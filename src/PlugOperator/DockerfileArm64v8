@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:7.0-bullseye-slim AS build
 WORKDIR /operator
 
 COPY ./ ./
-RUN dotnet publish -r linux-arm --no-self-contained -c Release -o out src/PlugOperator/PlugOperator.csproj
+RUN dotnet publish -r linux-arm --no-self-contained -p KubeOpsSkipCrds=true -p KubeOpsSkipRbac=true -p KubeOpsSkipOperator=true -p KubeOpsSkipInstaller=true -c Release -o out src/PlugOperator/PlugOperator.csproj
 
 # The runner for the application
 FROM mcr.microsoft.com/dotnet/aspnet:7.0-bullseye-slim-arm64v8 as final
