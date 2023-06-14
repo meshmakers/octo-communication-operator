@@ -69,7 +69,7 @@ stages:
            parameters:
              ContainerRegistry: 'dockerhub@ianitor'
              Repository: meshmakers/octo-plug-operator
-             Dockerfile: src/PlugOperator/Dockerfile
+             Dockerfile: src/PlugOperator/DockerfileArm64v8
              IsRelease: ${{ variables.isRelease }}
              Architecture: 'arm64v8'             
          - task: PowerShell@2
