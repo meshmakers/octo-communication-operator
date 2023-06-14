@@ -7,10 +7,13 @@ parameters:
     type: string
   - name: IsRelease
     type: boolean
+  - name: Architecture
+    type: string
+    default: amd64
 
 steps:
   - task: Docker@2
-    displayName: Build ${{ parameters.Repository }}
+    displayName: Build ${{ parameters.Repository }}:${{ parameters.Architecture }}-$(Build.BuildNumber)
     inputs:
       command: build
       containerRegistry: ${{ parameters.ContainerRegistry }}
@@ -18,14 +21,14 @@ steps:
       dockerfile: ${{ parameters.Dockerfile }}
       buildContext: $(System.DefaultWorkingDirectory)
       tags: |
-        $(Build.BuildNumber)
+        ${{ parameters.Architecture }}-$(Build.BuildNumber)
 
   - task: Docker@2
     condition: ${{ eq(parameters.IsRelease, true) }}
-    displayName: Push ${{ parameters.Repository }}
+    displayName: Push ${{ parameters.Repository }}:${{ parameters.Architecture }}-$(Build.BuildNumber)
     inputs:
       command: push
       containerRegistry: ${{ parameters.ContainerRegistry }}
       repository: ${{ parameters.Repository }}
       tags: |
-        $(Build.BuildNumber)
+        ${{ parameters.Architecture }}-$(Build.BuildNumber)

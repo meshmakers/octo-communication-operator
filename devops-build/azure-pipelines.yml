@@ -64,6 +64,14 @@ stages:
              Repository: meshmakers/octo-plug-operator
              Dockerfile: src/PlugOperator/Dockerfile
              IsRelease: ${{ variables.isRelease }}
+             Architecture: 'amd64'
+         - template: buildAndPushDockerImage.yml
+           parameters:
+             ContainerRegistry: 'dockerhub@ianitor'
+             Repository: meshmakers/octo-plug-operator
+             Dockerfile: src/PlugOperator/Dockerfile
+             IsRelease: ${{ variables.isRelease }}
+             Architecture: 'arm64v8'             
          - task: PowerShell@2
            displayName: 'Create versioninfo file'
            inputs:
