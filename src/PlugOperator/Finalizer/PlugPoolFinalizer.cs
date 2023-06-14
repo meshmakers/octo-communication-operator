@@ -4,11 +4,11 @@ using PlugOperator.Entities;
 
 namespace PlugOperator.Finalizer;
 
-public class DemoFinalizer : IResourceFinalizer<V1PlugPoolEntity>
+public class PlugPoolFinalizer : IResourceFinalizer<V1PlugPoolEntity>
 {
-    private readonly ILogger<DemoFinalizer> _logger;
+    private readonly ILogger<PlugPoolFinalizer> _logger;
 
-    public DemoFinalizer(ILogger<DemoFinalizer> logger)
+    public PlugPoolFinalizer(ILogger<PlugPoolFinalizer> logger)
     {
         _logger = logger;
     }

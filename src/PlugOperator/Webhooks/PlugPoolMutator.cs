@@ -3,7 +3,7 @@ using PlugOperator.Entities;
 
 namespace PlugOperator.Webhooks;
 
-public class DemoMutator : IMutationWebhook<V1PlugPoolEntity>
+public class PlugPoolMutator : IMutationWebhook<V1PlugPoolEntity>
 {
     public AdmissionOperations Operations => AdmissionOperations.Create;
 

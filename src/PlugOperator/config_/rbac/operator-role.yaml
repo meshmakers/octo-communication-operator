@@ -1,0 +1,66 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: operator-role
+rules:
+- apiGroups:
+  - octo-mesh.meshmakers.io
+  - coordination.k8s.io
+  resources:
+  - plugpools
+  - leases
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - get
+  - list
+  - update
+- apiGroups:
+  - ""
+  - admissionregistration.k8s.io
+  resources:
+  - services
+  - validatingwebhookconfigurations
+  - mutatingwebhookconfigurations
+  verbs:
+  - create
+  - get
+  - patch
+  - update
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - octo-mesh.meshmakers.io
+  resources:
+  - plugpools/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - services/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments/status
+  verbs:
+  - get
+  - patch
+  - update

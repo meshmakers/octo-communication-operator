@@ -10,4 +10,8 @@
     <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="0.0.2306.14013" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="config\operator\" />
+  </ItemGroup>
+
 </Project>

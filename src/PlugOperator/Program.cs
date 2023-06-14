@@ -4,6 +4,9 @@ using KubeOps.Operator;
 using PlugOperator.Reconcilers;
 using PlugOperator.Services;
 
+// Needed if config directory needs to be created newly
+//Environment.SetEnvironmentVariable("CFSSL_EXECUTABLES_PATH", "../../tools");
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<IKubernetes>(sp =>
 {

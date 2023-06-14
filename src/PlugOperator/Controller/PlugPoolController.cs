@@ -26,7 +26,7 @@ public class PlugPoolController : IResourceController<V1PlugPoolEntity>
     public async Task<ResourceControllerResult?> ReconcileAsync(V1PlugPoolEntity entity)
     {
         _logger.LogInformation("Entity {Name} called {ReconcileAsyncName}", entity.Name(), nameof(ReconcileAsync));
-        await _finalizerManager.RegisterFinalizerAsync<DemoFinalizer>(entity);
+        await _finalizerManager.RegisterFinalizerAsync<PlugPoolFinalizer>(entity);
 
         await _plugPoolService.RegisterPoolAsync(entity);
         
