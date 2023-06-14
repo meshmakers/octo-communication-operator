@@ -10,6 +10,6 @@ resources:
 images:
 - name: operator
   newName: meshmakers/octo-plug-operator
-  newTag: arm64v8-0.0.2306.14004
+  newTag: arm64v8-0.0.2306.14011
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
