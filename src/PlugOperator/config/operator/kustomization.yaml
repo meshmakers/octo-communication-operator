@@ -1,0 +1,17 @@
+commonLabels:
+  operator-element: operator-instance
+resources:
+- deployment.yaml
+configMapGenerator:
+- name: webhook-ca
+  files:
+  - ca.pem
+  - ca-key.pem
+- name: webhook-config
+  literals:
+  - KESTREL__ENDPOINTS__HTTP__URL=http://0.0.0.0:6000
+  - KESTREL__ENDPOINTS__HTTPS__URL=https://0.0.0.0:6001
+  - KESTREL__ENDPOINTS__HTTPS__CERTIFICATE__PATH=/certs/server.pem
+  - KESTREL__ENDPOINTS__HTTPS__CERTIFICATE__KEYPATH=/certs/server-key.pem
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

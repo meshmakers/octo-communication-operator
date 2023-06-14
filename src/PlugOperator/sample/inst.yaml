@@ -1,0 +1,10 @@
+apiVersion: octo-mesh.meshmakers.io/v1alpha1
+kind: PlugPool
+metadata:
+  name: demo-plug-pool
+spec:
+  plugControllerUri: "http://192.168.13.220:5014/"
+  plugPoolName: "octo-mesh-test-pool"
+  tenantId: "meshtest"
+  brokerHost: "mq.staging.meshmakers.cloud"
+  
