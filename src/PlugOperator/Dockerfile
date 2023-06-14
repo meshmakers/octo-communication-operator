@@ -3,6 +3,12 @@ FROM mcr.microsoft.com/dotnet/sdk:7.0-bullseye-slim AS build
 WORKDIR /operator
 
 COPY ./ ./
+RUN curl -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.6.4/cfssl_1.6.4_linux_amd64
+RUN curl -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.6.4/cfssljson_1.6.4_linux_amd64
+RUN chmod +x ./cfssl
+RUN chmod +x ./cfssljson
+RUN mkdir out
+RUN cp cfssl cfssljson out/
 RUN dotnet publish -c Release -o out src/PlugOperator/PlugOperator.csproj
 
 # The runner for the application

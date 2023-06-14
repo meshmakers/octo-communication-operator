@@ -6,8 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="KubeOps" Version="6.6.2" />
-    <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="0.0.2306.14010" />
+    <PackageReference Include="KubeOps" Version="7.3.0" />
+    <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="0.0.2306.14013" />
   </ItemGroup>
 
 </Project>

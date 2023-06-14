@@ -1,4 +1,5 @@
 using k8s;
+using KubeOps.KubernetesClient;
 using KubeOps.Operator;
 using PlugOperator.Reconcilers;
 using PlugOperator.Services;
@@ -24,6 +25,7 @@ builder.Services.AddKubernetesOperator((x) =>
 });
 builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
 builder.Services.AddSingleton<IPlugReconciler, PlugReconciler>();
+builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
 
 var app = builder.Build();
 app.UseKubernetesOperator();

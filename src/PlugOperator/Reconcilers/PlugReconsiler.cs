@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
-using k8s;
 using k8s.Models;
-using KubeOps.Operator.Entities.Extensions;
+using KubeOps.KubernetesClient;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using PlugOperator.Common;
 using PlugOperator.Entities;
@@ -11,18 +10,18 @@ namespace PlugOperator.Reconcilers;
 
 public class PlugReconciler : IPlugReconciler
 {
-    private readonly IKubernetes _kubernetes;
+    private readonly IKubernetesClient _kubernetesClient;
     private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of <see cref="PlugReconciler"/>
     /// </summary>
-    /// <param name="kubernetes">Kubernetes client to use</param>
+    /// <param name="kubernetesClient">Kubernetes client to use</param>
     /// <param name="logger">Logger to write log message to</param>
-    public PlugReconciler(IKubernetes kubernetes, ILogger<PlugReconciler> logger)
+    public PlugReconciler(IKubernetesClient kubernetesClient, ILogger<PlugReconciler> logger)
     {
         _logger = logger;
-        _kubernetes = kubernetes;
+        _kubernetesClient = kubernetesClient;
     }
 
     /// <summary>
@@ -33,8 +32,8 @@ public class PlugReconciler : IPlugReconciler
     /// <param name="entity">Plug pool entity for reconcile</param>
     public async Task ReconcileAsync(PoolDescriptor poolDescriptor, PlugPoolPlugDto plugPoolPlug, V1PlugPoolEntity entity)
     {
-        await ReconcilePlugDeploymentAsync(poolDescriptor, plugPoolPlug, entity);
-        await ReconcilePlugServiceAsync(poolDescriptor, plugPoolPlug, entity);
+        await ReconcilePlugDeploymentAsync(poolDescriptor, plugPoolPlug);
+        await ReconcilePlugServiceAsync(poolDescriptor, plugPoolPlug);
     }
 
     /// <summary>
@@ -63,10 +62,10 @@ public class PlugReconciler : IPlugReconciler
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
 
-        var existingServices = await _kubernetes.ListNamespacedServiceAsync(
-            k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
+        var existingServices = 
+            await _kubernetesClient.List<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
 
-        var existingService = existingServices.Items.SingleOrDefault();
+        var existingService = existingServices.SingleOrDefault();
         if (existingService != null)
         {
             await DeletePlugService(k8Pool, existingService);
@@ -75,7 +74,7 @@ public class PlugReconciler : IPlugReconciler
     
     private async Task DeletePlugDeploymentAsync(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug)
     {
-        var serviceLabels = new Dictionary<string, string>
+        var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = "octo-mesh-plug",
             ["octo-mesh.meshmakers.io/plug"] = plugPoolPlug.PlugRtId.ToString(),
@@ -83,10 +82,10 @@ public class PlugReconciler : IPlugReconciler
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
 
-        var existingServices = await _kubernetes.ListNamespacedDeploymentAsync(
-            k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
-
-        var existingService = existingServices.Items.SingleOrDefault();
+        var existingDeployments = 
+            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
+        
+        var existingService = existingDeployments.SingleOrDefault();
         if (existingService != null)
         {
             await DeletePlugDeployment(k8Pool, existingService);
@@ -102,10 +101,10 @@ public class PlugReconciler : IPlugReconciler
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
 
-        var existingDeployments = await _kubernetes.ListNamespacedDeploymentAsync(
-            k8Pool.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
+        var existingDeployments = 
+            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
 
-        foreach (var existingDeployment in existingDeployments.Items)
+        foreach (var existingDeployment in existingDeployments)
         {
             await DeletePlugDeployment(k8Pool, existingDeployment);
         }
@@ -114,7 +113,7 @@ public class PlugReconciler : IPlugReconciler
     private async Task DeletePlugDeployment(K8Pool k8Pool, V1Deployment existingDeployment)
     {
         _logger.DeletingDeployment(existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
-        await _kubernetes.DeleteNamespacedDeploymentAsync(existingDeployment.Metadata.Name, k8Pool.Namespace);
+        await _kubernetesClient.Delete<V1Deployment>(existingDeployment.Metadata.Name, k8Pool.Namespace);
     }
 
     private async Task DeleteAllPlugServicesAsync(K8Pool k8Pool)
@@ -126,10 +125,10 @@ public class PlugReconciler : IPlugReconciler
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
 
-        var existingServices = await _kubernetes.ListNamespacedServiceAsync(
-            k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
+        var existingServices = 
+            await _kubernetesClient.List<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
 
-        foreach (var existingService in existingServices.Items)
+        foreach (var existingService in existingServices)
         {
             await DeletePlugService(k8Pool, existingService);
         }
@@ -138,10 +137,10 @@ public class PlugReconciler : IPlugReconciler
     private async Task DeletePlugService(K8Pool k8Pool, V1Service existingService)
     {
         _logger.DeletingService(existingService.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
-        await _kubernetes.DeleteNamespacedServiceAsync(existingService.Metadata.Name, k8Pool.Namespace);
+        await _kubernetesClient.Delete<V1Service>(existingService.Metadata.Name, k8Pool.Namespace);
     }
 
-    private async Task ReconcilePlugDeploymentAsync(PoolDescriptor poolDescriptor, PlugPoolPlugDto plugPoolPlug, V1PlugPoolEntity entity)
+    private async Task ReconcilePlugDeploymentAsync(PoolDescriptor poolDescriptor, PlugPoolPlugDto plugPoolPlug)
     {
         var deploymentLabels = new Dictionary<string, string>
         {
@@ -151,18 +150,18 @@ public class PlugReconciler : IPlugReconciler
             ["octo-mesh.meshmakers.io/tenant"] = poolDescriptor.TenantId
         };
 
-        var existingDeployments = await _kubernetes.ListNamespacedDeploymentAsync(
-            poolDescriptor.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
+        var existingDeployments = 
+            await _kubernetesClient.List<V1Deployment>(poolDescriptor.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
 
-        if (existingDeployments.Items.Any())
+        if (existingDeployments.Any())
         {
-            await DeletePlugDeployment(poolDescriptor, existingDeployments.Items.Single());
+            await DeletePlugDeployment(poolDescriptor, existingDeployments.Single());
         }
 
-        await CreateDeployment(poolDescriptor, plugPoolPlug, entity, deploymentLabels);
+        await CreateDeployment(poolDescriptor, plugPoolPlug, deploymentLabels);
     }
 
-    private async Task ReconcilePlugServiceAsync(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug, V1PlugPoolEntity entity)
+    private async Task ReconcilePlugServiceAsync(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug)
     {
         var serviceLabels = new Dictionary<string, string>
         {
@@ -172,19 +171,18 @@ public class PlugReconciler : IPlugReconciler
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
 
+        var existingServices = 
+            await _kubernetesClient.List<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
 
-        var existingServices = await _kubernetes.ListNamespacedServiceAsync(
-            entity.Namespace(), labelSelector: serviceLabels.AsLabelSelector());
-
-        if (existingServices.Items.Any())
+        if (existingServices.Any())
         {
-            await DeletePlugService(k8Pool, existingServices.Items.Single());
+            await DeletePlugService(k8Pool, existingServices.Single());
         }
 
-        await CreateService(k8Pool, plugPoolPlug, entity, serviceLabels);
+        await CreateService(k8Pool, plugPoolPlug, serviceLabels);
     }
 
-    private async Task CreateDeployment(PoolDescriptor poolDescriptor, PlugPoolPlugDto plugPoolPlug, V1PlugPoolEntity entity,
+    private async Task CreateDeployment(PoolDescriptor poolDescriptor, PlugPoolPlugDto plugPoolPlug, 
         Dictionary<string, string> deploymentLabels)
     {
         var deploymentName = $"{poolDescriptor.TenantId}-{plugPoolPlug.PlugRtId.ToString()}-octo-mesh-plug";
@@ -199,6 +197,7 @@ public class PlugReconciler : IPlugReconciler
             Metadata = new V1ObjectMeta
             {
                 Name = deploymentName,
+                NamespaceProperty = poolDescriptor.Namespace,
                 Labels = deploymentLabels
             },
             Spec = new V1DeploymentSpec
@@ -305,22 +304,22 @@ public class PlugReconciler : IPlugReconciler
             }
         };
 
-        await _kubernetes.CreateNamespacedDeploymentAsync(
-            deployment.WithOwnerReference(entity), poolDescriptor.Namespace);
+        await _kubernetesClient.Create(deployment);
     }
 
-    private async Task CreateService(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug, V1PlugPoolEntity entity,
+    private async Task CreateService(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug, 
         Dictionary<string, string> serviceLabels)
     {
         var serviceName = $"{k8Pool.TenantId}-{plugPoolPlug.PlugRtId}-octo-mesh-plug";
 
-        _logger.CreatingService(serviceName, entity.Name(), entity.Namespace());
+        _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 
         var service = new V1Service
         {
             Metadata = new V1ObjectMeta
             {
                 Name = serviceName,
+                NamespaceProperty = k8Pool.Namespace,
                 Labels = serviceLabels,
             },
             Spec = new V1ServiceSpec
@@ -340,8 +339,6 @@ public class PlugReconciler : IPlugReconciler
             }
         };
 
-        await _kubernetes.CreateNamespacedServiceAsync(
-            service.WithOwnerReference(entity),
-            entity.Namespace());
+        await _kubernetesClient.Create(service);
     }
 }

@@ -58,6 +58,7 @@ spec:
       - args:
         - webhooks
         - install
+        - -r
         env:
         - name: POD_NAMESPACE
           valueFrom:
