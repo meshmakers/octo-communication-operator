@@ -10,6 +10,11 @@ using PlugOperator.Services;
 namespace PlugOperator.Controller;
 
 [EntityRbac(typeof(V1PlugPoolEntity), Verbs = RbacVerb.All)]
+[EntityRbac(typeof(V1Namespace), Verbs = RbacVerb.All)]
+[EntityRbac(typeof(V1StatefulSet), Verbs = RbacVerb.All)]
+[EntityRbac(typeof(V1Deployment), Verbs = RbacVerb.All)]
+[EntityRbac(typeof(V1Service), Verbs = RbacVerb.All)]
+[EntityRbac(typeof(V1Secret), Verbs = RbacVerb.All)]
 public class PlugPoolController : IResourceController<V1PlugPoolEntity>
 {
     private readonly IPlugPoolService _plugPoolService;
