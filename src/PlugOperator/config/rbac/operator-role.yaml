@@ -5,10 +5,27 @@ metadata:
 rules:
 - apiGroups:
   - octo-mesh.meshmakers.io
+  - ""
+  - apps
   - coordination.k8s.io
   resources:
   - plugpools
+  - namespaces
+  - statefulsets
+  - secrets
   - leases
+  verbs:
+  - '*'
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - services
   verbs:
   - '*'
 - apiGroups:
@@ -21,10 +38,8 @@ rules:
   - list
   - update
 - apiGroups:
-  - ""
   - admissionregistration.k8s.io
   resources:
-  - services
   - validatingwebhookconfigurations
   - mutatingwebhookconfigurations
   verbs:
@@ -33,13 +48,6 @@ rules:
   - patch
   - update
   - delete
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  verbs:
-  - get
-  - list
 - apiGroups:
   - octo-mesh.meshmakers.io
   resources:
@@ -51,7 +59,15 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - services/status
+  - namespaces/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets/status
   verbs:
   - get
   - patch
@@ -60,6 +76,14 @@ rules:
   - apps
   resources:
   - deployments/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - services/status
   verbs:
   - get
   - patch

@@ -3,8 +3,11 @@ using KubeOps.KubernetesClient;
 using KubeOps.Operator;
 using NLog;
 using NLog.Web;
+using PlugOperator.Controller;
+using PlugOperator.Entities;
 using PlugOperator.Reconcilers;
 using PlugOperator.Services;
+using PlugOperator.Webhooks;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // Needed if config directory needs to be created newly
@@ -19,12 +22,12 @@ try
     logger.Debug("init main");
 
     var builder = WebApplication.CreateBuilder(args);
-    
+
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
     builder.Logging.SetMinimumLevel(LogLevel.Trace);
     builder.Host.UseNLog();
-    
+
     builder.Services.AddSingleton<IKubernetes>(sp =>
     {
         // Since we can run inside or outside the cluster,
@@ -39,10 +42,14 @@ try
     });
 
     builder.Services.AddKubernetesOperator((x) =>
-    {
-        x.HttpPort = 6000;
-        x.HttpsPort = 6001;
-    });
+        {
+            x.HttpPort = 6000;
+            x.HttpsPort = 6001;
+            x.EnableAssemblyScanning = false;
+        }).AddEntity<V1PlugPoolEntity>()
+        .AddController<PlugPoolController>()
+        .AddMutationWebhook<PlugPoolMutator>();
+    
     builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
     builder.Services.AddSingleton<IPlugReconciler, PlugReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
