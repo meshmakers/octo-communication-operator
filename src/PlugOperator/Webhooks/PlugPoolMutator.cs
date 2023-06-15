@@ -9,7 +9,7 @@ public class PlugPoolMutator : IMutationWebhook<V1PlugPoolEntity>
 
     public MutationResult Create(V1PlugPoolEntity newEntity, bool dryRun)
     {
-        newEntity.Spec.PlugPoolName = "not foobar";
-        return MutationResult.Modified(newEntity);
+   //     newEntity.Spec.PlugPoolName = "not foobar";
+        return MutationResult.NoChanges();
     }
 }

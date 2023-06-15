@@ -32,6 +32,8 @@ public class PlugReconciler : IPlugReconciler
     /// <param name="entity">Plug pool entity for reconcile</param>
     public async Task ReconcileAsync(PoolDescriptor poolDescriptor, PlugPoolPlugDto plugPoolPlug, V1PlugPoolEntity entity)
     {
+        _logger.LogInformation("[{TenantId}] Reconciling plug '{PlugId}'", poolDescriptor.TenantId, plugPoolPlug.PlugRtId);
+        
         try
         {
             await ReconcilePlugDeploymentAsync(poolDescriptor, plugPoolPlug);
@@ -50,6 +52,9 @@ public class PlugReconciler : IPlugReconciler
     /// <param name="k8Pool">Meta data about the pool</param>
     public async Task DeleteAsync(K8Pool k8Pool)
     {
+        _logger.LogInformation("[{TenantId}] Deleting plug pool '{PoolName}', namespace '{Namespace}'", 
+            k8Pool.TenantId, k8Pool.PoolName, k8Pool.Namespace);
+        
         try
         {
             await DeleteAllPlugDeploymentsAsync(k8Pool);
@@ -64,6 +69,9 @@ public class PlugReconciler : IPlugReconciler
 
     public async Task DeleteAsync(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug)
     {
+        _logger.LogInformation("[{TenantId}] Deleting plug '{PlugId}', namespace '{Namespace}'", 
+            k8Pool.TenantId, plugPoolPlug.PlugRtId, k8Pool.Namespace);
+        
         try
         {
             await DeletePlugDeploymentAsync(k8Pool, plugPoolPlug);
@@ -78,6 +86,9 @@ public class PlugReconciler : IPlugReconciler
 
     private async Task DeletePlugServiceAsync(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug)
     {
+        _logger.LogInformation("[{TenantId}] Deleting plug service for plug '{PlugId}', namespace '{Namespace}'", 
+            k8Pool.TenantId, plugPoolPlug.PlugRtId, k8Pool.Namespace);
+        
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = "octo-mesh-plug",
@@ -98,6 +109,9 @@ public class PlugReconciler : IPlugReconciler
 
     private async Task DeletePlugDeploymentAsync(K8Pool k8Pool, PlugPoolPlugDto plugPoolPlug)
     {
+        _logger.LogInformation("[{TenantId}] Deleting plug deployment for plug '{PlugId}', namespace '{Namespace}'", 
+            k8Pool.TenantId, plugPoolPlug.PlugRtId, k8Pool.Namespace);
+        
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = "octo-mesh-plug",
@@ -118,6 +132,8 @@ public class PlugReconciler : IPlugReconciler
 
     private async Task DeleteAllPlugDeploymentsAsync(K8Pool k8Pool)
     {
+        _logger.LogInformation("[{TenantId}] Deleting all plug deployments for pool '{PoolName}', namespace '{Namespace}'", 
+            k8Pool.TenantId, k8Pool.PoolName, k8Pool.Namespace);
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = "octo-mesh-plug",
@@ -137,6 +153,9 @@ public class PlugReconciler : IPlugReconciler
 
     private async Task DeletePlugDeployment(K8Pool k8Pool, V1Deployment existingDeployment)
     {
+        _logger.LogInformation("[{TenantId}] Deleting plug deployment '{DeploymentName}' for pool '{PoolName}', namespace '{Namespace}'", 
+            k8Pool.TenantId, existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
+        
         _logger.DeletingDeployment(existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
         await _kubernetesClient.Delete<V1Deployment>(existingDeployment.Metadata.Name, k8Pool.Namespace);
     }
