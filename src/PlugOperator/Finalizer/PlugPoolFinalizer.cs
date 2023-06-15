@@ -15,7 +15,7 @@ public class PlugPoolFinalizer : IResourceFinalizer<V1PlugPoolEntity>
 
     public Task FinalizeAsync(V1PlugPoolEntity entity)
     {
-        _logger.LogInformation($"entity {entity.Name()} called {nameof(FinalizeAsync)}.");
+        _logger.LogInformation("entity {Name} called {FinalizeAsyncName}", entity.Name(), nameof(FinalizeAsync));
 
         return Task.CompletedTask;
     }

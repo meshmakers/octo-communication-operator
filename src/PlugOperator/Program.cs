@@ -5,6 +5,7 @@ using NLog;
 using NLog.Web;
 using PlugOperator.Controller;
 using PlugOperator.Entities;
+using PlugOperator.Finalizer;
 using PlugOperator.Reconcilers;
 using PlugOperator.Services;
 using PlugOperator.Webhooks;
@@ -46,8 +47,10 @@ try
             x.HttpPort = 6000;
             x.HttpsPort = 6001;
             x.EnableAssemblyScanning = false;
-        }).AddEntity<V1PlugPoolEntity>()
+        })
+        .AddEntity<V1PlugPoolEntity>()
         .AddController<PlugPoolController>()
+        .AddFinalizer<PlugPoolFinalizer>()
         .AddMutationWebhook<PlugPoolMutator>();
     
     builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
