@@ -233,9 +233,18 @@ public class PlugReconciler : IPlugReconciler
         var secretName = $"{poolDescriptor.TenantId}-{poolDescriptor.PoolName}-octo-mesh-connection";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
+        
+        string architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+        _logger.LogInformation("Architecture: {Architecture}", architecture);
+        string architectureString = "amd64";
+        if (architecture == "Arm64")
+        {
+            architectureString = "arm64v8";
+        }
 
-        var deploymentImageName = plugPoolPlug.ImageName + ":" + plugPoolPlug.Version;
-
+        var deploymentImageName = plugPoolPlug.ImageName + ":" + architectureString + "-" + plugPoolPlug.Version;
+        _logger.LogInformation("Image: {Image}", deploymentImageName); 
+        
         var deployment = new V1Deployment
         {
             Metadata = new V1ObjectMeta
