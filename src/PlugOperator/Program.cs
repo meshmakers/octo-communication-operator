@@ -1,35 +1,64 @@
 using k8s;
 using KubeOps.KubernetesClient;
 using KubeOps.Operator;
+using NLog;
+using NLog.Web;
 using PlugOperator.Reconcilers;
 using PlugOperator.Services;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // Needed if config directory needs to be created newly
 //Environment.SetEnvironmentVariable("CFSSL_EXECUTABLES_PATH", "../../tools");
 
-var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddSingleton<IKubernetes>(sp =>
+// NLog: setup the logger first to catch all errors
+var nlogFactory = NLogBuilder.ConfigureNLog("nlog.config");
+var logger = nlogFactory.GetCurrentClassLogger();
+
+try
 {
-    // Since we can run inside or outside the cluster,
-    // we need to set up a different configuration for each of the cases.
-    var config = KubernetesClientConfiguration.IsInCluster() switch
-    {
-        true => KubernetesClientConfiguration.InClusterConfig(),
-        false => KubernetesClientConfiguration.BuildConfigFromConfigFile()
-    };
+    logger.Debug("init main");
+
+    var builder = WebApplication.CreateBuilder(args);
     
-    return new Kubernetes(config);
-});
+    // NLog: Setup NLog for Dependency injection
+    builder.Logging.ClearProviders();
+    builder.Logging.SetMinimumLevel(LogLevel.Trace);
+    builder.Host.UseNLog();
+    
+    builder.Services.AddSingleton<IKubernetes>(sp =>
+    {
+        // Since we can run inside or outside the cluster,
+        // we need to set up a different configuration for each of the cases.
+        var config = KubernetesClientConfiguration.IsInCluster() switch
+        {
+            true => KubernetesClientConfiguration.InClusterConfig(),
+            false => KubernetesClientConfiguration.BuildConfigFromConfigFile()
+        };
 
-builder.Services.AddKubernetesOperator((x) =>
+        return new Kubernetes(config);
+    });
+
+    builder.Services.AddKubernetesOperator((x) =>
+    {
+        x.HttpPort = 6000;
+        x.HttpsPort = 6001;
+    });
+    builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
+    builder.Services.AddSingleton<IPlugReconciler, PlugReconciler>();
+    builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
+
+    var app = builder.Build();
+    app.UseKubernetesOperator();
+    await app.RunOperatorAsync(args);
+}
+catch (Exception ex)
 {
-    x.HttpPort = 6000;
-    x.HttpsPort = 6001;
-});
-builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
-builder.Services.AddSingleton<IPlugReconciler, PlugReconciler>();
-builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
-
-var app = builder.Build();
-app.UseKubernetesOperator();
-await app.RunOperatorAsync(args);
+    //NLog: catch setup errors
+    logger.Error(ex, "Stopped program because of exception");
+    throw;
+}
+finally
+{
+    // Ensure to flush and stop internal timers/threads before application-exit (Avoid segmentation fault on Linux)
+    LogManager.Shutdown();
+}
