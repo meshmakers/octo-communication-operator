@@ -32,10 +32,11 @@ public class PlugPoolService : IPlugPoolService, IPoolHubCallbacks
         }
         
         _logger.LogInformation("Registering pool {PoolName} with controller {ControllerUri}", entity.Spec.PlugPoolName, entity.Spec.PlugControllerUri);
-        var plugPoolControllerClient = new PlugPoolControllerClient(new PlugControllerClientOptions
+        var plugPoolControllerClient = new PoolControllerClient(new PoolControllerClientOptions
         {
             EndpointUri = entity.Spec.PlugControllerUri,
-            TenantId = entity.Spec.TenantId
+            TenantId = entity.Spec.TenantId,
+            PlugPoolName = entity.Spec.PlugPoolName
         }, new ServiceClientAccessToken(), this);
         
         pool = new Pool(new PoolDescriptor
