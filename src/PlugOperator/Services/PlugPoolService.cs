@@ -23,11 +23,15 @@ public class PlugPoolService : IPlugPoolService, IPoolHubCallbacks
     
     public async Task RegisterPoolAsync(V1PlugPoolEntity entity)
     {
-        if (_pools.TryGetValue(entity.Spec.PlugPoolName, out var pool) && pool.PlugPoolControllerClient.IsAlive)
+        _logger.LogInformation("Registering pool {PoolName}", entity.Spec.PlugPoolName);
+        
+        if (_pools.TryGetValue(entity.Spec.PlugPoolName, out var pool) && pool.PlugPoolControllerClient.IsAlive && pool.IsRegistered)
         {
+            _logger.LogInformation("Pool {PoolName} already registered, connection alive", entity.Spec.PlugPoolName);
             return;
         }
         
+        _logger.LogInformation("Registering pool {PoolName} with controller {ControllerUri}", entity.Spec.PlugPoolName, entity.Spec.PlugControllerUri);
         var plugPoolControllerClient = new PlugPoolControllerClient(new PlugControllerClientOptions
         {
             EndpointUri = entity.Spec.PlugControllerUri,
@@ -47,13 +51,19 @@ public class PlugPoolService : IPlugPoolService, IPoolHubCallbacks
 
         _pools[entity.Spec.PlugPoolName] = pool;
 
+        _logger.LogInformation("Deleting deployment for pool {PoolName}", entity.Spec.PlugPoolName);
         await DeleteDeploymentAsync(entity);
         
         try
         {
+            _logger.LogInformation("Starting pool {PoolName}", entity.Spec.PlugPoolName);
             await plugPoolControllerClient.StartAsync();
-        
+
+            _logger.LogInformation("Registering pool {PoolName} with controller", entity.Spec.PlugPoolName);
             var plugPoolConfiguration = await plugPoolControllerClient.RegisterPlugPoolOperatorAsync(entity.Spec.PlugPoolName);
+            _logger.LogInformation("Registered pool {PoolName} with controller, configuration of '{PlugCount}' plugs retrieved", entity.Spec.PlugPoolName, plugPoolConfiguration.Plugs.Count());
+            pool.IsRegistered = true;
+            
             foreach (var plug in plugPoolConfiguration.Plugs)
             {
                 await DeployPlug(pool.PoolDescriptor, plug, entity);
@@ -67,6 +77,8 @@ public class PlugPoolService : IPlugPoolService, IPoolHubCallbacks
 
     public async Task UnRegisterPoolAsync(V1PlugPoolEntity entity)
     {
+        _logger.LogInformation("Unregistering pool {PoolName}", entity.Spec.PlugPoolName);
+        
         if (_pools.ContainsKey(entity.Spec.PlugPoolName))
         {
             var pool = _pools[entity.Spec.PlugPoolName];
@@ -90,11 +102,15 @@ public class PlugPoolService : IPlugPoolService, IPoolHubCallbacks
 
     private async Task DeployPlug(PoolDescriptor poolDescriptor, PlugPoolPlugDto poolPlugDto , V1PlugPoolEntity entity)
     {
+        _logger.LogInformation("Deploying plug {PlugRtId} for pool {PoolName}", poolPlugDto.PlugRtId, poolDescriptor.PoolName);
+
         await _plugReconciler.ReconcileAsync(poolDescriptor, poolPlugDto, entity);
     }
 
     public async Task DeployPlugAsync(string tenantId, PlugPoolPlugDto plug)
     {
+        _logger.LogInformation("Deploying plug {PlugRtId} for pool {PoolName}", plug.PlugRtId, plug.PlugPoolName);
+
         if (_pools.TryGetValue(plug.PlugPoolName, out var pool))
         {
             await DeployPlug(pool.PoolDescriptor, plug, pool.Entity);
@@ -103,6 +119,8 @@ public class PlugPoolService : IPlugPoolService, IPoolHubCallbacks
 
     public async Task UndeployPlugAsync(string tenantId, PlugPoolPlugDto plug)
     {
+        _logger.LogInformation("Undeploying plug {PlugRtId} for pool {PoolName}", plug.PlugRtId, plug.PlugPoolName);
+
         if (_pools.TryGetValue(plug.PlugPoolName, out var pool))
         {
             await _plugReconciler.DeleteAsync(pool.PoolDescriptor, plug);

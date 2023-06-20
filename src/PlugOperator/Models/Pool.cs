@@ -8,6 +8,8 @@ public class Pool
     public PoolDescriptor PoolDescriptor { get; }
     public IPlugPoolControllerClient PlugPoolControllerClient { get; }
     public V1PlugPoolEntity Entity { get; }
+    
+    public bool IsRegistered { get; set; }
 
     public Pool(PoolDescriptor poolDescriptor, IPlugPoolControllerClient plugPoolControllerClient, V1PlugPoolEntity entity)
     {
