@@ -12,7 +12,7 @@ using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // Needed if config directory needs to be created newly
-//Environment.SetEnvironmentVariable("CFSSL_EXECUTABLES_PATH", "../../tools");
+//Environment.SetEnvironmentVariable("CFSSL_EXECUTABLES_PATH", "/Users/gerald/RiderProjects/meshmakers/octo-communication-operator/tools");
 
 // NLog: setup the logger first to catch all errors
 var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;

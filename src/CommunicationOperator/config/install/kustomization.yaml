@@ -1,7 +1,7 @@
-namespace: communicationoperator-system
-namePrefix: communicationoperator-
+namespace: meshmakers-octo-communication-operator-system
+namePrefix: meshmakers-octo-communication-operator-
 commonLabels:
-  operator: communicationoperator
+  operator: meshmakers-octo-communication-operator
 resources:
 - ./namespace.yaml
 - ../crds
