@@ -1,0 +1,10 @@
+apiVersion: octo-mesh.meshmakers.io/v1alpha1
+kind: CommunicationPool
+metadata:
+  name: second-pool
+spec:
+  communicationControllerUri: "http://192.168.13.125:5014/"
+  poolName: "second-pool"
+  tenantId: "meshtest"
+  brokerHost: "mq.staging.meshmakers.cloud"
+  

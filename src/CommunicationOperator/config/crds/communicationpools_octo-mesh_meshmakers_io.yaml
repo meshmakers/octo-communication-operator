@@ -1,0 +1,47 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: communicationpools.octo-mesh.meshmakers.io
+spec:
+  group: octo-mesh.meshmakers.io
+  names:
+    kind: CommunicationPool
+    listKind: CommunicationPoolList
+    plural: communicationpools
+    singular: communicationpool
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          status:
+            description: Status object for the entity.
+            properties:
+              communicationStatus:
+                type: string
+            type: object
+          spec:
+            description: Specification of the kubernetes object.
+            properties:
+              tenantId:
+                type: string
+              poolName:
+                type: string
+              communicationControllerUri:
+                type: string
+              brokerHost:
+                type: string
+              brokerVirtualHost:
+                type: string
+              brokerPort:
+                format: int32
+                type: integer
+              brokerUserNameSecret:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,6 +1,0 @@
-commonLabels:
-  operator-element: crd
-resources:
-- plugpools_octo-mesh_meshmakers_io.yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization

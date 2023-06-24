@@ -1,0 +1,10 @@
+apiVersion: octo-mesh.meshmakers.io/v1alpha1
+kind: CommunicationPool
+metadata:
+  name: first-pool
+spec:
+  communicationControllerUri: "https://communication.staging.meshmakers.cloud"
+  poolName: "k8sfirmianstrasse"
+  tenantId: "meshtest"
+  brokerHost: "mq.staging.meshmakers.cloud"
+  
