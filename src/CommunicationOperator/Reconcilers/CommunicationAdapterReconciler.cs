@@ -370,7 +370,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task CreateService(K8Pool k8Pool, PoolCommunicationAdapterDto adapterDto,
         Dictionary<string, string> serviceLabels)
     {
-        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkId}-{adapterDto.AdapterRtId}";
+        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkId.Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId}";
 
         _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 
