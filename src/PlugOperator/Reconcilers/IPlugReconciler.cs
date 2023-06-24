@@ -1,4 +1,4 @@
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using PlugOperator.Entities;
 using PlugOperator.Models;
 

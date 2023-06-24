@@ -15,8 +15,8 @@ using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 //Environment.SetEnvironmentVariable("CFSSL_EXECUTABLES_PATH", "../../tools");
 
 // NLog: setup the logger first to catch all errors
-var nlogFactory = NLogBuilder.ConfigureNLog("nlog.config");
-var logger = nlogFactory.GetCurrentClassLogger();
+var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
+var logger = nLogFactory.GetCurrentClassLogger();
 
 try
 {
@@ -29,7 +29,7 @@ try
     builder.Logging.SetMinimumLevel(LogLevel.Trace);
     builder.Host.UseNLog();
 
-    builder.Services.AddSingleton<IKubernetes>(sp =>
+    builder.Services.AddSingleton<IKubernetes>(_ =>
     {
         // Since we can run inside or outside the cluster,
         // we need to set up a different configuration for each of the cases.

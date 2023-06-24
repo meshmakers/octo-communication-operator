@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using k8s.Models;
 using KubeOps.KubernetesClient;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using PlugOperator.Common;
 using PlugOperator.Entities;
 using PlugOperator.Models;
@@ -157,7 +157,7 @@ public class PlugReconciler : IPlugReconciler
             k8Pool.TenantId, existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
         
         _logger.DeletingDeployment(existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
-        await _kubernetesClient.Delete<V1Deployment>(existingDeployment.Metadata.Name, k8Pool.Namespace);
+        await _kubernetesClient.Delete<V1DeploymentTemporary>(existingDeployment.Metadata.Name, k8Pool.Namespace);
     }
 
     private async Task DeleteAllPlugServicesAsync(K8Pool k8Pool)
