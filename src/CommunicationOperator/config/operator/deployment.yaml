@@ -29,8 +29,8 @@ spec:
           httpGet:
             path: /health
             port: http
-          initialDelaySeconds: 60
-          timeoutSeconds: 8
+          initialDelaySeconds: 30
+          timeoutSeconds: 1
         name: operator
         ports:
         - containerPort: 6000
@@ -41,8 +41,8 @@ spec:
           httpGet:
             path: /ready
             port: http
-          initialDelaySeconds: 30
-          timeoutSeconds: 8
+          initialDelaySeconds: 15
+          timeoutSeconds: 1
         resources:
           limits:
             cpu: 100m

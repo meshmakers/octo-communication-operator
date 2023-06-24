@@ -236,7 +236,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task CreateDeployment(PoolDescriptor poolDescriptor, PoolCommunicationAdapterDto adapterDto,
         Dictionary<string, string> deploymentLabels)
     {
-        var deploymentName = $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkId}-{adapterDto.AdapterRtId.ToString()}";
+        var deploymentName = $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkId.Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId.ToString()}";
         var secretName = $"{poolDescriptor.TenantId}-{poolDescriptor.PoolName}-octo-mesh-connection";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
