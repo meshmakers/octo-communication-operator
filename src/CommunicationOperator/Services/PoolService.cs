@@ -90,10 +90,18 @@ public class PoolService : IPoolService, IPoolHubCallbacks
 
         if (_pools.ContainsKey(entity.Spec.PoolName))
         {
-            var pool = _pools[entity.Spec.PoolName];
-            await pool.PoolHubClient.UnregisterPoolOperatorAsync(entity.Spec.PoolName);
-            await pool.PoolHubClient.StopAsync();
-            _pools.Remove(entity.Spec.PoolName);
+            try
+            {
+                var pool = _pools[entity.Spec.PoolName];
+                await pool.PoolHubClient.UnregisterPoolOperatorAsync(entity.Spec.PoolName);
+                await pool.PoolHubClient.StopAsync();
+                _pools.Remove(entity.Spec.PoolName);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error unregistering at communication controller");
+                throw;
+            }
         }
 
         await DeleteDeploymentAsync(entity);
