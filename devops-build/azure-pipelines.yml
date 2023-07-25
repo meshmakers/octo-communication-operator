@@ -50,6 +50,12 @@ stages:
                }
            displayName: 'Set build number'
          - template: setversion.yml
+         - task: PowerShell@2
+           displayName: "Enable multiarch support"
+           inputs:
+             targetType: 'inline'
+             script: |
+              docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
          - task: DotNetCoreCLI@2
            displayName: 'Test'
            inputs:
