@@ -50,12 +50,6 @@ stages:
                }
            displayName: 'Set build number'
          - template: setversion.yml
-         - task: PowerShell@2
-           displayName: "Enable multiarch support"
-           inputs:
-             targetType: 'inline'
-             script: |
-              docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
          - task: DotNetCoreCLI@2
            displayName: 'Test'
            inputs:
@@ -68,16 +62,8 @@ stages:
            parameters:
              ContainerRegistry: 'dockerhub@ianitor'
              Repository: meshmakers/octo-communication-operator
-             Dockerfile: src/CommunicationOperator/DockerfileArm64v8
-             IsRelease: ${{ variables.isRelease }}
-             Architecture: 'arm64v8'
-         - template: buildAndPushDockerImage.yml
-           parameters:
-             ContainerRegistry: 'dockerhub@ianitor'
-             Repository: meshmakers/octo-communication-operator
              Dockerfile: src/CommunicationOperator/Dockerfile
              IsRelease: ${{ variables.isRelease }}
-             Architecture: 'amd64'
          - task: PowerShell@2
            displayName: 'Create versioninfo file'
            inputs:
