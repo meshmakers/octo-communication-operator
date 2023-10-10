@@ -7,28 +7,35 @@ parameters:
     type: string
   - name: IsRelease
     type: boolean
-  - name: Architecture
-    type: string
-    default: amd64
 
 steps:
   - task: Docker@2
-    displayName: Build ${{ parameters.Repository }}:${{ parameters.Architecture }}-$(Build.BuildNumber)
+    displayName: Login to ${{ parameters.ContainerRegistry }}
     inputs:
-      command: build
+      command: login
       containerRegistry: ${{ parameters.ContainerRegistry }}
-      repository: ${{ parameters.Repository }}
-      dockerfile: ${{ parameters.Dockerfile }}
-      buildContext: $(System.DefaultWorkingDirectory)
-      tags: |
-        ${{ parameters.Architecture }}-$(Build.BuildNumber)
 
-  - task: Docker@2
-    condition: ${{ eq(parameters.IsRelease, true) }}
-    displayName: Push ${{ parameters.Repository }}:${{ parameters.Architecture }}-$(Build.BuildNumber)
+  - task: CmdLine@2
+    displayName: Build only ${{ parameters.Repository }}:$(Build.BuildNumber)
+    condition: eq('${{ parameters.IsRelease }}', false)
     inputs:
-      command: push
-      containerRegistry: ${{ parameters.ContainerRegistry }}
-      repository: ${{ parameters.Repository }}
-      tags: |
-        ${{ parameters.Architecture }}-$(Build.BuildNumber)
+      script: |
+        docker buildx create --use --name mybuilder --bootstrap &&
+        docker buildx build --platform linux/arm64,linux/amd64 \
+          -f ${{ parameters.Dockerfile }} \
+          -t ${{ parameters.Repository }}:$(build.buildNumber) \
+          $(System.DefaultWorkingDirectory) &&
+        docker buildx rm mybuilder
+
+  - task: CmdLine@2
+    displayName: Build and Push ${{ parameters.Repository }}:$(Build.BuildNumber)
+    condition: eq('${{ parameters.IsRelease }}', true)
+    inputs:
+      script: |
+        docker buildx create --use --name mybuilder --bootstrap &&
+        docker buildx build --platform linux/arm64,linux/amd64 \
+          -f ${{ parameters.Dockerfile }} \
+          -t ${{ parameters.Repository }}:$(build.buildNumber) \
+          --push \
+          $(System.DefaultWorkingDirectory) &&
+        docker buildx rm mybuilder

@@ -1,5 +1,5 @@
 # Build the operator
-FROM mcr.microsoft.com/dotnet/sdk:7.0-bullseye-slim AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk AS build
 WORKDIR /operator
 
 COPY ./ ./
@@ -12,7 +12,7 @@ RUN cp cfssl cfssljson out/
 RUN dotnet publish -c Release -o out src/CommunicationOperator/CommunicationOperator.csproj
 
 # The runner for the application
-FROM mcr.microsoft.com/dotnet/aspnet:7.0-bullseye-slim as final
+FROM mcr.microsoft.com/dotnet/aspnet as final
 
 RUN addgroup k8s-operator && useradd -G k8s-operator operator-user
 
