@@ -30,7 +30,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         V1CommunicationPoolEntity entity)
     {
         _logger.LogInformation("[{TenantId}] Reconciling communication adapter '{CkId}/{RtId}'", poolDescriptor.TenantId,
-            poolAdapter.AdapterCkId,
+            poolAdapter.AdapterCkTypeId,
             poolAdapter.AdapterRtId);
 
         try
@@ -41,9 +41,9 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         catch (Exception e)
         {
             _logger.LogError(e, "Error while reconciling adapter '{CkId}/{RtId}'",
-                poolAdapter.AdapterCkId,
+                poolAdapter.AdapterCkTypeId,
                 poolAdapter.AdapterRtId);
-            throw CommunicationAdapterReconsilerException.AdapterReconcileFailed(poolAdapter.AdapterCkId,
+            throw CommunicationAdapterReconsilerException.AdapterReconcileFailed(poolAdapter.AdapterCkTypeId,
                 poolAdapter.AdapterRtId, e);
         }
     }
@@ -72,7 +72,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     public async Task DeleteAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
     {
         _logger.LogInformation("[{TenantId}] Deleting adapter '{CkId}/{RtId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterCkId, poolAdapter.AdapterRtId, k8Pool.Namespace);
+            k8Pool.TenantId, poolAdapter.AdapterCkTypeId, poolAdapter.AdapterRtId, k8Pool.Namespace);
 
         try
         {
@@ -81,9 +81,9 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Error while deleting adapter '{CkId}/{RtId}'", poolAdapter.AdapterCkId,
+            _logger.LogError(e, "Error while deleting adapter '{CkId}/{RtId}'", poolAdapter.AdapterCkTypeId,
                 poolAdapter.AdapterRtId);
-            throw CommunicationAdapterReconsilerException.AdapterDeleteFailed(poolAdapter.AdapterCkId,
+            throw CommunicationAdapterReconsilerException.AdapterDeleteFailed(poolAdapter.AdapterCkTypeId,
                 poolAdapter.AdapterRtId, e);
         }
     }
@@ -91,12 +91,12 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task DeleteAdapterServiceAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
     {
         _logger.LogInformation("[{TenantId}] Deleting service for adapter '{CkId}/{RtId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterCkId, poolAdapter.AdapterRtId, k8Pool.Namespace);
+            k8Pool.TenantId, poolAdapter.AdapterCkTypeId, poolAdapter.AdapterRtId, k8Pool.Namespace);
 
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId,
             ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -115,12 +115,12 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task DeleteAdapterDeploymentAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
     {
         _logger.LogInformation("[{TenantId}] Deleting deployment for adapter '{CkId}/{RtId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterCkId, poolAdapter.AdapterRtId, k8Pool.Namespace);
+            k8Pool.TenantId, poolAdapter.AdapterCkTypeId, poolAdapter.AdapterRtId, k8Pool.Namespace);
 
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId,
             ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -195,7 +195,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId,
             ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = poolDescriptor.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = poolDescriptor.TenantId
@@ -217,7 +217,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId,
             ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -238,7 +238,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         Dictionary<string, string> deploymentLabels)
     {
         var deploymentName =
-            $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkId.Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId.ToString()}";
+            $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkTypeId.Replace(".", "-").Replace("/", "-").ToLower()}-{adapterDto.AdapterRtId.ToString()}";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
 
@@ -319,7 +319,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
         var collection = new Collection<V1EnvVar>();
 
-        switch (adapterDto.AdapterCkId)
+        switch (adapterDto.AdapterCkTypeId)
         {
             case Statics.CkIdPlug:
                 collection.Add(new()
@@ -410,7 +410,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task CreateService(K8Pool k8Pool, PoolCommunicationAdapterDto adapterDto,
         Dictionary<string, string> serviceLabels)
     {
-        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkId.Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId}";
+        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkTypeId.Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId}";
 
         _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 

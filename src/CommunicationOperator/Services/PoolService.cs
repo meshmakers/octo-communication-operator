@@ -122,7 +122,7 @@ public class PoolService : IPoolService, IPoolHubCallbacks
 
     private async Task DeployAdapter(PoolDescriptor poolDescriptor, PoolCommunicationAdapterDto adapterDto, V1CommunicationPoolEntity entity)
     {
-        _logger.LogInformation("Deploying adapter '{AdapterCkId}/{AdapterRtId}‘ for pool {PoolName}", adapterDto.AdapterCkId,
+        _logger.LogInformation("Deploying adapter '{AdapterCkId}/{AdapterRtId}‘ for pool {PoolName}", adapterDto.AdapterCkTypeId,
             adapterDto.AdapterRtId, poolDescriptor.PoolName);
 
         await _communicationAdapterReconciler.ReconcileAsync(poolDescriptor, adapterDto, entity);
@@ -130,7 +130,7 @@ public class PoolService : IPoolService, IPoolHubCallbacks
 
     public async Task DeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto adapterDto)
     {
-        _logger.LogInformation("Deploying adapter '{AdapterCkId}/{AdapterRtId}‘ for pool {PoolName}", adapterDto.AdapterCkId,
+        _logger.LogInformation("Deploying adapter '{AdapterCkId}/{AdapterRtId}‘ for pool {PoolName}", adapterDto.AdapterCkTypeId,
             adapterDto.AdapterRtId, adapterDto.PoolName);
 
         if (_pools.TryGetValue(adapterDto.PoolName, out var pool))
@@ -141,7 +141,7 @@ public class PoolService : IPoolService, IPoolHubCallbacks
 
     public async Task UndeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto adapterDto)
     {
-        _logger.LogInformation("Undeploying adapter '{AdapterCkId}/{AdapterRtId}‘ for pool {PoolName}", adapterDto.AdapterCkId,
+        _logger.LogInformation("Undeploying adapter '{AdapterCkId}/{AdapterRtId}‘ for pool {PoolName}", adapterDto.AdapterCkTypeId,
             adapterDto.AdapterRtId, adapterDto.PoolName);
 
         if (_pools.TryGetValue(adapterDto.PoolName, out var pool))

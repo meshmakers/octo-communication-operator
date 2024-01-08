@@ -1,4 +1,4 @@
-using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 
