@@ -13,8 +13,6 @@ trigger:
 variables:
   buildConfiguration: 'Release'
   buildPlatform: 'any cpu'
-  Company: "meshmakers GmbH"
-  Copyright: "(c) 2022-2023 meshmakers GmbH"
   isRelease: true # ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
   MajorVersion: 0
   MinorVersion: 0

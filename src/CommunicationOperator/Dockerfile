@@ -1,5 +1,5 @@
 # Build the operator
-FROM mcr.microsoft.com/dotnet/sdk:7.0-bullseye-slim AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
 WORKDIR /operator
 
 COPY ./ ./
