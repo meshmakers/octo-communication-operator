@@ -16,7 +16,7 @@ public class CommunicationAdapterReconsilerException : Exception
     {
     }
 
-    internal static Exception AdapterReconcileFailed(string adapterCkId, OctoObjectId adapterRtId, Exception exception)
+    internal static Exception AdapterReconcileFailed(CkId<CkTypeId> adapterCkId, OctoObjectId adapterRtId, Exception exception)
     {
         return new CommunicationAdapterReconsilerException($"Reconcile failed for adapter {adapterCkId}/{adapterRtId}", exception);
     }
@@ -26,7 +26,7 @@ public class CommunicationAdapterReconsilerException : Exception
         return new CommunicationAdapterReconsilerException($"Delete failed for pool {k8PoolPoolName}", exception);
     }
 
-    internal static Exception AdapterDeleteFailed(string adapterCkId, OctoObjectId adapterRtId, Exception exception)
+    internal static Exception AdapterDeleteFailed(CkId<CkTypeId> adapterCkId, OctoObjectId adapterRtId, Exception exception)
     {
         return new CommunicationAdapterReconsilerException($"Delete failed for adapter {adapterCkId}/{adapterRtId}", exception);
     }

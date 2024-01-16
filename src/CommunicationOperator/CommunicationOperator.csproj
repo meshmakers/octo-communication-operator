@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <PackageReference Include="KubeOps" Version="7.6.1" />
-    <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="3.0.19" />
+    <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="3.0.28" />
     <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8" />
   </ItemGroup>
 

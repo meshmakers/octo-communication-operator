@@ -96,7 +96,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId.ToString(),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -120,7 +120,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId.ToString(),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -195,7 +195,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId.ToString(),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = poolDescriptor.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = poolDescriptor.TenantId
@@ -217,7 +217,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId,
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId.ToString(),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -238,7 +238,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         Dictionary<string, string> deploymentLabels)
     {
         var deploymentName =
-            $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkTypeId.Replace(".", "-").Replace("/", "-").ToLower()}-{adapterDto.AdapterRtId.ToString()}";
+            $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkTypeId.ToString().Replace(".", "-").Replace("/", "-").ToLower()}-{adapterDto.AdapterRtId.ToString()}";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
 
@@ -319,10 +319,9 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
         var collection = new Collection<V1EnvVar>();
 
-        switch (adapterDto.AdapterCkTypeId)
+        if (adapterDto.AdapterCkTypeId == Statics.CkIdPlug)
         {
-            case Statics.CkIdPlug:
-                collection.Add(new()
+             collection.Add(new()
                 {
                     Name = "OCTO_PLUG__TENANTID",
                     Value = poolDescriptor.TenantId
@@ -382,27 +381,26 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
                             }
                         }
                     });
-                break;
-            case Statics.CkIdSocket:
-                collection.Add(new()
-                {
-                    Name = "OCTO_SOCKET__TENANTID",
-                    Value = poolDescriptor.TenantId
-                });
-                collection.Add(new()
-                {
-                    Name = "OCTO_SOCKET__COMMUNICATIONCONTROLLERSERVICESURI",
-                    Value = poolDescriptor.ControllerUri
-                });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_SOCKET__PLUGRTID",
-                        Value = adapterDto.AdapterRtId.ToString()
-                    });
-                break;
         }
-
+        else if (adapterDto.AdapterCkTypeId == Statics.CkIdSocket)
+        {
+            collection.Add(new()
+            {
+                Name = "OCTO_SOCKET__TENANTID",
+                Value = poolDescriptor.TenantId
+            });
+            collection.Add(new()
+            {
+                Name = "OCTO_SOCKET__COMMUNICATIONCONTROLLERSERVICESURI",
+                Value = poolDescriptor.ControllerUri
+            });
+            collection.Add(
+                new()
+                {
+                    Name = "OCTO_SOCKET__PLUGRTID",
+                    Value = adapterDto.AdapterRtId.ToString()
+                });
+        }
 
         return collection;
     }
@@ -410,7 +408,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task CreateService(K8Pool k8Pool, PoolCommunicationAdapterDto adapterDto,
         Dictionary<string, string> serviceLabels)
     {
-        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkTypeId.Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId}";
+        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkTypeId.ToString().Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId}";
 
         _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 
