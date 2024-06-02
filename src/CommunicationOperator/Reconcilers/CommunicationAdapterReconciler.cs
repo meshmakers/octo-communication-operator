@@ -20,7 +20,8 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     /// </summary>
     /// <param name="kubernetesClient">Kubernetes client to use</param>
     /// <param name="logger">Logger to write log message to</param>
-    public CommunicationAdapterReconciler(IKubernetesClient kubernetesClient, ILogger<CommunicationAdapterReconciler> logger)
+    public CommunicationAdapterReconciler(IKubernetesClient kubernetesClient,
+        ILogger<CommunicationAdapterReconciler> logger)
     {
         _logger = logger;
         _kubernetesClient = kubernetesClient;
@@ -29,9 +30,9 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     public async Task ReconcileAsync(PoolDescriptor poolDescriptor, PoolCommunicationAdapterDto poolAdapter,
         V1CommunicationPoolEntity entity)
     {
-        _logger.LogInformation("[{TenantId}] Reconciling communication adapter '{CkId}/{RtId}'", poolDescriptor.TenantId,
-            poolAdapter.AdapterCkTypeId,
-            poolAdapter.AdapterRtId);
+        _logger.LogInformation("[{TenantId}] Reconciling communication adapter '{AdapterRtEntityId}'",
+            poolDescriptor.TenantId,
+            poolAdapter.AdapterRtEntityId);
 
         try
         {
@@ -40,11 +41,9 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Error while reconciling adapter '{CkId}/{RtId}'",
-                poolAdapter.AdapterCkTypeId,
-                poolAdapter.AdapterRtId);
-            throw CommunicationAdapterReconsilerException.AdapterReconcileFailed(poolAdapter.AdapterCkTypeId,
-                poolAdapter.AdapterRtId, e);
+            _logger.LogError(e, "Error while reconciling adapter '{AdapterRtEntityId}'",
+                poolAdapter.AdapterRtEntityId);
+            throw CommunicationAdapterReconsilerException.AdapterReconcileFailed(poolAdapter.AdapterRtEntityId, e);
         }
     }
 
@@ -71,8 +70,8 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
     public async Task DeleteAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
     {
-        _logger.LogInformation("[{TenantId}] Deleting adapter '{CkId}/{RtId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterCkTypeId, poolAdapter.AdapterRtId, k8Pool.Namespace);
+        _logger.LogInformation("[{TenantId}] Deleting adapter '{AdapterRtEntityId}', namespace '{Namespace}'",
+            k8Pool.TenantId, poolAdapter.AdapterRtEntityId, k8Pool.Namespace);
 
         try
         {
@@ -81,23 +80,23 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Error while deleting adapter '{CkId}/{RtId}'", poolAdapter.AdapterCkTypeId,
-                poolAdapter.AdapterRtId);
-            throw CommunicationAdapterReconsilerException.AdapterDeleteFailed(poolAdapter.AdapterCkTypeId,
-                poolAdapter.AdapterRtId, e);
+            _logger.LogError(e, "Error while deleting adapter '{AdapterRtEntityId}'",
+                poolAdapter.AdapterRtEntityId);
+            throw CommunicationAdapterReconsilerException.AdapterDeleteFailed(poolAdapter.AdapterRtEntityId, e);
         }
     }
 
     private async Task DeleteAdapterServiceAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
     {
-        _logger.LogInformation("[{TenantId}] Deleting service for adapter '{CkId}/{RtId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterCkTypeId, poolAdapter.AdapterRtId, k8Pool.Namespace);
+        _logger.LogInformation(
+            "[{TenantId}] Deleting service for adapter '{AdapterRtEntityId}', namespace '{Namespace}'",
+            k8Pool.TenantId, poolAdapter.AdapterRtEntityId, k8Pool.Namespace);
 
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId.ToString(),
-            ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
@@ -114,20 +113,22 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
     private async Task DeleteAdapterDeploymentAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
     {
-        _logger.LogInformation("[{TenantId}] Deleting deployment for adapter '{CkId}/{RtId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterCkTypeId, poolAdapter.AdapterRtId, k8Pool.Namespace);
+        _logger.LogInformation(
+            "[{TenantId}] Deleting deployment for adapter '{AdapterRtEntityId}', namespace '{Namespace}'",
+            k8Pool.TenantId, poolAdapter.AdapterRtEntityId, k8Pool.Namespace);
 
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterCkTypeId.ToString(),
-            ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
 
         var existingDeployments =
-            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
+            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace,
+                labelSelector: deploymentLabels.AsLabelSelector());
 
         var existingService = existingDeployments.SingleOrDefault();
         if (existingService != null)
@@ -149,7 +150,8 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
 
         var existingDeployments =
-            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
+            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace,
+                labelSelector: deploymentLabels.AsLabelSelector());
 
         foreach (var existingDeployment in existingDeployments)
         {
@@ -159,7 +161,8 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
     private async Task DeleteAdapterDeployment(K8Pool k8Pool, V1Deployment existingDeployment)
     {
-        _logger.LogInformation("[{TenantId}] Deleting adapter deployment '{DeploymentName}' for pool '{PoolName}', namespace '{Namespace}'",
+        _logger.LogInformation(
+            "[{TenantId}] Deleting adapter deployment '{DeploymentName}' for pool '{PoolName}', namespace '{Namespace}'",
             k8Pool.TenantId, existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
 
         _logger.DeletingDeployment(existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
@@ -190,19 +193,21 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         await _kubernetesClient.Delete<V1Service>(existingService.Metadata.Name, k8Pool.Namespace);
     }
 
-    private async Task ReconcileAdapterDeploymentAsync(PoolDescriptor poolDescriptor, PoolCommunicationAdapterDto adapterDto)
+    private async Task ReconcileAdapterDeploymentAsync(PoolDescriptor poolDescriptor,
+        PoolCommunicationAdapterDto adapterDto)
     {
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId.ToString(),
-            ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = poolDescriptor.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = poolDescriptor.TenantId
         };
 
         var existingDeployments =
-            await _kubernetesClient.List<V1Deployment>(poolDescriptor.Namespace, labelSelector: deploymentLabels.AsLabelSelector());
+            await _kubernetesClient.List<V1Deployment>(poolDescriptor.Namespace,
+                labelSelector: deploymentLabels.AsLabelSelector());
 
         if (existingDeployments.Any())
         {
@@ -217,8 +222,8 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterCkTypeId.ToString(),
-            ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
         };
@@ -238,7 +243,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         Dictionary<string, string> deploymentLabels)
     {
         var deploymentName =
-            $"{poolDescriptor.TenantId}-{adapterDto.AdapterCkTypeId.ToString().Replace(".", "-").Replace("/", "-").ToLower()}-{adapterDto.AdapterRtId.ToString()}";
+            $"{poolDescriptor.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.ToString().Replace(".", "-").Replace("/", "-").ToLower()}-{adapterDto.AdapterRtEntityId.RtId.ToString()}";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
 
@@ -319,88 +324,73 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
         var collection = new Collection<V1EnvVar>();
 
-        if (adapterDto.AdapterCkTypeId == Statics.CkIdPlug)
+        collection.Add(new()
         {
-             collection.Add(new()
-                {
-                    Name = "OCTO_PLUG__TENANTID",
-                    Value = poolDescriptor.TenantId
-                });
-                collection.Add(new()
-                {
-                    Name = "OCTO_PLUG__COMMUNICATIONCONTROLLERSERVICESURI",
-                    Value = poolDescriptor.ControllerUri
-                });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_PLUG__PLUGRTID",
-                        Value = adapterDto.AdapterRtId.ToString()
-                    });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_PLUG__BROKERHOST",
-                        Value = poolDescriptor.BrokerHost
-                    });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_PLUG__BROKERVIRTUALHOST",
-                        Value = poolDescriptor.BrokerVirtualHost
-                    });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_PLUG__BROKERPORT",
-                        Value = poolDescriptor.BrokerPort.ToString()
-                    });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_PLUG__BROKERUSERNAME",
-                        ValueFrom = new V1EnvVarSource
-                        {
-                            SecretKeyRef = new V1SecretKeySelector
-                            {
-                                Name = secretName,
-                                Key = "brokerusername"
-                            }
-                        }
-                    });
-                collection.Add(
-                    new()
-                    {
-                        Name = "OCTO_PLUG__BROKERPASSWORD",
-                        ValueFrom = new V1EnvVarSource
-                        {
-                            SecretKeyRef = new V1SecretKeySelector
-                            {
-                                Name = secretName,
-                                Key = "brokerpassword"
-                            }
-                        }
-                    });
-        }
-        else if (adapterDto.AdapterCkTypeId == Statics.CkIdSocket)
+            Name = "OCTO_ADAPTER__TENANTID",
+            Value = poolDescriptor.TenantId
+        });
+        collection.Add(new()
         {
-            collection.Add(new()
+            Name = "OCTO_ADAPTER__COMMUNICATIONCONTROLLERSERVICESURI",
+            Value = poolDescriptor.ControllerUri
+        });
+        collection.Add(
+            new()
             {
-                Name = "OCTO_SOCKET__TENANTID",
-                Value = poolDescriptor.TenantId
+                Name = "OCTO_ADAPTER__ADAPTERCKTYPEID",
+                Value = adapterDto.AdapterRtEntityId.CkTypeId.ToString()
             });
-            collection.Add(new()
+        collection.Add(
+            new()
             {
-                Name = "OCTO_SOCKET__COMMUNICATIONCONTROLLERSERVICESURI",
-                Value = poolDescriptor.ControllerUri
+                Name = "OCTO_ADAPTER__ADAPTERRTID",
+                Value = adapterDto.AdapterRtEntityId.RtId.ToString()
             });
-            collection.Add(
-                new()
+        collection.Add(
+            new()
+            {
+                Name = "OCTO_ADAPTER__BROKERHOST",
+                Value = poolDescriptor.BrokerHost
+            });
+        collection.Add(
+            new()
+            {
+                Name = "OCTO_ADAPTER__BROKERVIRTUALHOST",
+                Value = poolDescriptor.BrokerVirtualHost
+            });
+        collection.Add(
+            new()
+            {
+                Name = "OCTO_ADAPTER__BROKERPORT",
+                Value = poolDescriptor.BrokerPort.ToString()
+            });
+        collection.Add(
+            new()
+            {
+                Name = "OCTO_ADAPTER__BROKERUSERNAME",
+                ValueFrom = new V1EnvVarSource
                 {
-                    Name = "OCTO_SOCKET__PLUGRTID",
-                    Value = adapterDto.AdapterRtId.ToString()
-                });
-        }
+                    SecretKeyRef = new V1SecretKeySelector
+                    {
+                        Name = secretName,
+                        Key = "brokerusername"
+                    }
+                }
+            });
+        collection.Add(
+            new()
+            {
+                Name = "OCTO_ADAPTER__BROKERPASSWORD",
+                ValueFrom = new V1EnvVarSource
+                {
+                    SecretKeyRef = new V1SecretKeySelector
+                    {
+                        Name = secretName,
+                        Key = "brokerpassword"
+                    }
+                }
+            });
+
 
         return collection;
     }
@@ -408,7 +398,8 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task CreateService(K8Pool k8Pool, PoolCommunicationAdapterDto adapterDto,
         Dictionary<string, string> serviceLabels)
     {
-        var serviceName = $"{k8Pool.TenantId}-{adapterDto.AdapterCkTypeId.ToString().Replace(".", "-").ToLower()}-{adapterDto.AdapterRtId}";
+        var serviceName =
+            $"{k8Pool.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.ToString().Replace(".", "-").ToLower()}-{adapterDto.AdapterRtEntityId.RtId}";
 
         _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 

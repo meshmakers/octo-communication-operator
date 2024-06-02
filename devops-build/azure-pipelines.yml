@@ -11,12 +11,14 @@ trigger:
       - main
 
 variables:
-  buildConfiguration: 'Release'
-  buildPlatform: 'any cpu'
-  isRelease: true # ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
-  MajorVersion: 0
-  MinorVersion: 0
-  
+  - group: GitSSHGroup
+  - group: ApiKeys
+  - group: OctoDefault
+  - name: solutionFile
+    value: 'Octo.CommunicationController.sln'
+  - name: isRelease
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+
 stages:
  - stage: Build
    jobs:
@@ -62,16 +64,14 @@ stages:
                '**/*Tests.csproj'
                !'**/*SystemTests.csproj'
              testRunTitle: 'CI'
-         - template: buildAndPushDockerImage.yml
+         - template: build-and-push-docker-image.yml
            parameters:
-             ContainerRegistry: 'dockerhub@ianitor'
              Repository: meshmakers/octo-communication-operator
              Dockerfile: src/CommunicationOperator/DockerfileArm64v8
              IsRelease: ${{ variables.isRelease }}
              Architecture: 'arm64v8'
-         - template: buildAndPushDockerImage.yml
+         - template: build-and-push-docker-image.yml
            parameters:
-             ContainerRegistry: 'dockerhub@ianitor'
              Repository: meshmakers/octo-communication-operator
              Dockerfile: src/CommunicationOperator/Dockerfile
              IsRelease: ${{ variables.isRelease }}
