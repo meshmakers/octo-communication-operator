@@ -31,14 +31,12 @@ steps:
       ${{ parameters.Architecture }}-$(Build.BuildNumber)
       
 - task: Docker@2
-  condition: ${{ eq(parameters.IsRelease, false) }}
   displayName: Tag docker image for for private ${{ parameters.Repository }}
   inputs:
     command: tag
     arguments: ${{ parameters.Repository }}:${{ parameters.Architecture }}-$(Build.BuildNumber) $(DockerRegistryPrivateUri)/${{ parameters.Repository }}:${{ parameters.Architecture }}-$(Build.BuildNumber)      
       
 - task: Docker@2
-  condition: ${{ eq(parameters.IsRelease, false) }}
   displayName: Push to private ${{ parameters.Repository }}
   inputs:
     command: push
