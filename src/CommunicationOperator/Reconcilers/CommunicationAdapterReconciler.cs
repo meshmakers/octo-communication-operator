@@ -166,7 +166,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
             k8Pool.TenantId, existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
 
         _logger.DeletingDeployment(existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
-        await _kubernetesClient.DeleteAsync<V1DeploymentTemporary>(existingDeployment.Metadata.Name, k8Pool.Namespace);
+        await _kubernetesClient.DeleteAsync<V1Deployment>(existingDeployment.Metadata.Name, k8Pool.Namespace);
     }
 
     private async Task DeleteAllAdapterServicesAsync(K8Pool k8Pool)
