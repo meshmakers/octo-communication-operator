@@ -6,6 +6,7 @@ using KubeOps.Operator.Web.Builder;
 using KubeOps.Operator.Web.Certificates;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -54,10 +55,12 @@ try
         .UseCertificateProvider(port, ip, generator)
 #endif
         ;
-    
+
+    builder.Services.AddHealthChecks();
+
     builder.Services
         .AddControllers();
-    
+
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<ICommunicationAdapterReconciler, CommunicationAdapterReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
@@ -67,6 +70,17 @@ try
     app.UseRouting();
     app.UseDeveloperExceptionPage();
     app.MapControllers();
+
+
+    app.MapHealthChecks("/health/ready", new HealthCheckOptions
+    {
+        Predicate = check => check.Tags.Contains("ready")
+    });
+
+    app.MapHealthChecks("/health/live", new HealthCheckOptions
+    {
+        Predicate = check => check.Tags.Contains("live")
+    });
 
     await app.RunAsync();
 }
