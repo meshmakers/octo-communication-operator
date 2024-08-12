@@ -50,6 +50,7 @@ stages:
                }
            displayName: 'Set build number'
          - template: setversion.yml
+         - template: download-ca.yml           
          - task: PowerShell@2
            displayName: "Enable multiarch support"
            inputs:
