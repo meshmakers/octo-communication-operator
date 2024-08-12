@@ -5,11 +5,13 @@
     <RootNamespace>Meshmakers.Octo.Communication.Operator</RootNamespace>
     <Configurations>Debug;Release;DebugL</Configurations>
     <Platforms>AnyCPU</Platforms>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="KubeOps.Generator" Version="9.1.3" />
-    <PackageReference Include="KubeOps.Operator.Web" Version="9.1.3" />
+    <PackageReference Include="KubeOps.Generator" Version="9.9.9" OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+    <PackageReference Include="KubeOps.Operator.Web" Version="9.9.9" />
     <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="$(OctoVersion)" />
     <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.11" />
   </ItemGroup>

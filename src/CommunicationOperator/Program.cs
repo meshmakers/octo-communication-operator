@@ -1,6 +1,9 @@
+using System.Security.Cryptography.X509Certificates;
 using k8s;
 using KubeOps.KubernetesClient;
 using KubeOps.Operator;
+using KubeOps.Operator.Web.Builder;
+using KubeOps.Operator.Web.Certificates;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
 using NLog;
@@ -13,6 +16,13 @@ using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 // NLog: set up the logger first to catch all errors
 var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
 var logger = nLogFactory.GetCurrentClassLogger();
+
+#if DEBUG || DEBUGL
+string ip = "192.168.1.100";
+ushort port = 443;
+using CertificateGenerator generator = new CertificateGenerator(ip);
+using X509Certificate2 cert = generator.Server.CopyServerCertWithPrivateKey();
+#endif
 
 try
 {
@@ -40,9 +50,9 @@ try
     builder.Services
         .AddKubernetesOperator()
         .RegisterComponents()
-// #if DEBUG
-//     .AddDevelopmentTunnel(5000)
-// #endif
+#if DEBUG || DEBUGL
+        .UseCertificateProvider(port, ip, generator)
+#endif
         ;
     
     builder.Services

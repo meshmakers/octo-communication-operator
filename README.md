@@ -36,3 +36,9 @@ Install the operator:
 make install
 ```
 
+
+# Generate CRD and deployment files
+```bash
+dotnet kubeops g op meshmakers-octo-communication-operator ./CommunicationOperator.csproj --out config --clear-out
+```
+
