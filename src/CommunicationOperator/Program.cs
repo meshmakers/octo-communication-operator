@@ -1,12 +1,8 @@
 using k8s;
 using KubeOps.KubernetesClient;
 using KubeOps.Operator;
-using Meshmakers.Octo.Communication.Operator.Controller;
-using Meshmakers.Octo.Communication.Operator.Entities;
-using Meshmakers.Octo.Communication.Operator.Finalizer;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
-using Meshmakers.Octo.Communication.Operator.Webhooks;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -14,7 +10,7 @@ using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 // Needed if config directory needs to be created newly
 //Environment.SetEnvironmentVariable("CFSSL_EXECUTABLES_PATH", "/Users/gerald/RiderProjects/meshmakers/octo-communication-operator/tools");
 
-// NLog: setup the logger first to catch all errors
+// NLog: set up the logger first to catch all errors
 var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
 var logger = nLogFactory.GetCurrentClassLogger();
 
@@ -41,25 +37,28 @@ try
 
         return new Kubernetes(config);
     });
-
-    builder.Services.AddKubernetesOperator((x) =>
-        {
-            x.HttpPort = 6000;
-            x.HttpsPort = 6001;
-            x.EnableAssemblyScanning = false;
-        })
-        .AddEntity<V1CommunicationPoolEntity>()
-        .AddController<CommunicationPoolController>()
-        .AddFinalizer<CommunicationPoolFinalizer>()
-        .AddMutationWebhook<CommunicationPoolMutator>();
+    builder.Services
+        .AddKubernetesOperator()
+        .RegisterComponents()
+// #if DEBUG
+//     .AddDevelopmentTunnel(5000)
+// #endif
+        ;
+    
+    builder.Services
+        .AddControllers();
     
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<ICommunicationAdapterReconciler, CommunicationAdapterReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
 
     var app = builder.Build();
-    app.UseKubernetesOperator();
-    await app.RunOperatorAsync(args);
+
+    app.UseRouting();
+    app.UseDeveloperExceptionPage();
+    app.MapControllers();
+
+    await app.RunAsync();
 }
 catch (Exception ex)
 {

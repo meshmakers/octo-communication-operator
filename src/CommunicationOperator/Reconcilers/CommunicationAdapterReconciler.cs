@@ -50,7 +50,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     /// <summary>
     /// Deletes the adapters for the pool resource.
     /// </summary>
-    /// <param name="k8Pool">Meta data about the pool</param>
+    /// <param name="k8Pool">Metadata about the pool</param>
     public async Task DeleteAsync(K8Pool k8Pool)
     {
         _logger.LogInformation("[{TenantId}] Deleting pool '{PoolName}', namespace '{Namespace}'",
@@ -102,7 +102,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         };
 
         var existingServices =
-            await _kubernetesClient.List<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
+            await _kubernetesClient.ListAsync<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
 
         var existingService = existingServices.SingleOrDefault();
         if (existingService != null)
@@ -127,7 +127,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         };
 
         var existingDeployments =
-            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace,
+            await _kubernetesClient.ListAsync<V1Deployment>(k8Pool.Namespace,
                 labelSelector: deploymentLabels.AsLabelSelector());
 
         var existingService = existingDeployments.SingleOrDefault();
@@ -150,7 +150,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
 
 
         var existingDeployments =
-            await _kubernetesClient.List<V1Deployment>(k8Pool.Namespace,
+            await _kubernetesClient.ListAsync<V1Deployment>(k8Pool.Namespace,
                 labelSelector: deploymentLabels.AsLabelSelector());
 
         foreach (var existingDeployment in existingDeployments)
@@ -166,7 +166,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
             k8Pool.TenantId, existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
 
         _logger.DeletingDeployment(existingDeployment.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
-        await _kubernetesClient.Delete<V1DeploymentTemporary>(existingDeployment.Metadata.Name, k8Pool.Namespace);
+        await _kubernetesClient.DeleteAsync<V1DeploymentTemporary>(existingDeployment.Metadata.Name, k8Pool.Namespace);
     }
 
     private async Task DeleteAllAdapterServicesAsync(K8Pool k8Pool)
@@ -179,7 +179,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         };
 
         var existingServices =
-            await _kubernetesClient.List<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
+            await _kubernetesClient.ListAsync<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
 
         foreach (var existingService in existingServices)
         {
@@ -190,7 +190,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private async Task DeleteAdapterService(K8Pool k8Pool, V1Service existingService)
     {
         _logger.DeletingService(existingService.Metadata.Name, k8Pool.PoolName, k8Pool.Namespace);
-        await _kubernetesClient.Delete<V1Service>(existingService.Metadata.Name, k8Pool.Namespace);
+        await _kubernetesClient.DeleteAsync<V1Service>(existingService.Metadata.Name, k8Pool.Namespace);
     }
 
     private async Task ReconcileAdapterDeploymentAsync(PoolDescriptor poolDescriptor,
@@ -206,7 +206,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         };
 
         var existingDeployments =
-            await _kubernetesClient.List<V1Deployment>(poolDescriptor.Namespace,
+            await _kubernetesClient.ListAsync<V1Deployment>(poolDescriptor.Namespace,
                 labelSelector: deploymentLabels.AsLabelSelector());
 
         if (existingDeployments.Any())
@@ -229,7 +229,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         };
 
         var existingServices =
-            await _kubernetesClient.List<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
+            await _kubernetesClient.ListAsync<V1Service>(k8Pool.Namespace, labelSelector: serviceLabels.AsLabelSelector());
 
         if (existingServices.Any())
         {
@@ -314,7 +314,7 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
             }
         };
 
-        await _kubernetesClient.Create(deployment);
+        await _kubernetesClient.CreateAsync(deployment);
     }
 
     private Collection<V1EnvVar> CreateEnvironment(PoolDescriptor poolDescriptor,
@@ -428,6 +428,6 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
             }
         };
 
-        await _kubernetesClient.Create(service);
+        await _kubernetesClient.CreateAsync(service);
     }
 }
