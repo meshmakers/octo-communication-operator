@@ -3,8 +3,8 @@ kind: CommunicationPool
 metadata:
   name: first-pool
 spec:
-  communicationControllerUri: "https://communication.staging.meshmakers.cloud"
+  communicationControllerUri: "https://communication.rke2-local.srv.mm.local"
   poolName: "k8sfirmianstrasse"
   tenantId: "meshtest"
-  brokerHost: "mq.staging.meshmakers.cloud"
+  brokerHost: "mq.rke2-local.srv.mm.local"
   
