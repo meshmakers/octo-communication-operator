@@ -102,7 +102,7 @@ public class AdapterReconciler : IAdapterReconciler
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterRtEntityId.CkTypeId.ToString().Replace("/", "-"),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -127,7 +127,7 @@ public class AdapterReconciler : IAdapterReconciler
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = poolAdapter.AdapterRtEntityId.CkTypeId.ToString().Replace("/", "-"),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = poolAdapter.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -206,7 +206,7 @@ public class AdapterReconciler : IAdapterReconciler
         var deploymentLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterRtEntityId.CkTypeId.ToString().Replace("/", "-"),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = poolDescriptor.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = poolDescriptor.TenantId
@@ -229,7 +229,7 @@ public class AdapterReconciler : IAdapterReconciler
         var serviceLabels = new Dictionary<string, string>
         {
             ["octo-mesh.meshmakers.io/component"] = ComponentDeploymentName,
-            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterRtEntityId.CkTypeId.ToString(),
+            ["octo-mesh.meshmakers.io/adapter-ckId"] = adapterDto.AdapterRtEntityId.CkTypeId.ToString().Replace("/", "-"),
             ["octo-mesh.meshmakers.io/adapter-rtId"] = adapterDto.AdapterRtEntityId.RtId.ToString(),
             ["octo-mesh.meshmakers.io/pool"] = k8Pool.PoolName,
             ["octo-mesh.meshmakers.io/tenant"] = k8Pool.TenantId
@@ -250,7 +250,7 @@ public class AdapterReconciler : IAdapterReconciler
         Dictionary<string, string> deploymentLabels)
     {
         var deploymentName =
-            $"{poolDescriptor.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.ToString().Replace(".", "-").Replace("/", "-").ToLower()}-{adapterDto.AdapterRtEntityId.RtId.ToString()}";
+            $"{poolDescriptor.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.Key.TypeId.ToLower()}-{adapterDto.AdapterRtEntityId.RtId.ToString()}";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
 
@@ -406,7 +406,7 @@ public class AdapterReconciler : IAdapterReconciler
         Dictionary<string, string> serviceLabels)
     {
         var serviceName =
-            $"{k8Pool.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.ToString().Replace(".", "-").ToLower()}-{adapterDto.AdapterRtEntityId.RtId}";
+            $"{k8Pool.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.Key.TypeId.ToLower()}-{adapterDto.AdapterRtEntityId.RtId}";
 
         _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 

@@ -19,8 +19,8 @@ var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile
 var logger = nLogFactory.GetCurrentClassLogger();
 
 #if DEBUG || DEBUGL
-string ip = "192.168.1.100";
-ushort port = 443;
+string ip = "192.168.15.66";
+ushort port = 6001;
 using CertificateGenerator generator = new CertificateGenerator(ip);
 using X509Certificate2 cert = generator.Server.CopyServerCertWithPrivateKey();
 #endif
@@ -30,6 +30,14 @@ try
     logger.Debug("init main");
 
     var builder = WebApplication.CreateBuilder(args);
+
+#if DEBUG || DEBUGL
+    builder.WebHost.ConfigureKestrel(serverOptions =>
+    {
+        serverOptions.Listen(System.Net.IPAddress.Any, port,
+             listenOptions => { listenOptions.UseHttps(cert); });
+    });
+#endif
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
