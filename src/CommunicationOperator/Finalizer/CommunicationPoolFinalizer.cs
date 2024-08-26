@@ -9,7 +9,7 @@ public class CommunicationPoolFinalizer(ILogger<CommunicationPoolFinalizer> logg
 {
     public Task FinalizeAsync(V1CommunicationPoolEntity entity, CancellationToken cancellationToken)
     {
-        logger.LogInformation("entity {Name} called {FinalizeAsyncName}", entity.Name(), nameof(FinalizeAsync));
+        logger.LogInformation("Entity {Name} called {FinalizeAsyncName}", entity.Name(), nameof(FinalizeAsync));
 
         return Task.CompletedTask;
     }

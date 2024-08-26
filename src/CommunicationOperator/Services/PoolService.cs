@@ -4,12 +4,13 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Entities;
 using Meshmakers.Octo.Communication.Operator.Models;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
 
 namespace Meshmakers.Octo.Communication.Operator.Services;
 
-public class PoolService(ILogger<PoolService> logger, ICommunicationAdapterReconciler communicationAdapterReconciler)
+public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapterReconciler)
     : IPoolService, IPoolHubCallbacks
 {
     private readonly Dictionary<string, Pool> _pools = new();
@@ -47,7 +48,9 @@ public class PoolService(ILogger<PoolService> logger, ICommunicationAdapterRecon
                 PoolName = entity.Spec.PoolName,
                 ControllerUri = entity.Spec.CommunicationControllerUri,
                 BrokerHost = entity.Spec.BrokerHost,
-                BrokerVirtualHost = string.IsNullOrWhiteSpace(entity.Spec.BrokerVirtualHost) ? "/" : entity.Spec.BrokerVirtualHost,
+                BrokerVirtualHost = string.IsNullOrWhiteSpace(entity.Spec.BrokerVirtualHost)
+                    ? "/"
+                    : entity.Spec.BrokerVirtualHost,
                 BrokerPort = entity.Spec.BrokerPort,
             }, controllerClient, entity);
 
@@ -56,19 +59,19 @@ public class PoolService(ILogger<PoolService> logger, ICommunicationAdapterRecon
             logger.LogInformation("Deleting deployment for pool {PoolName}", entity.Spec.PoolName);
             await DeleteDeploymentAsync(entity);
 
-
             logger.LogInformation("Starting pool {PoolName}", entity.Spec.PoolName);
             await controllerClient.StartAsync(CancellationToken.None);
 
             logger.LogInformation("Registering pool {PoolName} with controller", entity.Spec.PoolName);
             var poolConfiguration = await controllerClient.RegisterPoolOperatorAsync(entity.Spec.PoolName);
-            logger.LogInformation("Registered pool {PoolName} with controller, configuration of '{AdapterCount}' adapter retrieved",
+            logger.LogInformation(
+                "Registered pool {PoolName} with controller, configuration of '{AdapterCount}' adapter retrieved",
                 entity.Spec.PoolName, poolConfiguration.CommunicationAdapterList.Count());
             pool.IsRegistered = true;
 
             foreach (var adapterDto in poolConfiguration.CommunicationAdapterList)
             {
-                await DeployAdapter(pool.PoolDescriptor, adapterDto, entity);
+                await DeployAdapterAsync(pool, adapterDto, entity);
             }
         }
         catch (Exception e)
@@ -105,7 +108,7 @@ public class PoolService(ILogger<PoolService> logger, ICommunicationAdapterRecon
 
     private async Task DeleteDeploymentAsync(V1CommunicationPoolEntity entity)
     {
-        await communicationAdapterReconciler.DeleteAsync(new K8Pool
+        await adapterReconciler.DeleteAsync(new K8Pool
         {
             Namespace = entity.Namespace(),
             PoolName = entity.Spec.PoolName,
@@ -113,30 +116,56 @@ public class PoolService(ILogger<PoolService> logger, ICommunicationAdapterRecon
         });
     }
 
-    private async Task DeployAdapter(PoolDescriptor poolDescriptor, PoolCommunicationAdapterDto adapterDto, V1CommunicationPoolEntity entity)
+    private async Task DeployAdapterAsync(Pool pool, PoolCommunicationAdapterDto adapterDto,
+        V1CommunicationPoolEntity entity)
     {
-        logger.LogInformation("Deploying adapter '{AdapterRtEntityId}‘ for pool {PoolName}", adapterDto.AdapterRtEntityId, poolDescriptor.PoolName);
+        logger.LogInformation("Deploying adapter '{AdapterRtEntityId}‘ for pool {PoolName}",
+            adapterDto.AdapterRtEntityId, pool.PoolDescriptor.PoolName);
 
-        await communicationAdapterReconciler.ReconcileAsync(poolDescriptor, adapterDto, entity);
+        await adapterReconciler.ReconcileAsync(pool, adapterDto, entity);
+    }
+
+    public async Task UpdatePoolConfigurationAsync(string tenantId, string poolName,
+        PoolConfigurationDto poolConfigurationDto)
+    {
+        logger.LogInformation("Updating pool configuration for tenant '{TenantId}', pool '{PoolName}'", tenantId,
+            poolName);
+
+        if (_pools.TryGetValue(poolName, out var pool))
+        {
+            await adapterReconciler.DeleteAsync(new K8Pool
+            {
+                Namespace = pool.PoolDescriptor.Namespace,
+                PoolName = pool.PoolDescriptor.PoolName,
+                TenantId = pool.PoolDescriptor.TenantId
+            });
+
+            foreach (var adapterDto in poolConfigurationDto.CommunicationAdapterList)
+            {
+                await DeployAdapterAsync(pool, adapterDto, pool.Entity);
+            }
+        }
     }
 
     public async Task DeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto adapterDto)
     {
-        logger.LogInformation("Deploying adapter '{AdapterRtEntityId}‘ for pool {PoolName}", adapterDto.AdapterRtEntityId, adapterDto.PoolName);
+        logger.LogInformation("Deploying adapter '{AdapterRtEntityId}‘ for pool {PoolName}",
+            adapterDto.AdapterRtEntityId, adapterDto.PoolName);
 
         if (_pools.TryGetValue(adapterDto.PoolName, out var pool))
         {
-            await DeployAdapter(pool.PoolDescriptor, adapterDto, pool.Entity);
+            await DeployAdapterAsync(pool, adapterDto, pool.Entity);
         }
     }
 
     public async Task UndeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto adapterDto)
     {
-        logger.LogInformation("Undeploying adapter '{AdapterRtEntityId}‘ for pool {PoolName}", adapterDto.AdapterRtEntityId, adapterDto.PoolName);
+        logger.LogInformation("Undeploying adapter '{AdapterRtEntityId}‘ for pool {PoolName}",
+            adapterDto.AdapterRtEntityId, adapterDto.PoolName);
 
         if (_pools.TryGetValue(adapterDto.PoolName, out var pool))
         {
-            await communicationAdapterReconciler.DeleteAsync(pool.PoolDescriptor, adapterDto);
+            await adapterReconciler.DeleteAsync(pool, adapterDto);
         }
     }
 }

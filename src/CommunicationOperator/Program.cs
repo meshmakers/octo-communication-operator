@@ -62,7 +62,7 @@ try
         .AddControllers();
 
     builder.Services.AddSingleton<IPoolService, PoolService>();
-    builder.Services.AddSingleton<ICommunicationAdapterReconciler, CommunicationAdapterReconciler>();
+    builder.Services.AddSingleton<IAdapterReconciler, AdapterReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
 
     var app = builder.Build();

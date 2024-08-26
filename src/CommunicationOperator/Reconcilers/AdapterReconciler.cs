@@ -8,7 +8,7 @@ using Meshmakers.Octo.Communication.Operator.Models;
 
 namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 
-public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
+public class AdapterReconciler : IAdapterReconciler
 {
     private const string ComponentDeploymentName = "communication-adapter";
 
@@ -16,41 +16,46 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
     private readonly ILogger _logger;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="CommunicationAdapterReconciler"/>
+    /// Initializes a new instance of <see cref="AdapterReconciler"/>
     /// </summary>
     /// <param name="kubernetesClient">Kubernetes client to use</param>
     /// <param name="logger">Logger to write log message to</param>
-    public CommunicationAdapterReconciler(IKubernetesClient kubernetesClient,
-        ILogger<CommunicationAdapterReconciler> logger)
+    public AdapterReconciler(IKubernetesClient kubernetesClient,
+        ILogger<AdapterReconciler> logger)
     {
         _logger = logger;
         _kubernetesClient = kubernetesClient;
     }
 
-    public async Task ReconcileAsync(PoolDescriptor poolDescriptor, PoolCommunicationAdapterDto poolAdapter,
+    /// <summary>
+    /// Reconciles the communication adapter for the pool resource.
+    /// </summary>
+    /// <param name="pool">Pool management object</param>
+    /// <param name="poolAdapter">The pool communication adapter to reconcile</param>
+    /// <param name="entity">Communication pool entity for reconcile</param>
+    /// <exception cref="AdapterReconsilerException"></exception>
+    public async Task ReconcileAsync(Pool pool, PoolCommunicationAdapterDto poolAdapter,
         V1CommunicationPoolEntity entity)
     {
         _logger.LogInformation("[{TenantId}] Reconciling communication adapter '{AdapterRtEntityId}'",
-            poolDescriptor.TenantId,
+            pool.PoolDescriptor.TenantId,
             poolAdapter.AdapterRtEntityId);
 
         try
         {
-            await ReconcileAdapterDeploymentAsync(poolDescriptor, poolAdapter);
-            await ReconcileAdapterServiceAsync(poolDescriptor, poolAdapter);
+            await ReconcileAdapterDeploymentAsync(pool.PoolDescriptor, poolAdapter);
+            await ReconcileAdapterServiceAsync(pool.PoolDescriptor, poolAdapter);
+            await pool.PoolHubClient.UpdateAdapterDeploymentStateAsync(pool.PoolDescriptor.PoolName,
+                poolAdapter.AdapterRtEntityId, true);
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Error while reconciling adapter '{AdapterRtEntityId}'",
                 poolAdapter.AdapterRtEntityId);
-            throw CommunicationAdapterReconsilerException.AdapterReconcileFailed(poolAdapter.AdapterRtEntityId, e);
+            throw AdapterReconsilerException.AdapterReconcileFailed(poolAdapter.AdapterRtEntityId, e);
         }
     }
 
-    /// <summary>
-    /// Deletes the adapters for the pool resource.
-    /// </summary>
-    /// <param name="k8Pool">Metadata about the pool</param>
     public async Task DeleteAsync(K8Pool k8Pool)
     {
         _logger.LogInformation("[{TenantId}] Deleting pool '{PoolName}', namespace '{Namespace}'",
@@ -64,25 +69,27 @@ public class CommunicationAdapterReconciler : ICommunicationAdapterReconciler
         catch (Exception e)
         {
             _logger.LogError(e, "Error while deleting pool {PoolName}", k8Pool.PoolName);
-            throw CommunicationAdapterReconsilerException.PoolDeleteFailed(k8Pool.PoolName, e);
+            throw AdapterReconsilerException.PoolDeleteFailed(k8Pool.PoolName, e);
         }
     }
 
-    public async Task DeleteAsync(K8Pool k8Pool, PoolCommunicationAdapterDto poolAdapter)
+    public async Task DeleteAsync(Pool pool, PoolCommunicationAdapterDto poolAdapter)
     {
         _logger.LogInformation("[{TenantId}] Deleting adapter '{AdapterRtEntityId}', namespace '{Namespace}'",
-            k8Pool.TenantId, poolAdapter.AdapterRtEntityId, k8Pool.Namespace);
+            pool.PoolDescriptor.TenantId, poolAdapter.AdapterRtEntityId, pool.PoolDescriptor.Namespace);
 
         try
         {
-            await DeleteAdapterDeploymentAsync(k8Pool, poolAdapter);
-            await DeleteAdapterServiceAsync(k8Pool, poolAdapter);
+            await DeleteAdapterDeploymentAsync(pool.PoolDescriptor, poolAdapter);
+            await DeleteAdapterServiceAsync(pool.PoolDescriptor, poolAdapter);
+            await pool.PoolHubClient.UpdateAdapterDeploymentStateAsync(pool.PoolDescriptor.PoolName,
+                poolAdapter.AdapterRtEntityId, false);
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Error while deleting adapter '{AdapterRtEntityId}'",
                 poolAdapter.AdapterRtEntityId);
-            throw CommunicationAdapterReconsilerException.AdapterDeleteFailed(poolAdapter.AdapterRtEntityId, e);
+            throw AdapterReconsilerException.AdapterDeleteFailed(poolAdapter.AdapterRtEntityId, e);
         }
     }
 

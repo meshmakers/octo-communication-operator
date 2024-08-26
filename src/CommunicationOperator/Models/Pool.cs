@@ -3,18 +3,11 @@ using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
 
 namespace Meshmakers.Octo.Communication.Operator.Models;
 
-public class Pool
+public class Pool(PoolDescriptor poolDescriptor, IPoolHubClient poolHubClient, V1CommunicationPoolEntity entity)
 {
-    public PoolDescriptor PoolDescriptor { get; }
-    public IPoolHubClient PoolHubClient { get; }
-    public V1CommunicationPoolEntity Entity { get; }
-    
-    public bool IsRegistered { get; set; }
+    public PoolDescriptor PoolDescriptor { get; } = poolDescriptor;
+    public IPoolHubClient PoolHubClient { get; } = poolHubClient;
+    public V1CommunicationPoolEntity Entity { get; } = entity;
 
-    public Pool(PoolDescriptor poolDescriptor, IPoolHubClient poolHubClient, V1CommunicationPoolEntity entity)
-    {
-        PoolDescriptor = poolDescriptor;
-        PoolHubClient = poolHubClient;
-        Entity = entity;
-    }
+    public bool IsRegistered { get; set; }
 }
