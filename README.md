@@ -22,7 +22,7 @@ winget install Kubernetes.kind
 
 Create a cluster:
 ```bash
-kind create cluster
+./src/scripts/Create-KindTestCluster.ps1
 ```
 
 Connect to the cluster:
@@ -30,11 +30,33 @@ Connect to the cluster:
 kubectl cluster-info --context kind-kind
 ```
 
-
-Install the operator:
+Install the CRDs (located in the `octo-helm` repository):
 ```bash
-make install
+cd ~/meshmakers/octo-helm/src 
+helm install --namespace octo-operator-system --create-namespace octo-mesh-crds ./octo-mesh-crds/
 ```
+
+In Program.cs set the IP address of your host system:
+```csharp
+    #if DEBUG || DEBUGL
+    string ip = "192.168.15.66"; // Set the IP address of your host system
+    ushort port = 6001;
+    using CertificateGenerator generator = new CertificateGenerator(ip);
+    using X509Certificate2 cert = generator.Server.CopyServerCertWithPrivateKey();
+    #endif
+```
+
+Run the operator in debug mode
+
+Apply secret and the pool to create a first communication:
+```bash
+kubectl create ns pool1
+kubectl -n pool1 apply -f ./src/scripts/test-cluster-secret-local.yaml
+kubectl -n pool1 apply -f ./src/scripts/test-cluster-pool-local.yaml
+```
+
+
+## During development
 
 
 # Generate CRD and deployment files

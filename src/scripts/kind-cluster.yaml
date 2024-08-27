@@ -1,0 +1,13 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: ./salzburgdev-ca.crt
+        containerPath: /usr/share/ca-certificates/salzburgdev-ca.crt
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.salzburgdev.loki"]
+    endpoint = ["https://registry.salzburgdev.loki"]
+  [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.salzburgdev.loki".tls]
+    insecure_skip_verify = true  

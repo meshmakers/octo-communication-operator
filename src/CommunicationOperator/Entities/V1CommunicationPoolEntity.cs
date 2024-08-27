@@ -12,6 +12,8 @@ public class V1CommunicationPoolEntity : CustomKubernetesEntity<V1CommunicationP
         public string PoolName { get; set; } = string.Empty;
         public string CommunicationControllerUri { get; set; } = string.Empty;
         
+        public bool IgnoreCertificateValidation { get; set; }
+
         public string BrokerHost { get; set; } = string.Empty;
         
         public string BrokerVirtualHost { get; set; } = string.Empty;

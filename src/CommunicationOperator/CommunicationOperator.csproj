@@ -16,4 +16,8 @@
     <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.11" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Remove="sample\local-secret.yaml" />
+  </ItemGroup>
+
 </Project>

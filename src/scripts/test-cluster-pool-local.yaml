@@ -3,8 +3,8 @@ kind: CommunicationPool
 metadata:
   name: first-pool
 spec:
-  communicationControllerUri: "https://localhost:5015"
+  communicationControllerUri: "https://192.168.102.147:5015"
   poolName: "k8sfirmianstrasse"
   tenantId: "meshtest"
-  brokerHost: "localhost"
-  
+  brokerHost: "192.168.102.147"
+  ignoreCertificateValidation: true
