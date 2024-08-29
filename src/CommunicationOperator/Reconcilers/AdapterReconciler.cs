@@ -286,7 +286,7 @@ public class AdapterReconciler : IAdapterReconciler
                             new()
                             {
                                 Name = deploymentName,
-                                Image = deploymentImageName,
+                                Image = deploymentImageName.Trim(),
                                 // Command = new Collection<string> { "prefect", "orion", "start" },
                                 Env = CreateEnvironment(poolDescriptor, adapterDto),
                                 Ports = new Collection<V1ContainerPort>

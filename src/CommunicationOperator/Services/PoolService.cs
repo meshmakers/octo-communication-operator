@@ -93,12 +93,12 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
     {
         logger.LogInformation("Unregistering pool {PoolName}", entity.Spec.PoolName);
 
-        await DeleteDeploymentAsync(entity);
-        
         if (_pools.ContainsKey(entity.Spec.PoolName))
         {
             try
             {
+                await DeleteDeploymentAsync(entity);
+
                 var pool = _pools[entity.Spec.PoolName];
                 await pool.PoolHubClient.UnregisterPoolOperatorAsync(entity.Spec.PoolName);
                 await pool.PoolHubClient.StopAsync();
