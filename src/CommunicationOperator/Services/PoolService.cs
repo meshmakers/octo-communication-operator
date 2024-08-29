@@ -4,7 +4,6 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Entities;
 using Meshmakers.Octo.Communication.Operator.Models;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
-using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
 
@@ -166,6 +165,17 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
         if (_pools.TryGetValue(adapterDto.PoolName, out var pool))
         {
             await adapterReconciler.DeleteAsync(pool, adapterDto);
+        }
+    }
+
+    public async Task PreReloadTenantAsync(string tenantId)
+    {
+        logger.LogInformation("Pre-reloading tenant '{TenantId}'", tenantId);
+        
+        foreach (var pool in _pools.Values)
+        {
+            await UnRegisterPoolAsync(pool.Entity);
+            await RegisterPoolAsync(pool.Entity);
         }
     }
 }
