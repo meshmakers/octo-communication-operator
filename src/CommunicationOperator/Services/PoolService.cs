@@ -6,6 +6,7 @@ using Meshmakers.Octo.Communication.Operator.Models;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Meshmakers.Octo.Communication.Operator.Services;
 
@@ -14,7 +15,7 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
 {
     private readonly Dictionary<string, Pool> _pools = new();
 
-    public async Task RegisterPoolAsync(V1CommunicationPoolEntity entity)
+    public async Task RegisterPoolAsync(V1CommunicationPoolEntity entity, CancellationToken cancellationToken)
     {
         logger.LogInformation("Registering pool {PoolName}", entity.Spec.PoolName);
         try
@@ -30,6 +31,8 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
                 await pool.PoolHubClient.StopAsync();
                 _pools.Remove(entity.Spec.PoolName);
             }
+            
+            cancellationToken.ThrowIfCancellationRequested();
 
             logger.LogInformation("Registering pool {PoolName} with controller {ControllerUri}", entity.Spec.PoolName,
                 entity.Spec.CommunicationControllerUri);
@@ -55,27 +58,34 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
 
             _pools[entity.Spec.PoolName] = pool;
 
+            cancellationToken.ThrowIfCancellationRequested();
             logger.LogInformation("Deleting deployment for pool {PoolName}", entity.Spec.PoolName);
             await DeleteDeploymentAsync(entity);
 
             logger.LogInformation("Starting pool {PoolName}", entity.Spec.PoolName);
             await controllerClient.StartAsync(CancellationToken.None);
 
-            logger.LogInformation("Registering pool {PoolName} with controller", entity.Spec.PoolName);
+            logger.LogInformation("Registering pool {PoolName} at controller {Uri}", entity.Spec.PoolName, 
+                entity.Spec.CommunicationControllerUri);
             var poolConfiguration = await controllerClient.RegisterPoolOperatorAsync(entity.Spec.PoolName);
             logger.LogInformation(
                 "Registered pool {PoolName} with controller, configuration of '{AdapterCount}' adapter retrieved",
                 entity.Spec.PoolName, poolConfiguration.CommunicationAdapterList.Count());
             pool.IsRegistered = true;
 
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (var adapterDto in poolConfiguration.CommunicationAdapterList)
             {
                 await DeployAdapterAsync(pool, adapterDto, entity);
             }
         }
+        catch (HubException e)
+        {
+            throw PoolServiceException.ConnectionError(entity.Spec.PoolName, e);
+        }
         catch (Exception e)
         {
-            logger.LogError(e, "Error connecting to communication controller");
+            throw PoolServiceException.DeployFailed(entity.Spec.PoolName, e);
         }
     }
 
@@ -83,6 +93,8 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
     {
         logger.LogInformation("Unregistering pool {PoolName}", entity.Spec.PoolName);
 
+        await DeleteDeploymentAsync(entity);
+        
         if (_pools.ContainsKey(entity.Spec.PoolName))
         {
             try
@@ -91,10 +103,13 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
                 await pool.PoolHubClient.UnregisterPoolOperatorAsync(entity.Spec.PoolName);
                 await pool.PoolHubClient.StopAsync();
             }
+            catch (HubException e)
+            {
+                throw PoolServiceException.ConnectionError(entity.Spec.PoolName, e);
+            }
             catch (Exception e)
             {
-                logger.LogError(e, "Error unregistering at communication controller");
-                throw;
+                throw PoolServiceException.DeployFailed(entity.Spec.PoolName, e);
             }
             finally
             {
@@ -102,7 +117,6 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
             }
         }
 
-        await DeleteDeploymentAsync(entity);
     }
 
     private async Task DeleteDeploymentAsync(V1CommunicationPoolEntity entity)
@@ -171,11 +185,11 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
     public async Task PreReloadTenantAsync(string tenantId)
     {
         logger.LogInformation("Pre-reloading tenant '{TenantId}'", tenantId);
-        
+
         foreach (var pool in _pools.Values)
         {
             await UnRegisterPoolAsync(pool.Entity);
-            await RegisterPoolAsync(pool.Entity);
+            await RegisterPoolAsync(pool.Entity, CancellationToken.None);
         }
     }
 }
