@@ -25,7 +25,7 @@ public class CommunicationPoolController(
         try
         {
             entity.Status.CommunicationStatus = "In Progress";
-            await client.UpdateStatusAsync(entity, cancellationToken);
+            entity = await client.UpdateStatusAsync(entity, cancellationToken);
 
             await poolService.RegisterPoolAsync(entity, cancellationToken);
             
@@ -48,7 +48,7 @@ public class CommunicationPoolController(
         try
         {
             entity.Status.CommunicationStatus = "In Progress";
-            await client.UpdateStatusAsync(entity, cancellationToken);
+            entity = await client.UpdateStatusAsync(entity, cancellationToken);
             
             await poolService.UnRegisterPoolAsync(entity);
             
