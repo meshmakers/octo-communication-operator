@@ -36,7 +36,7 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
 
             logger.LogInformation("Registering pool {PoolName} with controller {ControllerUri}", entity.Spec.PoolName,
                 entity.Spec.CommunicationControllerUri);
-            var controllerClient = new PoolHubClient(new PoolHubClientOptions
+            var poolHubClient = new PoolHubClient(new PoolHubClientOptions
             {
                 EndpointUri = entity.Spec.CommunicationControllerUri,
                 TenantId = entity.Spec.TenantId,
@@ -54,7 +54,7 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
                     ? "/"
                     : entity.Spec.BrokerVirtualHost,
                 BrokerPort = entity.Spec.BrokerPort,
-            }, controllerClient, entity);
+            }, poolHubClient, entity);
 
             _pools[entity.Spec.PoolName] = pool;
 
@@ -62,22 +62,26 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
             logger.LogInformation("Deleting deployment for pool {PoolName}", entity.Spec.PoolName);
             await DeleteDeploymentAsync(entity);
 
-            logger.LogInformation("Starting pool {PoolName}", entity.Spec.PoolName);
-            await controllerClient.StartAsync(CancellationToken.None);
-
-            logger.LogInformation("Registering pool {PoolName} at controller {Uri}", entity.Spec.PoolName, 
-                entity.Spec.CommunicationControllerUri);
-            var poolConfiguration = await controllerClient.RegisterPoolOperatorAsync(entity.Spec.PoolName);
-            logger.LogInformation(
-                "Registered pool {PoolName} with controller, configuration of '{AdapterCount}' adapter retrieved",
-                entity.Spec.PoolName, poolConfiguration.CommunicationAdapterList.Count());
-            pool.IsRegistered = true;
-
             cancellationToken.ThrowIfCancellationRequested();
-            foreach (var adapterDto in poolConfiguration.CommunicationAdapterList)
+            var onReconnectFunction = async () =>
             {
-                await DeployAdapterAsync(pool, adapterDto, entity);
-            }
+                logger.LogInformation("Registering pool {PoolName}", entity.Spec.PoolName);
+                var poolConfiguration = await poolHubClient.RegisterPoolOperatorAsync(entity.Spec.PoolName);
+                logger.LogInformation(
+                    "Registered pool {PoolName} with controller, configuration of '{AdapterCount}' adapter retrieved",
+                    entity.Spec.PoolName, poolConfiguration.CommunicationAdapterList.Count());
+                pool.IsRegistered = true;
+                    
+                foreach (var adapterDto in poolConfiguration.CommunicationAdapterList)
+                {
+                    await DeployAdapterAsync(pool, adapterDto, entity);
+                }
+            };
+
+            logger.LogInformation("Starting pool {PoolName} at controller {Uri}", entity.Spec.PoolName, 
+                entity.Spec.CommunicationControllerUri);
+            await poolHubClient.StartAsync(onReconnectFunction, CancellationToken.None);
+            poolHubClient.EnableReconnect(onReconnectFunction);
         }
         catch (HubException e)
         {
@@ -100,6 +104,7 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
                 await DeleteDeploymentAsync(entity);
 
                 var pool = _pools[entity.Spec.PoolName];
+                pool.IsRegistered = false;
                 await pool.PoolHubClient.UnregisterPoolOperatorAsync(entity.Spec.PoolName);
                 await pool.PoolHubClient.StopAsync();
             }
@@ -182,14 +187,30 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
         }
     }
 
-    public async Task PreReloadTenantAsync(string tenantId)
+    public async Task PreUpdateTenantAsync(string tenantId)
     {
-        logger.LogInformation("Pre-reloading tenant '{TenantId}'", tenantId);
+        logger.LogInformation("PreUpdateTenantAsync for tenant {TenantId}", tenantId);
 
-        foreach (var pool in _pools.Values)
+        try
         {
-            await UnRegisterPoolAsync(pool.Entity);
-            await RegisterPoolAsync(pool.Entity, CancellationToken.None);
+            var pools = _pools.Values.ToArray();
+            foreach (var pool in pools)
+            {
+                await UnRegisterPoolAsync(pool.Entity);
+            }
+        
+            logger.LogInformation("Waiting for 5 seconds before re-registering pools");
+            await Task.Delay(5000);
+            logger.LogInformation("Re-registering pools");
+        
+            foreach (var pool in pools)
+            {
+                await RegisterPoolAsync(pool.Entity, CancellationToken.None);
+            }
+        }
+        catch (Exception e)
+        {
+            throw PoolServiceException.PreUpdateTenantFailed(tenantId, e);
         }
     }
 }

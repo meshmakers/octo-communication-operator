@@ -25,4 +25,9 @@ public class PoolServiceException : Exception
     {       
         return new PoolServiceException($"Cannot deploy pool {poolName}", exception);
     }
+
+    public static Exception PreUpdateTenantFailed(string tenantId, Exception exception)
+    {
+        return new PoolServiceException($"[{tenantId}] Failed to pre-update tenant", exception);
+    }
 }

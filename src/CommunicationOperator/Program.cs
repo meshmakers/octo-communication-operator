@@ -19,7 +19,7 @@ var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile
 var logger = nLogFactory.GetCurrentClassLogger();
 
 #if DEBUG || DEBUGL
-string ip = "192.168.102.147";
+string ip = "192.168.14.188";
 ushort port = 6001;
 using CertificateGenerator generator = new CertificateGenerator(ip);
 using X509Certificate2 cert = generator.Server.CopyServerCertWithPrivateKey();
