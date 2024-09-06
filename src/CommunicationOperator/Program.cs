@@ -72,6 +72,7 @@ try
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IAdapterReconciler, AdapterReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
+    builder.Services.AddScoped<IDiagnosticsService, DiagnosticsService>();
 
     var app = builder.Build();
 
