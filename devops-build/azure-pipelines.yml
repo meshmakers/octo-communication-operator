@@ -18,6 +18,10 @@ variables:
     value: 'Octo.CommunicationController.sln'
   - name: isRelease
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+  - name: MajorVersion
+    value: '0'
+  - name: MinorVersion
+    value: '1'
 
 stages:
  - stage: Build
