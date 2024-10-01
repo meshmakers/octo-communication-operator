@@ -19,7 +19,7 @@ var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile
 var logger = nLogFactory.GetCurrentClassLogger();
 
 #if DEBUG || DEBUGL
-string ip = "192.168.14.188";
+string ip = "192.168.14.189";
 ushort port = 6001;
 using CertificateGenerator generator = new CertificateGenerator(ip);
 using X509Certificate2 cert = generator.Server.CopyServerCertWithPrivateKey();
@@ -43,19 +43,7 @@ try
     builder.Logging.ClearProviders();
     builder.Logging.SetMinimumLevel(LogLevel.Trace);
     builder.Host.UseNLog();
-
-    builder.Services.AddSingleton<IKubernetes>(_ =>
-    {
-        // Since we can run inside or outside the cluster,
-        // we need to set up a different configuration for each of the cases.
-        var config = KubernetesClientConfiguration.IsInCluster() switch
-        {
-            true => KubernetesClientConfiguration.InClusterConfig(),
-            false => KubernetesClientConfiguration.BuildConfigFromConfigFile()
-        };
-
-        return new Kubernetes(config);
-    });
+    
     builder.Services
         .AddKubernetesOperator()
         .RegisterComponents()
