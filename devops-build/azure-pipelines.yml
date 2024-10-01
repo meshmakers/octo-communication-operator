@@ -53,16 +53,12 @@ stages:
              testRunTitle: 'CI'
          - template: build-and-push-docker-image.yml
            parameters:
-             Repository: meshmakers/octo-communication-operator
-             Dockerfile: src/CommunicationOperator/DockerfileArm64v8
-             IsRelease: ${{ variables.isRelease }}
-             Architecture: 'arm64v8'
-         - template: build-and-push-docker-image.yml
-           parameters:
-             Repository: meshmakers/octo-communication-operator
+             ContainerRegistry: 'dockerhub@ianitor'
+             Repository: meshmakers/octo-communication-plug-modbus
              Dockerfile: src/CommunicationOperator/Dockerfile
              IsRelease: ${{ variables.isRelease }}
-             Architecture: 'amd64'
+             Architecture: 'linux/arm64,linux/amd64'
+             PrivateRegistry: $(DockerRegistryPrivateUri)             
          - task: PowerShell@2
            displayName: 'Create versioninfo file'
            inputs:
