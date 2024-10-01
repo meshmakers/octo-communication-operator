@@ -48,7 +48,7 @@ stages:
          - template: build-and-push-docker-image.yml
            parameters:
              ContainerRegistry: 'dockerhub@ianitor'
-             Repository: meshmakers/octo-communication-plug-modbus
+             Repository: meshmakers/octo-communication-operator
              Dockerfile: src/CommunicationOperator/Dockerfile
              IsRelease: ${{ variables.isRelease }}
              Architecture: 'linux/arm64,linux/amd64'
