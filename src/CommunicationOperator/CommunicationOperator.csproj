@@ -13,7 +13,7 @@
                       ReferenceOutputAssembly="false" />
     <PackageReference Include="KubeOps.Operator.Web" Version="9.9.9" />
     <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="3.1.177" />
-    <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.13" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.14" />
   </ItemGroup>
 
 </Project>
