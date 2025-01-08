@@ -1,5 +1,5 @@
 # Build the operator
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build
 
 ARG OCTO_PRIVATE_NUGET_SERVICE
 ARG OCTO_PRIVATE_NUGET_CERTIFICATE
@@ -13,7 +13,7 @@ COPY ./ ./
 RUN dotnet publish -c Release -o out -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE}
 
 # The runner for the application
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim as final
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim as final
 
 RUN addgroup k8s-operator && useradd -G k8s-operator operator-user
 
