@@ -63,7 +63,7 @@ public class PoolService(ILogger<PoolService> logger, IAdapterReconciler adapter
             await DeleteDeploymentAsync(entity);
 
             cancellationToken.ThrowIfCancellationRequested();
-            var onReconnectFunction = async () =>
+            var onReconnectFunction = async (bool isReconnect) =>
             {
                 logger.LogInformation("Registering pool {PoolName}", entity.Spec.PoolName);
                 var poolConfiguration = await poolHubClient.RegisterPoolOperatorAsync(entity.Spec.PoolName);
