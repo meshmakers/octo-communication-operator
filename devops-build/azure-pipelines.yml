@@ -53,11 +53,12 @@ stages:
              testRunTitle: 'CI'
          - template: build-and-push-docker-image.yml
            parameters:
-             ContainerRegistry: $(DockerRegistryPublicConnection)
-             Repository: meshmakers/octo-communication-operator
-             Dockerfile: src/CommunicationOperator/Dockerfile
              Architecture: 'linux/arm64,linux/amd64'
-             PrivateRegistry: $(DockerRegistryPrivateUri)             
+             PrivateRegistry: $(DockerRegistryPrivateUri)
+             PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
+             PrivateRegistryName: $(DockerRegistryPrivateUri)
+             Repository: meshmakers/octo-communication-operator
+             Dockerfile: src/IdentityServices/Dockerfile
          - template: handle-artifacts.yml
 
      
