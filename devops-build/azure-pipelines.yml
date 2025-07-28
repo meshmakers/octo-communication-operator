@@ -54,7 +54,6 @@ stages:
          - template: build-and-push-docker-image.yml
            parameters:
              Architecture: 'linux/arm64,linux/amd64'
-             PrivateRegistry: $(DockerRegistryPrivateUri)
              PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
              PrivateRegistryName: $(DockerRegistryPrivateUri)
              Repository: meshmakers/octo-communication-operator
