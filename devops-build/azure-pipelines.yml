@@ -57,7 +57,7 @@ stages:
              PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
              PrivateRegistryName: $(DockerRegistryPrivateUri)
              Repository: meshmakers/octo-communication-operator
-             Dockerfile: src/IdentityServices/Dockerfile
+             Dockerfile: src/CommunicationOperator/Dockerfile
          - template: handle-artifacts.yml
 
      
