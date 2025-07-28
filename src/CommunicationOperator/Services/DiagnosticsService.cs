@@ -16,6 +16,11 @@ public class DiagnosticsService : IDiagnosticsService
         var minLevel = LogLevel.FromOrdinal((int)minLogLevel);
         var maxLevel = LogLevel.FromOrdinal((int)maxLogLevel);
 
+        if (LogManager.Configuration == null)
+        {
+            throw new InvalidOperationException("NLog configuration is not initialized.");
+        }
+
         var loggingRule = LogManager.Configuration.LoggingRules.SingleOrDefault(r => r.LoggerNamePattern == loggerName);
         
         // If the logger is disabled, remove the logging rule
@@ -33,6 +38,10 @@ public class DiagnosticsService : IDiagnosticsService
         if (loggingRule == null)
         {
             var target = LogManager.Configuration.FindTargetByName("coloredConsole");
+            if (target == null)
+            {
+                throw new InvalidOperationException("Target 'coloredConsole' not found in NLog configuration.");
+            }
             loggingRule = new LoggingRule(loggerName, target);
             LogManager.Configuration.LoggingRules.Insert(0, loggingRule);
         }
