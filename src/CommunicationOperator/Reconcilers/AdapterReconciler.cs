@@ -250,7 +250,7 @@ public class AdapterReconciler : IAdapterReconciler
         Dictionary<string, string> deploymentLabels)
     {
         var deploymentName =
-            $"{poolDescriptor.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.Key.TypeId.ToLower()}-{adapterDto.AdapterRtEntityId.RtId.ToString()}";
+            $"{poolDescriptor.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.ElementId.Name.ToLower()}-{adapterDto.AdapterRtEntityId.RtId.ToString()}";
 
         _logger.CreatingDeployment(deploymentName, poolDescriptor.PoolName, poolDescriptor.Namespace);
 
@@ -403,7 +403,7 @@ public class AdapterReconciler : IAdapterReconciler
         Dictionary<string, string> serviceLabels)
     {
         var serviceName =
-            $"{k8Pool.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.Key.TypeId.ToLower()}-{adapterDto.AdapterRtEntityId.RtId}";
+            $"{k8Pool.TenantId}-{adapterDto.AdapterRtEntityId.CkTypeId.ElementId.Name.ToLower()}-{adapterDto.AdapterRtEntityId.RtId}";
 
         _logger.CreatingService(serviceName, k8Pool.PoolName, k8Pool.Namespace);
 

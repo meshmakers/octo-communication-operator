@@ -9,11 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="KubeOps.Generator" Version="9.9.9" OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
-    <PackageReference Include="KubeOps.Operator.Web" Version="9.9.9" />
+    <PackageReference Include="KubeOps.Generator" Version="9.11.7" OutputItemType="Analyzer" ReferenceOutputAssembly="false">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="KubeOps.Operator.Web" Version="9.11.7" />
     <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="$(OctoVersion)" />
-    <PackageReference Include="NLog.Web.AspNetCore" Version="5.4.0" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="6.0.5" />
   </ItemGroup>
 
 </Project>
