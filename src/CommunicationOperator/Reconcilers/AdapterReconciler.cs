@@ -330,6 +330,11 @@ public class AdapterReconciler : IAdapterReconciler
         });
         collection.Add(new()
         {
+            Name = "OCTO_ADAPTER__INSTANCEPREFIX",
+            Value = poolDescriptor.InstancePrefix
+        });
+        collection.Add(new()
+        {
             Name = "OCTO_ADAPTER__IGNORECERTIFICATEVALIDATION",
             Value = poolDescriptor.IgnoreCertificateValidation.ToString()
         });
