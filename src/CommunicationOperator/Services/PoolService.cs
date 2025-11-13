@@ -59,6 +59,8 @@ public class PoolService(
                     ? "/"
                     : entity.Spec.BrokerVirtualHost,
                 BrokerPort = entity.Spec.BrokerPort,
+                InstancePrefix = entity.Spec.InstancePrefix,
+                IgnoreCertificateValidation = entity.Spec.IgnoreCertificateValidation
             }, poolHubClient, entity);
 
             _pools[entity.Spec.PoolName] = pool;
