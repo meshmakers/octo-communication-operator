@@ -291,7 +291,7 @@ public class AdapterReconciler : IAdapterReconciler
                                 Env = CreateEnvironment(poolDescriptor, adapterDto),
                                 Ports = new Collection<V1ContainerPort>
                                 {
-                                    new(containerPort: 4200, name: "http-orion")
+                                    new() { ContainerPort = 4200, Name = "http-orion"}
                                 },
                                 Resources = new V1ResourceRequirements
                                 {
