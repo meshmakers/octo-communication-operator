@@ -14,9 +14,9 @@ COPY ./ ./
 RUN dotnet publish -c Release -o out -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} -p:OctoVersion=${OCTO_VERSION}
 
 # The runner for the application
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble as final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS final
 
-RUN addgroup k8s-operator && useradd -G k8s-operator operator-user
+RUN groupadd -r k8s-operator && useradd -r -g k8s-operator operator-user
 
 WORKDIR /operator
 COPY --from=build /operator/out/ ./
