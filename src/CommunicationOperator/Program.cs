@@ -4,6 +4,7 @@ using KubeOps.KubernetesClient;
 using KubeOps.Operator;
 using KubeOps.Operator.Web.Builder;
 using KubeOps.Operator.Web.Certificates;
+using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -57,9 +58,26 @@ try
     builder.Services
         .AddControllers();
 
+    builder.Services.Configure<OperatorOptions>(builder.Configuration.GetSection("Operator"));
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IAdapterReconciler, AdapterReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
+    builder.Services.AddSingleton<IKubernetes>(_ =>
+    {
+        KubernetesClientConfiguration config;
+        try
+        {
+            config = KubernetesClientConfiguration.InClusterConfig();
+        }
+        catch
+        {
+            // Fall back to kubeconfig for local development
+            config = KubernetesClientConfiguration.BuildConfigFromConfigFile();
+        }
+        return new Kubernetes(config);
+    });
+    builder.Services.AddSingleton<ICommunicationPoolManager, CommunicationPoolManager>();
+    builder.Services.AddHostedService<OperatorHubService>();
     builder.Services.AddScoped<IDiagnosticsService, DiagnosticsService>();
 
     var app = builder.Build();

@@ -1,0 +1,131 @@
+using Meshmakers.Octo.Communication.Contracts.Hubs;
+using Meshmakers.Octo.Communication.Operator.Options;
+using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
+using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
+using Microsoft.Extensions.Options;
+
+namespace Meshmakers.Octo.Communication.Operator.Services;
+
+/// <summary>
+/// Background service that maintains a SignalR management connection to the Communication Controller.
+/// Receives tenant lifecycle events and creates/deletes CommunicationPool CRs accordingly.
+/// Only active when AutoManagePools is enabled.
+/// </summary>
+public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
+{
+    private readonly ILogger<OperatorHubService> _logger;
+    private readonly OperatorOptions _options;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ICommunicationPoolManager _poolManager;
+
+    public OperatorHubService(
+        ILogger<OperatorHubService> logger,
+        IOptions<OperatorOptions> options,
+        ILoggerFactory loggerFactory,
+        ICommunicationPoolManager poolManager)
+    {
+        _logger = logger;
+        _options = options.Value;
+        _loggerFactory = loggerFactory;
+        _poolManager = poolManager;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!_options.AutoManagePools)
+        {
+            _logger.LogInformation("AutoManagePools is disabled, operator hub service will not start");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.CommunicationControllerUri))
+        {
+            _logger.LogError("CommunicationControllerUri is required when AutoManagePools is enabled");
+            return;
+        }
+
+        _logger.LogInformation(
+            "Starting operator hub service, connecting to controller at {ControllerUri}",
+            _options.CommunicationControllerUri);
+
+        var clientOptions = new OperatorHubClientOptions
+        {
+            EndpointUri = _options.CommunicationControllerUri
+        };
+
+        var client = new OperatorHubClient(clientOptions,
+            _loggerFactory.CreateLogger<OperatorHubClient>(),
+            new ServiceClientAccessToken(), this);
+
+        var onReconnect = async (bool isReconnect) =>
+        {
+            _logger.LogInformation("Registering operator with controller (reconnect: {IsReconnect})", isReconnect);
+            var existingTenants = await client.RegisterOperatorAsync();
+            _logger.LogInformation("Registered with controller, {TenantCount} existing tenants",
+                existingTenants.Count());
+
+            foreach (var tenantId in existingTenants)
+            {
+                await _poolManager.CreateCommunicationPoolAsync(tenantId);
+            }
+        };
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await client.StartAsync(onReconnect, stoppingToken);
+                client.EnableReconnect(onReconnect);
+
+                _logger.LogInformation("Operator hub connected, waiting for tenant events");
+
+                // Keep running until cancelled
+                await Task.Delay(Timeout.Infinite, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Operator hub connection failed, retrying in 30 seconds");
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            }
+        }
+
+        try
+        {
+            await client.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error stopping operator hub client");
+        }
+    }
+
+    public async Task TenantCreatedAsync(string tenantId)
+    {
+        _logger.LogInformation("Tenant created event received: {TenantId}", tenantId);
+        try
+        {
+            await _poolManager.CreateCommunicationPoolAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create CommunicationPool CR for tenant {TenantId}", tenantId);
+        }
+    }
+
+    public async Task TenantDeletedAsync(string tenantId)
+    {
+        _logger.LogInformation("Tenant deleted event received: {TenantId}", tenantId);
+        try
+        {
+            await _poolManager.DeleteCommunicationPoolAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete CommunicationPool CR for tenant {TenantId}", tenantId);
+        }
+    }
+}

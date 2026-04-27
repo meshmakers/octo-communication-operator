@@ -5,6 +5,8 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Operator.Common;
 using Meshmakers.Octo.Communication.Operator.Entities;
 using Meshmakers.Octo.Communication.Operator.Models;
+using Meshmakers.Octo.Communication.Operator.Options;
+using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 
@@ -14,17 +16,21 @@ public class AdapterReconciler : IAdapterReconciler
 
     private readonly IKubernetesClient _kubernetesClient;
     private readonly ILogger _logger;
+    private readonly OperatorOptions _operatorOptions;
 
     /// <summary>
     /// Initializes a new instance of <see cref="AdapterReconciler"/>
     /// </summary>
     /// <param name="kubernetesClient">Kubernetes client to use</param>
     /// <param name="logger">Logger to write log message to</param>
+    /// <param name="operatorOptions">Operator configuration options</param>
     public AdapterReconciler(IKubernetesClient kubernetesClient,
-        ILogger<AdapterReconciler> logger)
+        ILogger<AdapterReconciler> logger,
+        IOptions<OperatorOptions> operatorOptions)
     {
         _logger = logger;
         _kubernetesClient = kubernetesClient;
+        _operatorOptions = operatorOptions.Value;
     }
 
     /// <summary>
@@ -281,6 +287,7 @@ public class AdapterReconciler : IAdapterReconciler
                     },
                     Spec = new V1PodSpec
                     {
+                        ImagePullSecrets = GetImagePullSecrets(),
                         Containers = new Collection<V1Container>
                         {
                             new()
@@ -438,5 +445,18 @@ public class AdapterReconciler : IAdapterReconciler
         };
 
         await _kubernetesClient.CreateAsync(service);
+    }
+
+    private IList<V1LocalObjectReference>? GetImagePullSecrets()
+    {
+        if (string.IsNullOrWhiteSpace(_operatorOptions.ImagePullSecretName))
+        {
+            return null;
+        }
+
+        return new List<V1LocalObjectReference>
+        {
+            new() { Name = _operatorOptions.ImagePullSecretName }
+        };
     }
 }

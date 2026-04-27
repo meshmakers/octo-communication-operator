@@ -1,5 +1,26 @@
 # OctoMesh Communication Operator
 
+The Communication Operator is a Kubernetes operator that manages mesh adapter deployments. It watches `CommunicationPool` custom resources and automatically deploys/undeploys adapter pods based on the configuration received from the Communication Controller via SignalR.
+
+The operator supports both **edge deployment** (running on remote edge clusters connecting to a central controller) and **central deployment** (running alongside the Communication Controller in the same cluster, where CRs are auto-created on tenant creation).
+
+## Configuration
+
+The operator can be configured via environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPERATOR__IMAGEPULLSECRETNAME` | Name of image pull secret for adapter pods | _(none)_ |
+| `OPERATOR__AUTOMANAGEPOOLS` | Auto-create CommunicationPool CRs on tenant creation | `false` |
+| `OPERATOR__OPERATORNAMESPACE` | Namespace for auto-created CRs | `octo-mesh` |
+| `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
+| `OPERATOR__DEFAULTPOOLNAME` | Pool name for auto-created CRs | `default` |
+| `OPERATOR__BROKERHOST` | RabbitMQ host for adapter pods | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
+| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(none)_ |
+| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(none)_ |
+
+For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
 
 ## Getting started as developer
 
