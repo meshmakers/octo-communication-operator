@@ -52,8 +52,10 @@ Install-OctoInfrastructure
 # 'octo' pool namespace
 Install-OctoKubernetes
 
-# Build everything (operator + controller + identity + ...) in Release
-Invoke-BuildAll -configuration Release
+# Build everything (operator + controller + identity + ...). DebugL matches
+# the standard local-dev convention (Octo packages come from ../nuget/, can
+# step-debug across repos). Use Release only when you want to mirror CI.
+Invoke-BuildAll -configuration DebugL
 ```
 
 `Install-OctoKubernetes` prints the active kubectl context at the end. If it
@@ -70,8 +72,12 @@ before continuing.
 In one terminal:
 
 ```powershell
-Start-Octo
+Start-Octo -configuration DebugL
 ```
+
+(`Start-Octo` defaults to Release; pass `-configuration DebugL` if you built
+that way. The configurations must match — both scripts read binaries from
+`bin/<configuration>/net10.0/`.)
 
 Wait until each backend service prints its "Now listening on …" line and
 status is `Running` for every job.
@@ -80,7 +86,7 @@ In a second terminal:
 
 ```powershell
 cd $rootPath/octo-communication-operator
-./start-operator.ps1
+./start-operator.ps1 -configuration DebugL
 ```
 
 The operator binds to `http://localhost:5022` and `https://localhost:5023`,
