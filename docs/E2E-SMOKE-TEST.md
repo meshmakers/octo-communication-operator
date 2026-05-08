@@ -108,16 +108,20 @@ If this line never appears, the Controller is not reachable — see
 ### 1. Authenticate
 
 ```powershell
-Invoke-OctoCliLoginLocal -tenantId admin
-octo-cli -c LogIn -i
+Invoke-OctoCliLoginLocal -tenantId OctoSystem
+# Browser opens, complete the device-code flow.
+octo-cli -c AuthStatus
+# Expected: a valid access token with a future expiry.
 ```
 
-Follow the device-code flow in the browser. After the CLI confirms the
-token, verify with:
+### 1a. Make sure the test tenant exists
 
 ```powershell
-octo-cli -c AuthStatus
+octo-cli -c Create -tid e2etest -db e2etest
 ```
+
+Idempotent: if the tenant already exists, the command reports "already
+exists" and is safe to skip.
 
 ### 2. Trigger CommunicationPool creation
 
