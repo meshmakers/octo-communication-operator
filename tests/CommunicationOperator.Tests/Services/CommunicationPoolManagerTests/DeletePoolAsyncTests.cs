@@ -2,14 +2,14 @@ using NSubstitute;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Services.CommunicationPoolManagerTests;
 
-public class DeleteCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBase
+public class DeletePoolAsyncTests : CommunicationPoolManagerTestsBase
 {
     [Test]
-    public async Task DeleteCommunicationPoolAsync_CrDoesNotExist_NothingDeleted()
+    public async Task DeletePoolAsync_CrDoesNotExist_NothingDeleted()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
 
-        await Manager.DeleteCommunicationPoolAsync(TenantId);
+        await Manager.DeletePoolAsync(TenantId, PoolName);
 
         await Gateway.DidNotReceive().DeleteCommunicationPoolAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -18,24 +18,24 @@ public class DeleteCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBa
     }
 
     [Test]
-    public async Task DeleteCommunicationPoolAsync_CrAndSecretExist_BothDeleted()
+    public async Task DeletePoolAsync_CrAndSecretExist_BothDeleted()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(true);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(true);
 
-        await Manager.DeleteCommunicationPoolAsync(TenantId);
+        await Manager.DeletePoolAsync(TenantId, PoolName);
 
         await Gateway.Received(1).DeleteCommunicationPoolAsync(PoolNamespace, ExpectedCrName);
         await Gateway.Received(1).DeleteSecretAsync(PoolNamespace, ExpectedSecretName);
     }
 
     [Test]
-    public async Task DeleteCommunicationPoolAsync_SecretMissing_OnlyCrDeleted()
+    public async Task DeletePoolAsync_SecretMissing_OnlyCrDeleted()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(true);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.DeleteCommunicationPoolAsync(TenantId);
+        await Manager.DeletePoolAsync(TenantId, PoolName);
 
         await Gateway.Received(1).DeleteCommunicationPoolAsync(PoolNamespace, ExpectedCrName);
         await Gateway.DidNotReceive().DeleteSecretAsync(

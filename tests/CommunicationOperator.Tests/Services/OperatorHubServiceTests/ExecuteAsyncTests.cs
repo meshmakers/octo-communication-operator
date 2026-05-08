@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Services;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
@@ -52,21 +53,25 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     }
 
     [Test]
-    public async Task ExecuteAsync_OnConnect_RegistersOperatorAndCreatesPoolForEachTenant()
+    public async Task ExecuteAsync_OnConnect_RegistersOperatorAndCreatesEachDeployedPool()
     {
         OperatorOptions.AutoManagePools = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
-        setup.Client.RegisterOperatorAsync().Returns(new[] { "tenant-a", "tenant-b" });
+        setup.Client.RegisterOperatorAsync().Returns(new[]
+        {
+            new DeployedPoolDto { TenantId = "tenant-a", PoolName = "default" },
+            new DeployedPoolDto { TenantId = "tenant-b", PoolName = "secondary" }
+        });
 
         var hosted = (IHostedService)Service;
         await hosted.StartAsync(CancellationToken.None);
         await setup.ConnectedAndReconnectEnabled.Task;
 
         await setup.Client.Received(1).RegisterOperatorAsync();
-        await PoolManager.Received(1).CreateCommunicationPoolAsync("tenant-a");
-        await PoolManager.Received(1).CreateCommunicationPoolAsync("tenant-b");
+        await PoolManager.Received(1).CreatePoolAsync("tenant-a", "default");
+        await PoolManager.Received(1).CreatePoolAsync("tenant-b", "secondary");
 
         await hosted.StopAsync(CancellationToken.None);
     }
@@ -95,8 +100,8 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         client.StartAsync(Arg.Any<Func<bool, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async ci => await ci.Arg<Func<bool, Task>>()(false));
 
-        // RegisterOperatorAsync default is null; configure to empty so .Count() doesn't NRE.
-        client.RegisterOperatorAsync().Returns(Array.Empty<string>());
+        // RegisterOperatorAsync default is null; configure to empty so the foreach doesn't NRE.
+        client.RegisterOperatorAsync().Returns(Array.Empty<DeployedPoolDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

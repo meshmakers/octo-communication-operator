@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
@@ -7,7 +8,7 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 
 /// <summary>
 /// Background service that maintains a SignalR management connection to the Communication Controller.
-/// Receives tenant lifecycle events and creates/deletes CommunicationPool CRs accordingly.
+/// Receives Cloud pool deploy / undeploy events and creates/deletes CommunicationPool CRs accordingly.
 /// Only active when AutoManagePools is enabled.
 /// </summary>
 public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
@@ -57,13 +58,13 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
         var onReconnect = async (bool isReconnect) =>
         {
             _logger.LogInformation("Registering operator with controller (reconnect: {IsReconnect})", isReconnect);
-            var existingTenants = await client.RegisterOperatorAsync();
-            _logger.LogInformation("Registered with controller, {TenantCount} existing tenants",
-                existingTenants.Count());
+            var deployedPools = (await client.RegisterOperatorAsync()).ToArray();
+            _logger.LogInformation("Registered with controller, {PoolCount} deployed Cloud pools",
+                deployedPools.Length);
 
-            foreach (var tenantId in existingTenants)
+            foreach (var pool in deployedPools)
             {
-                await _poolManager.CreateCommunicationPoolAsync(tenantId);
+                await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolName);
             }
         };
 
@@ -74,7 +75,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
                 await client.StartAsync(onReconnect, stoppingToken);
                 client.EnableReconnect(onReconnect);
 
-                _logger.LogInformation("Operator hub connected, waiting for tenant events");
+                _logger.LogInformation("Operator hub connected, waiting for pool events");
 
                 // Keep running until cancelled
                 await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -100,29 +101,35 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
         }
     }
 
-    public async Task TenantCreatedAsync(string tenantId)
+    public async Task PoolDeployedAsync(DeployedPoolDto pool)
     {
-        _logger.LogInformation("Tenant created event received: {TenantId}", tenantId);
+        _logger.LogInformation("Pool deployed event received: tenant '{TenantId}', pool '{PoolName}'",
+            pool.TenantId, pool.PoolName);
         try
         {
-            await _poolManager.CreateCommunicationPoolAsync(tenantId);
+            await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create CommunicationPool CR for tenant {TenantId}", tenantId);
+            _logger.LogError(ex,
+                "Failed to create CommunicationPool CR for tenant '{TenantId}', pool '{PoolName}'",
+                pool.TenantId, pool.PoolName);
         }
     }
 
-    public async Task TenantDeletedAsync(string tenantId)
+    public async Task PoolUndeployedAsync(string tenantId, string poolName)
     {
-        _logger.LogInformation("Tenant deleted event received: {TenantId}", tenantId);
+        _logger.LogInformation("Pool undeployed event received: tenant '{TenantId}', pool '{PoolName}'",
+            tenantId, poolName);
         try
         {
-            await _poolManager.DeleteCommunicationPoolAsync(tenantId);
+            await _poolManager.DeletePoolAsync(tenantId, poolName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete CommunicationPool CR for tenant {TenantId}", tenantId);
+            _logger.LogError(ex,
+                "Failed to delete CommunicationPool CR for tenant '{TenantId}', pool '{PoolName}'",
+                tenantId, poolName);
         }
     }
 }

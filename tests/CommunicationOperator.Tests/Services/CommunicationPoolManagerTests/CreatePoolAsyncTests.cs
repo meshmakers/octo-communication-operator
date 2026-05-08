@@ -3,14 +3,14 @@ using NSubstitute;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Services.CommunicationPoolManagerTests;
 
-public class CreateCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBase
+public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
 {
     [Test]
-    public async Task CreateCommunicationPoolAsync_CrAlreadyExists_NoCallsToCreate()
+    public async Task CreatePoolAsync_CrAlreadyExists_NoCallsToCreate()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(true);
 
-        await Manager.CreateCommunicationPoolAsync(TenantId);
+        await Manager.CreatePoolAsync(TenantId, PoolName);
 
         await Gateway.DidNotReceive().CreateCommunicationPoolAsync(
             Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
@@ -19,24 +19,24 @@ public class CreateCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBa
     }
 
     [Test]
-    public async Task CreateCommunicationPoolAsync_CrAndSecretMissing_BothCreated()
+    public async Task CreatePoolAsync_CrAndSecretMissing_BothCreated()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.CreateCommunicationPoolAsync(TenantId);
+        await Manager.CreatePoolAsync(TenantId, PoolName);
 
         await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Any<V1Secret>());
         await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
     }
 
     [Test]
-    public async Task CreateCommunicationPoolAsync_SecretExists_OnlyCrCreated()
+    public async Task CreatePoolAsync_SecretExists_OnlyCrCreated()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(true);
 
-        await Manager.CreateCommunicationPoolAsync(TenantId);
+        await Manager.CreatePoolAsync(TenantId, PoolName);
 
         await Gateway.DidNotReceive().CreateSecretAsync(
             Arg.Any<string>(), Arg.Any<V1Secret>(), Arg.Any<CancellationToken>());
@@ -44,12 +44,12 @@ public class CreateCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBa
     }
 
     [Test]
-    public async Task CreateCommunicationPoolAsync_BrokerSecretCarriesCredentialsAndLabels()
+    public async Task CreatePoolAsync_BrokerSecretCarriesCredentialsAndLabels()
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.CreateCommunicationPoolAsync(TenantId);
+        await Manager.CreatePoolAsync(TenantId, PoolName);
 
         await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Is<V1Secret>(s =>
             s.Metadata.Name == ExpectedSecretName &&
@@ -58,18 +58,19 @@ public class CreateCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBa
             s.StringData["brokerusername"] == "octo" &&
             s.StringData["brokerpassword"] == "secret" &&
             s.Metadata.Labels["octo-mesh.meshmakers.io/tenant"] == TenantId &&
+            s.Metadata.Labels["octo-mesh.meshmakers.io/pool"] == PoolName &&
             s.Metadata.Labels["octo-mesh.meshmakers.io/managed-by"] == "communication-operator"));
     }
 
     [Test]
-    public async Task CreateCommunicationPoolAsync_NullBrokerCredentials_StoredAsEmptyStrings()
+    public async Task CreatePoolAsync_NullBrokerCredentials_StoredAsEmptyStrings()
     {
         OperatorOptions.BrokerUser = null;
         OperatorOptions.BrokerPassword = null;
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.CreateCommunicationPoolAsync(TenantId);
+        await Manager.CreatePoolAsync(TenantId, PoolName);
 
         await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Is<V1Secret>(s =>
             s.StringData["brokerusername"] == string.Empty &&
@@ -77,14 +78,14 @@ public class CreateCommunicationPoolAsyncTests : CommunicationPoolManagerTestsBa
     }
 
     [Test]
-    public async Task CreateCommunicationPoolAsync_CrIsLowercased()
+    public async Task CreatePoolAsync_NameComponentsAreLowercased()
     {
-        Gateway.CommunicationPoolExistsAsync(PoolNamespace, "mixedcase-default").Returns(false);
-        Gateway.SecretExistsAsync(PoolNamespace, "mixedcase-default-octo-mesh-connection").Returns(false);
+        Gateway.CommunicationPoolExistsAsync(PoolNamespace, "mixedcase-mypool").Returns(false);
+        Gateway.SecretExistsAsync(PoolNamespace, "mixedcase-mypool-octo-mesh-connection").Returns(false);
 
-        await Manager.CreateCommunicationPoolAsync("MixedCase");
+        await Manager.CreatePoolAsync("MixedCase", "MyPool");
 
-        await Gateway.Received(1).CommunicationPoolExistsAsync(PoolNamespace, "mixedcase-default");
+        await Gateway.Received(1).CommunicationPoolExistsAsync(PoolNamespace, "mixedcase-mypool");
         await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
     }
 }

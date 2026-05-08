@@ -31,11 +31,6 @@ public class OperatorOptions
     public string CommunicationControllerUri { get; set; } = string.Empty;
 
     /// <summary>
-    /// Default pool name for auto-created CommunicationPool CRs.
-    /// </summary>
-    public string DefaultPoolName { get; set; } = "default";
-
-    /// <summary>
     /// Whether adapter pods should ignore certificate validation.
     /// </summary>
     public bool AdapterIgnoreCertificateValidation { get; set; }

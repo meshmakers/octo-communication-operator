@@ -21,9 +21,9 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         _gateway = gateway;
     }
 
-    public async Task CreateCommunicationPoolAsync(string tenantId)
+    public async Task CreatePoolAsync(string tenantId, string poolName)
     {
-        var crName = GetCrName(tenantId);
+        var crName = GetCrName(tenantId, poolName);
         var ns = _options.PoolNamespace;
 
         if (await _gateway.CommunicationPoolExistsAsync(ns, crName))
@@ -34,19 +34,19 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        await CreateBrokerSecretIfMissingAsync(tenantId, ns);
+        await CreateBrokerSecretIfMissingAsync(tenantId, poolName, ns);
 
-        var resource = BuildCommunicationPoolResource(tenantId, crName, ns);
+        var resource = BuildCommunicationPoolResource(tenantId, poolName, crName, ns);
         _logger.LogInformation(
-            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}'",
-            crName, ns, tenantId);
+            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}'",
+            crName, ns, tenantId, poolName);
         await _gateway.CreateCommunicationPoolAsync(ns, resource);
         _logger.LogInformation("CommunicationPool CR '{CrName}' created successfully", crName);
     }
 
-    public async Task DeleteCommunicationPoolAsync(string tenantId)
+    public async Task DeletePoolAsync(string tenantId, string poolName)
     {
-        var crName = GetCrName(tenantId);
+        var crName = GetCrName(tenantId, poolName);
         var ns = _options.PoolNamespace;
 
         if (!await _gateway.CommunicationPoolExistsAsync(ns, crName))
@@ -58,17 +58,17 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         }
 
         _logger.LogInformation(
-            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}'",
-            crName, ns, tenantId);
+            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}'",
+            crName, ns, tenantId, poolName);
         await _gateway.DeleteCommunicationPoolAsync(ns, crName);
 
-        await DeleteBrokerSecretAsync(tenantId, ns);
+        await DeleteBrokerSecretAsync(tenantId, poolName, ns);
         _logger.LogInformation("CommunicationPool CR '{CrName}' deleted successfully", crName);
     }
 
-    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string ns)
+    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string poolName, string ns)
     {
-        var secretName = GetSecretName(tenantId);
+        var secretName = GetSecretName(tenantId, poolName);
         if (await _gateway.SecretExistsAsync(ns, secretName))
         {
             _logger.LogInformation(
@@ -76,15 +76,15 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        var secret = BuildBrokerSecret(secretName, ns, tenantId);
+        var secret = BuildBrokerSecret(secretName, ns, tenantId, poolName);
         _logger.LogInformation(
             "Creating broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
         await _gateway.CreateSecretAsync(ns, secret);
     }
 
-    private async Task DeleteBrokerSecretAsync(string tenantId, string ns)
+    private async Task DeleteBrokerSecretAsync(string tenantId, string poolName, string ns)
     {
-        var secretName = GetSecretName(tenantId);
+        var secretName = GetSecretName(tenantId, poolName);
         if (!await _gateway.SecretExistsAsync(ns, secretName))
         {
             _logger.LogInformation(
@@ -96,7 +96,8 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         await _gateway.DeleteSecretAsync(ns, secretName);
     }
 
-    private CommunicationPoolResource BuildCommunicationPoolResource(string tenantId, string crName, string ns) =>
+    private CommunicationPoolResource BuildCommunicationPoolResource(
+        string tenantId, string poolName, string crName, string ns) =>
         new()
         {
             Metadata = new CommunicationPoolMetadata
@@ -106,13 +107,14 @@ public class CommunicationPoolManager : ICommunicationPoolManager
                 Labels = new Dictionary<string, string>
                 {
                     ["octo-mesh.meshmakers.io/tenant"] = tenantId,
+                    ["octo-mesh.meshmakers.io/pool"] = poolName,
                     ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
                 }
             },
             Spec = new CommunicationPoolSpec
             {
                 TenantId = tenantId,
-                PoolName = _options.DefaultPoolName,
+                PoolName = poolName,
                 CommunicationControllerUri = _options.CommunicationControllerUri,
                 InstancePrefix = _options.InstancePrefix ?? string.Empty,
                 IgnoreCertificateValidation = _options.AdapterIgnoreCertificateValidation,
@@ -122,7 +124,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             }
         };
 
-    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId) =>
+    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId, string poolName) =>
         new()
         {
             Metadata = new V1ObjectMeta
@@ -132,6 +134,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
                 Labels = new Dictionary<string, string>
                 {
                     ["octo-mesh.meshmakers.io/tenant"] = tenantId,
+                    ["octo-mesh.meshmakers.io/pool"] = poolName,
                     ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
                 }
             },
@@ -143,11 +146,11 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             }
         };
 
-    private string GetCrName(string tenantId) =>
-        $"{tenantId}-{_options.DefaultPoolName}".ToLowerInvariant();
+    private static string GetCrName(string tenantId, string poolName) =>
+        $"{tenantId}-{poolName}".ToLowerInvariant();
 
-    private string GetSecretName(string tenantId) =>
-        $"{tenantId}-{_options.DefaultPoolName}-octo-mesh-connection".ToLowerInvariant();
+    private static string GetSecretName(string tenantId, string poolName) =>
+        $"{tenantId}-{poolName}-octo-mesh-connection".ToLowerInvariant();
 }
 
 internal class CommunicationPoolResource
