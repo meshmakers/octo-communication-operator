@@ -105,7 +105,7 @@ If this line never appears, the Controller is not reachable — see
 
 ## Test procedure
 
-### 1. Authenticate
+### 1. Authenticate as OctoSystem admin
 
 ```powershell
 Invoke-OctoCliLoginLocal -tenantId OctoSystem
@@ -120,14 +120,30 @@ octo-cli -c AuthStatus
 octo-cli -c Create -tid e2etest -db e2etest
 ```
 
-Idempotent: if the tenant already exists, the command reports "already
-exists" and is safe to skip.
+Without `--no-provision`, the OctoSystem user that just authenticated is
+auto-provisioned as admin in the new tenant. If the tenant already exists,
+the command reports "already exists" and is safe to skip.
+
+### 1b. Switch CLI context to the test tenant
+
+`EnableCommunication` operates on the CLI's current tenant context, so we
+re-login with `e2etest` as the active tenant. The same identity (now an
+admin in `e2etest` after step 1a) is reused.
+
+```powershell
+Invoke-OctoCliLoginLocal -tenantId e2etest
+octo-cli -c AuthStatus
+# Expected tenant: e2etest
+```
 
 ### 2. Trigger CommunicationPool creation
 
 ```powershell
-octo-cli -c EnableCommunication -tid e2etest
+octo-cli -c EnableCommunication
 ```
+
+The tenant is taken from the CLI context set in step 1b; no `-tid` flag
+needed.
 
 The operator's log should print, within a second or two:
 
@@ -181,8 +197,10 @@ spec:
 ### 4. Trigger CommunicationPool deletion
 
 ```powershell
-octo-cli -c DisableCommunication -tid e2etest
+octo-cli -c DisableCommunication
 ```
+
+Same context rule as enable: tenant comes from the CLI's `e2etest` context.
 
 The operator's log should print:
 
