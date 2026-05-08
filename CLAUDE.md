@@ -70,7 +70,7 @@ Key options:
 |--------|---------|
 | `AutoManagePools` | Enables `OperatorHubService` (central mode) |
 | `CommunicationControllerUri` | SignalR endpoint of the Controller (required when `AutoManagePools=true`) |
-| `OperatorNamespace` | Namespace where auto-created `CommunicationPool` CRs and secrets live |
+| `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs, per-tenant broker secrets, and adapter Deployments/Services live (default `octo`) |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |
 | `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter pods |
 | `BrokerUser`, `BrokerPassword` | Credentials baked into `<tenantId>-<poolName>-octo-mesh-connection` secret |

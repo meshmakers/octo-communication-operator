@@ -18,9 +18,11 @@ public class OperatorOptions
     public bool AutoManagePools { get; set; }
 
     /// <summary>
-    /// Kubernetes namespace where CommunicationPool CRs are created.
+    /// Kubernetes namespace into which auto-created CommunicationPool CRs,
+    /// per-tenant broker secrets, and adapter Deployments/Services are placed.
+    /// All artefacts of a managed pool live in this namespace.
     /// </summary>
-    public string OperatorNamespace { get; set; } = "octo-mesh";
+    public string PoolNamespace { get; set; } = "octo";
 
     /// <summary>
     /// Cluster-internal URI of the communication controller service,

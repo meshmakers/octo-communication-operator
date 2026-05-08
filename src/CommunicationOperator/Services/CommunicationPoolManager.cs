@@ -32,7 +32,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
     public async Task CreateCommunicationPoolAsync(string tenantId)
     {
         var crName = GetCrName(tenantId);
-        var ns = _options.OperatorNamespace;
+        var ns = _options.PoolNamespace;
 
         if (await CommunicationPoolExistsAsync(crName, ns))
         {
@@ -82,7 +82,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
     public async Task DeleteCommunicationPoolAsync(string tenantId)
     {
         var crName = GetCrName(tenantId);
-        var ns = _options.OperatorNamespace;
+        var ns = _options.PoolNamespace;
 
         if (!await CommunicationPoolExistsAsync(crName, ns))
         {

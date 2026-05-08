@@ -12,13 +12,16 @@ The operator can be configured via environment variables:
 |----------|-------------|---------|
 | `OPERATOR__IMAGEPULLSECRETNAME` | Name of image pull secret for adapter pods | _(none)_ |
 | `OPERATOR__AUTOMANAGEPOOLS` | Auto-create CommunicationPool CRs on tenant creation | `false` |
-| `OPERATOR__OPERATORNAMESPACE` | Namespace for auto-created CRs | `octo-mesh` |
+| `OPERATOR__POOLNAMESPACE` | Namespace where auto-created CRs, broker secrets and adapter Deployments/Services live | `octo` |
 | `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
 | `OPERATOR__DEFAULTPOOLNAME` | Pool name for auto-created CRs | `default` |
+| `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to adapter pods | _(none)_ |
+| `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Adapter pods skip TLS validation when connecting to controller (dev only) | `false` |
 | `OPERATOR__BROKERHOST` | RabbitMQ host for adapter pods | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERVIRTUALHOST` | RabbitMQ virtual host | `/` |
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
-| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(none)_ |
-| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(none)_ |
+| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
 
 For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
 
