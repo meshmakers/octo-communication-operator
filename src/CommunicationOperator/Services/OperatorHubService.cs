@@ -1,6 +1,5 @@
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Options;
-using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
 using Microsoft.Extensions.Options;
 
@@ -15,18 +14,18 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
 {
     private readonly ILogger<OperatorHubService> _logger;
     private readonly OperatorOptions _options;
-    private readonly ILoggerFactory _loggerFactory;
+    private readonly IOperatorHubClientFactory _clientFactory;
     private readonly ICommunicationPoolManager _poolManager;
 
     public OperatorHubService(
         ILogger<OperatorHubService> logger,
         IOptions<OperatorOptions> options,
-        ILoggerFactory loggerFactory,
+        IOperatorHubClientFactory clientFactory,
         ICommunicationPoolManager poolManager)
     {
         _logger = logger;
         _options = options.Value;
-        _loggerFactory = loggerFactory;
+        _clientFactory = clientFactory;
         _poolManager = poolManager;
     }
 
@@ -53,9 +52,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
             EndpointUri = _options.CommunicationControllerUri
         };
 
-        var client = new OperatorHubClient(clientOptions,
-            _loggerFactory.CreateLogger<OperatorHubClient>(),
-            new ServiceClientAccessToken(), this);
+        var client = _clientFactory.Create(clientOptions, this);
 
         var onReconnect = async (bool isReconnect) =>
         {

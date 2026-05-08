@@ -78,6 +78,7 @@ try
     });
     builder.Services.AddSingleton<ICommunicationPoolKubernetesGateway, CommunicationPoolKubernetesGateway>();
     builder.Services.AddSingleton<ICommunicationPoolManager, CommunicationPoolManager>();
+    builder.Services.AddSingleton<IOperatorHubClientFactory, OperatorHubClientFactory>();
     builder.Services.AddHostedService<OperatorHubService>();
     builder.Services.AddScoped<IDiagnosticsService, DiagnosticsService>();
 

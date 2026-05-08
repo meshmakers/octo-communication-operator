@@ -171,6 +171,13 @@ Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, 
 
 - `Reconcilers/AdapterReconcilerTests/` — pool teardown, single-adapter teardown, reconcile flow (idempotent delete-then-recreate, image-pull-secret wiring, adapter env vars, pool-hub deployment-state callback in success and error paths). Mocks `IKubernetesClient` (KubeOps) directly — the interface is generic and ergonomic.
 - `Services/CommunicationPoolManagerTests/` — auto-create/delete CR + broker secret, idempotency (no-op when already present), CR/Secret content. Mocks `ICommunicationPoolKubernetesGateway` (see below).
+- `Services/OperatorHubServiceTests/ExecuteAsyncTests` — early-return paths (AutoManagePools off, controller URI missing), client creation, on-connect registration + per-tenant pool creation, clean shutdown via `IHostedService.StopAsync`. Mocks `IOperatorHubClientFactory` to substitute the SignalR client (see below).
+
+### `IOperatorHubClientFactory` — the seam for `OperatorHubClient`
+
+`OperatorHubService.ExecuteAsync` originally `new`'d an `OperatorHubClient` directly, which made the SignalR connection logic untestable. The factory interface produces an `IOperatorHubClient` (already exposed by the SDK) and is mocked in tests. Production wiring lives in `OperatorHubClientFactory` (registered as singleton in `Program.cs`).
+
+Tests use `client.When(c => c.EnableReconnect(...)).Do(_ => tcs.TrySetResult())` as a sync point — once `EnableReconnect` has been called, the connect callback has already finished and the service is parked in `Task.Delay(Infinite, stoppingToken)`. Asserting before that yields race conditions where the assertion runs before `ExecuteAsync` reaches the verified line.
 
 ### `ICommunicationPoolKubernetesGateway` — the seam for `IKubernetes`
 
@@ -183,8 +190,8 @@ The `ICommunicationPoolKubernetesGateway` interface (in `Services/`) collapses t
 
 ### Not yet covered
 
-- `OperatorHubService.ExecuteAsync` — instantiates `OperatorHubClient` directly. Needs a factory-injection refactor before it can be unit-tested without a real SignalR server.
 - `CommunicationPoolKubernetesGateway` itself — would need either an integration test against a real (or fake) k8s API or low-level `IKubernetes` mocking. Treated as a thin pass-through layer; covered indirectly by E2E tests.
+- `OperatorHubClientFactory` — the production `new OperatorHubClient(...)` wrapper; same rationale as above.
 
 ## Code Quality Standards
 
