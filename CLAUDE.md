@@ -109,15 +109,26 @@ Argument shape under MTP:
 
 ## CI Pipeline
 
-`devops-build/azure-pipelines.yml` builds, tests, builds the Docker image, and publishes artifacts. The test step is:
+`devops-build/azure-pipelines.yml` builds, tests, builds the Docker image, and publishes artifacts. The structure mirrors `octo-communication-controller-services` — explicit `Restore` → `Build` → `Test` so that `OctoNugetPrivateServer` is forwarded to MSBuild on every step:
 
 ```yaml
+- task: DotNetCoreCLI@2
+  inputs:
+    command: 'restore'
+    projects: '$(solutionFile)'
+    restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+    noCache: true
+- task: DotNetCoreCLI@2
+  inputs:
+    command: 'build'
+    projects: '$(solutionFile)'
+    arguments: '--no-restore --configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
 - task: DotNetCoreCLI@2
   displayName: 'Test'
   inputs:
     command: 'custom'
     custom: 'test'
-    arguments: '--solution $(solutionFile) --configuration $(buildConfiguration) -- --report-trx --report-trx-filename test-results.trx'
+    arguments: '--solution $(solutionFile) --no-build --configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) -- --report-trx --report-trx-filename test-results.trx'
 - task: PublishTestResults@2
   condition: succeededOrFailed()
   inputs:
@@ -125,7 +136,10 @@ Argument shape under MTP:
     testResultsFiles: '**/TestResults/test-results.trx'
 ```
 
-`command: 'custom'` is used because the standard `command: 'test'` in `DotNetCoreCLI@2` passes the project glob as positional args, which MTP rejects (see above). `--solution` lets the SDK enumerate every test project in the solution, so adding a new test project to the .sln is the only step needed to wire it into CI — no pipeline change required.
+Two reasons for this exact shape:
+
+1. **`OctoNugetPrivateServer` must be passed to every MSBuild invocation.** `Directory.Build.props` reads it to choose `OctoVersion` (`0.1.*` from the private feed when set, `3.3.*` from nuget.org otherwise) and `RestoreSources`. If only the restore step gets it but the build/test step doesn't, MSBuild re-evaluates and falls back to nuget.org, dragging in stale transitive packages (this is how RestSharp 110.2.0 — `GHSA-4rr6-2v9v-wcpc` — slipped in earlier and tripped `NU1902` under `TreatWarningsAsErrors`).
+2. **`command: 'custom'` + `--solution`** instead of `command: 'test'` + `projects: ...`. The standard form passes the project glob as positional args, which Microsoft.Testing.Platform rejects on .NET 10 SDK. `--solution` enumerates every test project in the .sln, so adding a new test project to the .sln is the only step needed to wire it into CI.
 
 ### Mandatory before commit (per repo conventions)
 

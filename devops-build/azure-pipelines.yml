@@ -42,13 +42,29 @@ stages:
          - checkout: self
            clean: true
          - template: set-version.yml
-         - template: download-ca.yml           
+         - template: download-ca.yml
+         - task: DotNetCoreCLI@2
+           displayName: 'Restore NuGet packages'
+           inputs:
+             command: 'restore'
+             projects: '$(solutionFile)'
+             restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+             noCache: true
+         - task: DotNetCoreCLI@2
+           displayName: 'Build'
+           inputs:
+             command: 'build'
+             projects: '$(solutionFile)'
+             arguments: '--no-restore --configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+             publishWebProjects: false
+             zipAfterPublish: false
+             modifyOutputPath: false
          - task: DotNetCoreCLI@2
            displayName: 'Test'
            inputs:
              command: 'custom'
              custom: 'test'
-             arguments: '--solution $(solutionFile) --configuration $(buildConfiguration) -- --report-trx --report-trx-filename test-results.trx'
+             arguments: '--solution $(solutionFile) --no-build --configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) -- --report-trx --report-trx-filename test-results.trx'
          - task: PublishTestResults@2
            displayName: 'Publish Test Results'
            condition: succeededOrFailed()
