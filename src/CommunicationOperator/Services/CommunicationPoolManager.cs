@@ -1,8 +1,4 @@
-using System.Net;
-using System.Text.Json;
 using System.Text.Json.Serialization;
-using k8s;
-using k8s.Autorest;
 using k8s.Models;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Microsoft.Extensions.Options;
@@ -11,22 +7,18 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 
 public class CommunicationPoolManager : ICommunicationPoolManager
 {
-    private const string CrdGroup = "octo-mesh.meshmakers.io";
-    private const string CrdVersion = "v1alpha1";
-    private const string CrdPlural = "communicationpools";
-
     private readonly ILogger<CommunicationPoolManager> _logger;
     private readonly OperatorOptions _options;
-    private readonly IKubernetes _kubernetesClient;
+    private readonly ICommunicationPoolKubernetesGateway _gateway;
 
     public CommunicationPoolManager(
         ILogger<CommunicationPoolManager> logger,
         IOptions<OperatorOptions> options,
-        IKubernetes kubernetesClient)
+        ICommunicationPoolKubernetesGateway gateway)
     {
         _logger = logger;
         _options = options.Value;
-        _kubernetesClient = kubernetesClient;
+        _gateway = gateway;
     }
 
     public async Task CreateCommunicationPoolAsync(string tenantId)
@@ -34,7 +26,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         var crName = GetCrName(tenantId);
         var ns = _options.PoolNamespace;
 
-        if (await CommunicationPoolExistsAsync(crName, ns))
+        if (await _gateway.CommunicationPoolExistsAsync(ns, crName))
         {
             _logger.LogInformation(
                 "CommunicationPool CR '{CrName}' already exists in namespace '{Namespace}', skipping creation",
@@ -42,9 +34,70 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        await CreateBrokerSecretAsync(tenantId, ns);
+        await CreateBrokerSecretIfMissingAsync(tenantId, ns);
 
-        var resource = new CommunicationPoolResource
+        var resource = BuildCommunicationPoolResource(tenantId, crName, ns);
+        _logger.LogInformation(
+            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}'",
+            crName, ns, tenantId);
+        await _gateway.CreateCommunicationPoolAsync(ns, resource);
+        _logger.LogInformation("CommunicationPool CR '{CrName}' created successfully", crName);
+    }
+
+    public async Task DeleteCommunicationPoolAsync(string tenantId)
+    {
+        var crName = GetCrName(tenantId);
+        var ns = _options.PoolNamespace;
+
+        if (!await _gateway.CommunicationPoolExistsAsync(ns, crName))
+        {
+            _logger.LogInformation(
+                "CommunicationPool CR '{CrName}' does not exist in namespace '{Namespace}', skipping deletion",
+                crName, ns);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}'",
+            crName, ns, tenantId);
+        await _gateway.DeleteCommunicationPoolAsync(ns, crName);
+
+        await DeleteBrokerSecretAsync(tenantId, ns);
+        _logger.LogInformation("CommunicationPool CR '{CrName}' deleted successfully", crName);
+    }
+
+    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string ns)
+    {
+        var secretName = GetSecretName(tenantId);
+        if (await _gateway.SecretExistsAsync(ns, secretName))
+        {
+            _logger.LogInformation(
+                "Broker secret '{SecretName}' already exists, skipping creation", secretName);
+            return;
+        }
+
+        var secret = BuildBrokerSecret(secretName, ns, tenantId);
+        _logger.LogInformation(
+            "Creating broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
+        await _gateway.CreateSecretAsync(ns, secret);
+    }
+
+    private async Task DeleteBrokerSecretAsync(string tenantId, string ns)
+    {
+        var secretName = GetSecretName(tenantId);
+        if (!await _gateway.SecretExistsAsync(ns, secretName))
+        {
+            _logger.LogInformation(
+                "Broker secret '{SecretName}' does not exist, skipping deletion", secretName);
+            return;
+        }
+        _logger.LogInformation(
+            "Deleting broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
+        await _gateway.DeleteSecretAsync(ns, secretName);
+    }
+
+    private CommunicationPoolResource BuildCommunicationPoolResource(string tenantId, string crName, string ns) =>
+        new()
         {
             Metadata = new CommunicationPoolMetadata
             {
@@ -69,71 +122,8 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             }
         };
 
-        _logger.LogInformation(
-            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}'",
-            crName, ns, tenantId);
-
-        await _kubernetesClient.CustomObjects.CreateNamespacedCustomObjectAsync(
-            resource, CrdGroup, CrdVersion, ns, CrdPlural);
-
-        _logger.LogInformation("CommunicationPool CR '{CrName}' created successfully", crName);
-    }
-
-    public async Task DeleteCommunicationPoolAsync(string tenantId)
-    {
-        var crName = GetCrName(tenantId);
-        var ns = _options.PoolNamespace;
-
-        if (!await CommunicationPoolExistsAsync(crName, ns))
-        {
-            _logger.LogInformation(
-                "CommunicationPool CR '{CrName}' does not exist in namespace '{Namespace}', skipping deletion",
-                crName, ns);
-            return;
-        }
-
-        _logger.LogInformation(
-            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}'",
-            crName, ns, tenantId);
-
-        await _kubernetesClient.CustomObjects.DeleteNamespacedCustomObjectAsync(
-            CrdGroup, CrdVersion, ns, CrdPlural, crName);
-
-        await DeleteBrokerSecretAsync(tenantId, ns);
-
-        _logger.LogInformation("CommunicationPool CR '{CrName}' deleted successfully", crName);
-    }
-
-    private async Task<bool> CommunicationPoolExistsAsync(string crName, string ns)
-    {
-        try
-        {
-            await _kubernetesClient.CustomObjects.GetNamespacedCustomObjectAsync(
-                CrdGroup, CrdVersion, ns, CrdPlural, crName);
-            return true;
-        }
-        catch (HttpOperationException ex) when (ex.Response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return false;
-        }
-    }
-
-    private async Task CreateBrokerSecretAsync(string tenantId, string ns)
-    {
-        var secretName = GetSecretName(tenantId);
-
-        try
-        {
-            await _kubernetesClient.CoreV1.ReadNamespacedSecretAsync(secretName, ns);
-            _logger.LogInformation("Broker secret '{SecretName}' already exists, skipping creation", secretName);
-            return;
-        }
-        catch (HttpOperationException ex) when (ex.Response.StatusCode == HttpStatusCode.NotFound)
-        {
-            // Secret doesn't exist, create it
-        }
-
-        var secret = new V1Secret
+    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId) =>
+        new()
         {
             Metadata = new V1ObjectMeta
             {
@@ -153,34 +143,11 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             }
         };
 
-        _logger.LogInformation("Creating broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
-        await _kubernetesClient.CoreV1.CreateNamespacedSecretAsync(secret, ns);
-    }
+    private string GetCrName(string tenantId) =>
+        $"{tenantId}-{_options.DefaultPoolName}".ToLowerInvariant();
 
-    private async Task DeleteBrokerSecretAsync(string tenantId, string ns)
-    {
-        var secretName = GetSecretName(tenantId);
-
-        try
-        {
-            _logger.LogInformation("Deleting broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
-            await _kubernetesClient.CoreV1.DeleteNamespacedSecretAsync(secretName, ns);
-        }
-        catch (HttpOperationException ex) when (ex.Response.StatusCode == HttpStatusCode.NotFound)
-        {
-            _logger.LogInformation("Broker secret '{SecretName}' does not exist, skipping deletion", secretName);
-        }
-    }
-
-    private string GetCrName(string tenantId)
-    {
-        return $"{tenantId}-{_options.DefaultPoolName}".ToLowerInvariant();
-    }
-
-    private string GetSecretName(string tenantId)
-    {
-        return $"{tenantId}-{_options.DefaultPoolName}-octo-mesh-connection".ToLowerInvariant();
-    }
+    private string GetSecretName(string tenantId) =>
+        $"{tenantId}-{_options.DefaultPoolName}-octo-mesh-connection".ToLowerInvariant();
 }
 
 internal class CommunicationPoolResource

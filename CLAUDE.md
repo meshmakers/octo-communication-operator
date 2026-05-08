@@ -157,9 +157,9 @@ Two reasons for this exact shape:
 - **`OperatorOptions` injection in tests**: use `Microsoft.Extensions.Options.Options.Create(new OperatorOptions { ... })`. Fully qualify because the test file's `using Meshmakers.Octo.Communication.Operator.Options;` shadows `Options.Create`.
 - **CA2252 (preview features)**: the test project sets `<EnablePreviewFeatures>true</EnablePreviewFeatures>` because KubeOps APIs are tagged `[RequiresPreviewFeatures]`. New test projects must do the same.
 
-### Tier 1 unit tests (current coverage)
+### Current unit-test coverage
 
-Pure-logic and lightweight callback surfaces. No Kubernetes API mocking yet:
+Pure-logic + callback surfaces:
 
 - `Common/DictionaryExtensionsTests` — label-selector formatting.
 - `Webhooks/CommunicationPoolValidatorTests` — pool-name space rule.
@@ -167,11 +167,24 @@ Pure-logic and lightweight callback surfaces. No Kubernetes API mocking yet:
 - `Finalizer/CommunicationPoolFinalizerTests` — success result + entity passthrough.
 - `Services/OperatorHubServiceTests` — `TenantCreatedAsync` / `TenantDeletedAsync` delegate to `ICommunicationPoolManager` and swallow exceptions.
 
-### Not yet covered (deferred)
+Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, not against the k8s SDK):
 
-- `CommunicationPoolManager` — direct `IKubernetes` (k8s SDK) calls; mocking the nested `CustomObjects` / `CoreV1` operations is verbose. A future round either mocks them or extracts a thin abstraction.
-- `AdapterReconciler` — uses `IKubernetesClient` (KubeOps); cleaner to mock but still left for tier 2.
-- `OperatorHubService.ExecuteAsync` — instantiates `OperatorHubClient` directly. Needs a factory injection refactor before it can be unit-tested without a real SignalR server.
+- `Reconcilers/AdapterReconcilerTests/` — pool teardown, single-adapter teardown, reconcile flow (idempotent delete-then-recreate, image-pull-secret wiring, adapter env vars, pool-hub deployment-state callback in success and error paths). Mocks `IKubernetesClient` (KubeOps) directly — the interface is generic and ergonomic.
+- `Services/CommunicationPoolManagerTests/` — auto-create/delete CR + broker secret, idempotency (no-op when already present), CR/Secret content. Mocks `ICommunicationPoolKubernetesGateway` (see below).
+
+### `ICommunicationPoolKubernetesGateway` — the seam for `IKubernetes`
+
+`CommunicationPoolManager` originally talked directly to `IKubernetes` and used a stack of extension methods (`CustomObjects.GetNamespacedCustomObjectAsync`, `CoreV1.ReadNamespacedSecretAsync`, …). Mocking that surface is verbose because:
+- the extensions delegate to nested sub-interfaces (`ICustomObjectsOperations`, `ICoreV1Operations`),
+- the `Exists`-via-404 idiom requires throwing `HttpOperationException` with a fake `HttpResponseMessageWrapper`,
+- assertions then have to target the underlying `*WithHttpMessagesAsync` method names rather than the readable extension API.
+
+The `ICommunicationPoolKubernetesGateway` interface (in `Services/`) collapses that surface to six methods: `CommunicationPoolExistsAsync`, `CreateCommunicationPoolAsync`, `DeleteCommunicationPoolAsync`, `SecretExistsAsync`, `CreateSecretAsync`, `DeleteSecretAsync`. The implementation `CommunicationPoolKubernetesGateway` keeps every k8s-SDK quirk (404 → `false`, extension-method routing, CRD group/version/plural constants) in one place. Add new k8s calls to the interface — don't reach back into `IKubernetes` from elsewhere.
+
+### Not yet covered
+
+- `OperatorHubService.ExecuteAsync` — instantiates `OperatorHubClient` directly. Needs a factory-injection refactor before it can be unit-tested without a real SignalR server.
+- `CommunicationPoolKubernetesGateway` itself — would need either an integration test against a real (or fake) k8s API or low-level `IKubernetes` mocking. Treated as a thin pass-through layer; covered indirectly by E2E tests.
 
 ## Code Quality Standards
 

@@ -76,6 +76,7 @@ try
         }
         return new Kubernetes(config);
     });
+    builder.Services.AddSingleton<ICommunicationPoolKubernetesGateway, CommunicationPoolKubernetesGateway>();
     builder.Services.AddSingleton<ICommunicationPoolManager, CommunicationPoolManager>();
     builder.Services.AddHostedService<OperatorHubService>();
     builder.Services.AddScoped<IDiagnosticsService, DiagnosticsService>();
