@@ -200,8 +200,22 @@ The `ICommunicationPoolKubernetesGateway` interface (in `Services/`) collapses t
 - Target framework: `net10.0`.
 - Three build configurations: `Debug`, `Release`, `DebugL` — DebugL pulls Octo NuGet packages from the monorepo's `../nuget/` cache. Both `CommunicationOperator.csproj` and `CommunicationOperator.Tests.csproj` declare all three configurations; the .sln maps each one straight through.
 
+## E2E Smoke Test
+
+Manual end-to-end validation of the central-operator path lives at
+`docs/E2E-SMOKE-TEST.md`. It uses the `octo-tools` PowerShell modules
+(`Install-OctoKubernetes`, `Start-Octo`) plus `start-operator.ps1` at the
+repo root to bring up the full stack (Mongo, RabbitMQ, kind, all backend
+services, operator) and triggers the lifecycle via `octo-cli`. Run it after
+non-trivial changes in `OperatorHubService` or `CommunicationPoolManager`.
+
+`start-operator.ps1` is intentionally **not** named `octo-start.ps1` — that
+would cause `Start-Octo` to launch the operator automatically, which we want
+to keep opt-in for now.
+
 ## Related Documentation
 
+- `docs/E2E-SMOKE-TEST.md` — manual smoke-test runbook (see above).
 - `docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md` — long-form design notes for application deployment management and version lifecycle (Helm-only deployment, `ManuallyDeployed` state).
 - Monorepo root `CLAUDE.md` — global build configurations, multi-tenancy, naming conventions.
 - `octo-communication-controller-services/CLAUDE.md` — counterpart on the controller side; the SignalR `/operatorHub` contract lives there.
