@@ -1,0 +1,173 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+The **Octo Communication Operator** is a Kubernetes operator that manages mesh adapter deployments via the [KubeOps](https://github.com/buehler/dotnet-operator-sdk) framework. It watches `CommunicationPool` custom resources and, optionally, connects to the Communication Controller via SignalR to receive tenant lifecycle events and auto-create/auto-delete `CommunicationPool` CRs.
+
+It supports two deployment modes:
+
+- **Edge deployment**: the operator runs on a remote edge cluster. `CommunicationPool` CRs are managed manually (or by an external system); the operator only reconciles existing CRs into adapter deployments and services.
+- **Central deployment**: the operator runs alongside the Communication Controller in the same cluster. With `OPERATOR__AUTOMANAGEPOOLS=true` it connects to the Controller's `/operatorHub` SignalR hub and creates/deletes `CommunicationPool` CRs and broker secrets in response to `TenantCreated` / `TenantDeleted` events.
+
+## Solution Layout
+
+```
+Octo.CommunicationOperator.sln
+├── src/CommunicationOperator/                Operator host (ASP.NET Core, Microsoft.NET.Sdk.Web)
+│   ├── Common/        DictionaryExtensions, OperatorLog (LoggerMessage source-gen)
+│   ├── Controller/    HTTP controllers (CommunicationPool, Diagnostics)
+│   ├── Entities/      V1CommunicationPoolEntity (CRD-mapped)
+│   ├── Finalizer/     CommunicationPoolFinalizer
+│   ├── Models/        Pool, K8Pool, PoolDescriptor (DTO-side models)
+│   ├── Options/       OperatorOptions (configuration binding)
+│   ├── Reconcilers/   AdapterReconciler (creates Deployments + Services per adapter)
+│   ├── Services/      CommunicationPoolManager, OperatorHubService, PoolService, DiagnosticsService
+│   ├── Webhooks/      CommunicationPoolValidator, CommunicationPoolMutator (admission webhooks)
+│   └── scripts/       kind cluster bootstrap scripts
+└── tests/CommunicationOperator.Tests/        Unit tests (TUnit + NSubstitute)
+```
+
+The CRD is shipped from the `octo-helm-core` repository (`octo-mesh-crds` chart), not from this repo. Generation of CRD YAMLs is documented in `README.md` ("Generate CRD and deployment files").
+
+## Architecture Concepts
+
+### Custom Resource: `CommunicationPool`
+
+The operator's primary resource is `V1CommunicationPoolEntity` (group `octo-mesh.meshmakers.io`, version `v1alpha1`). The spec carries the tenant identity, controller endpoint, and broker connection parameters that adapter pods need.
+
+### Reconciliation Flow
+
+1. A `CommunicationPool` CR is created (manually, or via `OperatorHubService` when `AutoManagePools=true`).
+2. The operator's pool service registers the pool with the Communication Controller via the `PoolHub` SignalR client.
+3. The Controller pushes the list of adapters to deploy into the pool.
+4. `AdapterReconciler` creates/updates Kubernetes `Deployment` + `Service` objects for each adapter, reading the broker credentials from the `<tenantId>-<poolName>-octo-mesh-connection` `Secret`.
+5. On pool deletion, all adapter deployments and services labelled with the pool are removed.
+
+### Central Operator Mode (AutoManagePools)
+
+When `OPERATOR__AUTOMANAGEPOOLS=true`, `OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` and:
+
+- on connect/reconnect, calls `RegisterOperatorAsync()` and creates pools for any tenants that already exist;
+- on `TenantCreatedAsync(tenantId)`, calls `CommunicationPoolManager.CreateCommunicationPoolAsync` (creates the CR + broker secret, idempotent);
+- on `TenantDeletedAsync(tenantId)`, calls `CommunicationPoolManager.DeleteCommunicationPoolAsync` (deletes both, idempotent).
+
+The connection is auto-reconnecting via `OperatorHubClient`. Failures from the pool manager are logged but **not propagated** so that one bad tenant cannot break the hub connection.
+
+### Webhooks
+
+- `CommunicationPoolValidator`: rejects pool names containing spaces.
+- `CommunicationPoolMutator`: currently a no-op (`NoChanges()`).
+
+## Configuration
+
+`OperatorOptions` is bound from the `Operator` configuration section. All keys are also available as environment variables prefixed `OPERATOR__`. See `README.md` for the full table.
+
+Key options:
+
+| Option | Purpose |
+|--------|---------|
+| `AutoManagePools` | Enables `OperatorHubService` (central mode) |
+| `CommunicationControllerUri` | SignalR endpoint of the Controller (required when `AutoManagePools=true`) |
+| `OperatorNamespace` | Namespace where auto-created `CommunicationPool` CRs and secrets live |
+| `DefaultPoolName` | Pool name applied to auto-created CRs |
+| `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter pods |
+| `BrokerUser`, `BrokerPassword` | Credentials baked into `<tenantId>-<poolName>-octo-mesh-connection` secret |
+| `ImagePullSecretName` | Optional pull secret added to adapter `Deployment` pod specs |
+| `InstancePrefix` | Forwarded to adapter pods as `OCTO_ADAPTER__INSTANCEPREFIX` |
+| `AdapterIgnoreCertificateValidation` | Forwarded to adapter pods |
+
+## Build & Test
+
+```bash
+# DebugL = local development with monorepo NuGet packages (see /CLAUDE.md for build configurations)
+dotnet build Octo.CommunicationOperator.sln -c DebugL
+
+# Canonical: same form the Azure Pipeline runs.
+# The `--` separates SDK args from Microsoft.Testing.Platform args.
+dotnet test --solution Octo.CommunicationOperator.sln -c DebugL -- --report-trx --report-trx-filename test-results.trx
+
+# Quick form during development (no TRX, no build):
+dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build
+
+# Run a specific test class
+dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build -- \
+    --treenode-filter "/*/*/CommunicationPoolValidatorTests/*"
+```
+
+### .NET 10 / Microsoft.Testing.Platform notes
+
+Under .NET 10 SDK the legacy VSTest path is rejected (`error: Testing with VSTest target is no longer supported`). Two pieces opt this repo into the new MTP-driven `dotnet test`:
+
+1. **`global.json`** at the repo root sets `"test": { "runner": "Microsoft.Testing.Platform" }`. Without this, `dotnet test` errors out.
+2. The test csproj references `Microsoft.Testing.Extensions.TrxReport` so that `-- --report-trx --report-trx-filename ...` produces a TRX file the Azure Pipeline can publish.
+
+Argument shape under MTP:
+- The project/solution is **required** as a flag: `--project <csproj>` or `--solution <sln>`. Passing it as a positional argument is rejected (`error: Specifying a project for "dotnet test" should be done via "--project"`).
+- Reporter and filter args belong **after `--`** (they're forwarded to the test executable, not the SDK).
+
+## CI Pipeline
+
+`devops-build/azure-pipelines.yml` builds, tests, builds the Docker image, and publishes artifacts. The test step is:
+
+```yaml
+- task: DotNetCoreCLI@2
+  displayName: 'Test'
+  inputs:
+    command: 'custom'
+    custom: 'test'
+    arguments: '--solution $(solutionFile) --configuration $(buildConfiguration) -- --report-trx --report-trx-filename test-results.trx'
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: 'VSTest'
+    testResultsFiles: '**/TestResults/test-results.trx'
+```
+
+`command: 'custom'` is used because the standard `command: 'test'` in `DotNetCoreCLI@2` passes the project glob as positional args, which MTP rejects (see above). `--solution` lets the SDK enumerate every test project in the solution, so adding a new test project to the .sln is the only step needed to wire it into CI — no pipeline change required.
+
+### Mandatory before commit (per repo conventions)
+
+1. `dotnet build Octo.CommunicationOperator.sln -c DebugL` succeeds with zero warnings (`TreatWarningsAsErrors=true`).
+2. The test runner above completes with all tests passing.
+3. Documentation (`README.md`, this `CLAUDE.md`, `docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md`) is updated for any change in behavior or structure.
+
+## Testing Conventions
+
+- **Framework**: TUnit (sibling repos use `[Test]` attribute and `Assert.That(...).IsXxx(...)` fluent API). NSubstitute for mocking.
+- **Project layout**: tests mirror the source folder structure (`Webhooks/`, `Services/`, `Common/`, `Finalizer/`).
+- **Namespaces**: `Meshmakers.Octo.Communication.Operator.Tests.<Area>`.
+- **Async exceptions on substitutes**: use `ThrowsAsync(...)` (not `Throws(...)`) for `Task`-returning members — `NS5003` is enforced as an error.
+- **Disposable systems-under-test**: TUnit emits `TUnit0023` if an `IDisposable` field is not disposed. Implement `IDisposable` on the test class and dispose in `Dispose()`.
+- **`OperatorOptions` injection in tests**: use `Microsoft.Extensions.Options.Options.Create(new OperatorOptions { ... })`. Fully qualify because the test file's `using Meshmakers.Octo.Communication.Operator.Options;` shadows `Options.Create`.
+- **CA2252 (preview features)**: the test project sets `<EnablePreviewFeatures>true</EnablePreviewFeatures>` because KubeOps APIs are tagged `[RequiresPreviewFeatures]`. New test projects must do the same.
+
+### Tier 1 unit tests (current coverage)
+
+Pure-logic and lightweight callback surfaces. No Kubernetes API mocking yet:
+
+- `Common/DictionaryExtensionsTests` — label-selector formatting.
+- `Webhooks/CommunicationPoolValidatorTests` — pool-name space rule.
+- `Webhooks/CommunicationPoolMutatorTests` — no-op invariant.
+- `Finalizer/CommunicationPoolFinalizerTests` — success result + entity passthrough.
+- `Services/OperatorHubServiceTests` — `TenantCreatedAsync` / `TenantDeletedAsync` delegate to `ICommunicationPoolManager` and swallow exceptions.
+
+### Not yet covered (deferred)
+
+- `CommunicationPoolManager` — direct `IKubernetes` (k8s SDK) calls; mocking the nested `CustomObjects` / `CoreV1` operations is verbose. A future round either mocks them or extracts a thin abstraction.
+- `AdapterReconciler` — uses `IKubernetesClient` (KubeOps); cleaner to mock but still left for tier 2.
+- `OperatorHubService.ExecuteAsync` — instantiates `OperatorHubClient` directly. Needs a factory injection refactor before it can be unit-tested without a real SignalR server.
+
+## Code Quality Standards
+
+- `Nullable=enable`, `TreatWarningsAsErrors=true`, `LangVersion=latestmajor` (inherited from `Directory.Build.props`).
+- `EnablePreviewFeatures=true` on both the operator project and the test project (KubeOps annotations).
+- Target framework: `net10.0`.
+- Three build configurations: `Debug`, `Release`, `DebugL` — DebugL pulls Octo NuGet packages from the monorepo's `../nuget/` cache. Both `CommunicationOperator.csproj` and `CommunicationOperator.Tests.csproj` declare all three configurations; the .sln maps each one straight through.
+
+## Related Documentation
+
+- `docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md` — long-form design notes for application deployment management and version lifecycle (Helm-only deployment, `ManuallyDeployed` state).
+- Monorepo root `CLAUDE.md` — global build configurations, multi-tenancy, naming conventions.
+- `octo-communication-controller-services/CLAUDE.md` — counterpart on the controller side; the SignalR `/operatorHub` contract lives there.

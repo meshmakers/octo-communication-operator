@@ -85,3 +85,20 @@ kubectl -n pool1 apply -f ./src/scripts/test-cluster-pool-local.yaml
 dotnet kubeops g op meshmakers-octo-communication-operator ./CommunicationOperator.csproj --out config --clear-out
 ```
 
+## Tests
+
+Unit tests live in `tests/CommunicationOperator.Tests/` and use **TUnit** with **NSubstitute** for mocking, matching the convention of the sibling `octo-communication-controller-services` repository.
+
+Build the solution and run the test suite:
+
+```bash
+# Canonical (same as Azure Pipeline):
+dotnet test --solution Octo.CommunicationOperator.sln -c DebugL -- --report-trx --report-trx-filename test-results.trx
+
+# Quick form during development:
+dotnet build Octo.CommunicationOperator.sln -c DebugL
+dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build
+```
+
+The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `CLAUDE.md` for details about the .NET 10 / MTP arguments.
+

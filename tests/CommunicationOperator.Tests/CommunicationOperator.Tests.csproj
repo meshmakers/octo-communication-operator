@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <RootNamespace>Meshmakers.Octo.Communication.Operator.Tests</RootNamespace>
+        <AssemblyName>Meshmakers.Octo.Communication.Operator.Tests</AssemblyName>
+        <IsPackable>false</IsPackable>
+        <EnablePreviewFeatures>true</EnablePreviewFeatures>
+        <Configurations>Debug;Release;DebugL</Configurations>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.2.2" />
+      <PackageReference Include="NSubstitute" Version="5.3.0" />
+      <PackageReference Include="NSubstitute.Analyzers.CSharp" Version="1.0.17">
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+      <PackageReference Include="TUnit" Version="1.43.11" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\src\CommunicationOperator\CommunicationOperator.csproj" />
+    </ItemGroup>
+
+</Project>

@@ -46,11 +46,18 @@ stages:
          - task: DotNetCoreCLI@2
            displayName: 'Test'
            inputs:
-             command: 'test'
-             projects: |
-               '**/*Tests.csproj'
-               !'**/*SystemTests.csproj'
+             command: 'custom'
+             custom: 'test'
+             arguments: '--solution $(solutionFile) --configuration $(buildConfiguration) -- --report-trx --report-trx-filename test-results.trx'
+         - task: PublishTestResults@2
+           displayName: 'Publish Test Results'
+           condition: succeededOrFailed()
+           inputs:
+             testResultsFormat: 'VSTest'
+             testResultsFiles: '**/TestResults/test-results.trx'
              testRunTitle: 'CI'
+             mergeTestResults: true
+             failTaskOnFailedTests: true
          - template: build-and-push-docker-image.yml
            parameters:
              Architecture: 'linux/arm64,linux/amd64'
