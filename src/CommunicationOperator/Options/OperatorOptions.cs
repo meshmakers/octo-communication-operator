@@ -64,4 +64,20 @@ public class OperatorOptions
     /// Instance prefix for the OctoMesh installation.
     /// </summary>
     public string? InstancePrefix { get; set; }
+
+    /// <summary>
+    /// Hostname or IP address where the operator's webhook endpoints are
+    /// reachable from the Kubernetes API server. Used only in DEBUG/DEBUGL
+    /// builds when KubeOps auto-registers webhook configurations against
+    /// this address. When null or empty, the operator picks the first
+    /// non-loopback IPv4 address of the host at startup.
+    /// </summary>
+    public string? DevWebhookHost { get; set; }
+
+    /// <summary>
+    /// Port the dev webhook endpoint binds to (HTTPS). Must match the port
+    /// the registered <c>MutatingWebhookConfiguration</c> /
+    /// <c>ValidatingWebhookConfiguration</c> use. Defaults to 6001.
+    /// </summary>
+    public ushort DevWebhookPort { get; set; } = 6001;
 }

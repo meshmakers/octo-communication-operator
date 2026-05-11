@@ -60,15 +60,21 @@ cd ~/meshmakers/octo-helm/src
 helm install --namespace octo-operator-system --create-namespace octo-mesh-crds ./octo-mesh-crds/
 ```
 
-In Program.cs set the IP address of your host system:
-```csharp
-    #if DEBUG || DEBUGL
-    string ip = "192.168.15.66"; // Set the IP address of your host system
-    ushort port = 6001;
-    using CertificateGenerator generator = new CertificateGenerator(ip);
-    using X509Certificate2 cert = generator.Server.CopyServerCertWithPrivateKey();
-    #endif
+No source edits are needed for the dev webhook endpoint. In DEBUG/DEBUGL
+builds the operator picks the first non-loopback IPv4 address of the host
+at startup and generates a self-signed TLS cert + KubeOps webhook
+configuration against it. The chosen address is logged on the first line:
+
 ```
+INFO Dev webhook endpoint: https://192.168.x.y:6001
+```
+
+To override (multi-NIC hosts, VPN-only setups), set either of:
+
+- `Operator:DevWebhookHost` and `Operator:DevWebhookPort` in
+  `src/CommunicationOperator/appsettings.Development.json`
+- `OCTO_OPERATOR__DEVWEBHOOKHOST` and `OCTO_OPERATOR__DEVWEBHOOKPORT`
+  environment variables
 
 Run the operator in debug mode
 
