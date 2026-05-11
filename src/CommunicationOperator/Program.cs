@@ -69,7 +69,7 @@ try
 #if DEBUG || DEBUGL
     builder.WebHost.ConfigureKestrel(serverOptions =>
     {
-        serverOptions.Listen(System.Net.IPAddress.Any, port,
+        serverOptions.Listen(IPAddress.Any, port,
              listenOptions => { listenOptions.UseHttps(cert); });
     });
 #endif
