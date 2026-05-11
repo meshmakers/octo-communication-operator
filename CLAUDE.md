@@ -165,6 +165,7 @@ Pure-logic + callback surfaces:
 - `Webhooks/CommunicationPoolValidatorTests` — pool-name space rule.
 - `Webhooks/CommunicationPoolMutatorTests` — no-op invariant.
 - `Finalizer/CommunicationPoolFinalizerTests` — success result + entity passthrough.
+- `Controller/CommunicationPoolControllerTests` — `ReconcileAsync` happy/failure paths and `DeletedAsync` no-status-update contract. The delete callback must not call `IKubernetesClient.UpdateStatusAsync` because the CR is already gone when KubeOps invokes it; a status-update there 404s and makes KubeOps retry the delete reconcile indefinitely.
 - `Services/OperatorHubServiceTests` — `TenantCreatedAsync` / `TenantDeletedAsync` delegate to `ICommunicationPoolManager` and swallow exceptions.
 
 Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, not against the k8s SDK):

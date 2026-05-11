@@ -53,24 +53,18 @@ public class CommunicationPoolController(
     {
         logger.LogInformation("Entity {Name} called {DeletedAsyncName}", entity.Name(), nameof(DeletedAsync));
 
+        // The CR is already gone from the cluster when DeletedAsync fires, so
+        // any UpdateStatusAsync call would 404 and the KubeOps queue would
+        // retry forever. Only run the in-process cleanup here.
         try
         {
-            entity.Status.CommunicationStatus = "In Progress";
-            entity = await client.UpdateStatusAsync(entity, cancellationToken);
-
             await poolService.UnRegisterPoolAsync(entity);
-
-            entity.Status.CommunicationStatus = "Unregistered";
-            await client.UpdateStatusAsync(entity, cancellationToken);
-
             return ReconciliationResult<V1CommunicationPoolEntity>.Success(entity);
         }
         catch (Exception e)
         {
-            logger.LogError(e, "Error while reconciling entity {Name}", entity.Name());
-            entity.Status.CommunicationStatus = "Failed: " + e.Message;
-            await client.UpdateStatusAsync(entity, cancellationToken);
-            return ReconciliationResult<V1CommunicationPoolEntity>.Failure(entity, "Failed to reconcile: " + e.Message);
+            logger.LogError(e, "Error while unregistering pool {Name}", entity.Name());
+            return ReconciliationResult<V1CommunicationPoolEntity>.Failure(entity, "Failed to unregister: " + e.Message);
         }
     }
 }
