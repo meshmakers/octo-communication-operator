@@ -104,29 +104,55 @@ public class PoolService(
     {
         logger.LogInformation("Unregistering pool {PoolName}", entity.Spec.PoolName);
 
-        if (_pools.ContainsKey(entity.Spec.PoolName))
+        if (!_pools.ContainsKey(entity.Spec.PoolName))
         {
+            return;
+        }
+
+        try
+        {
+            await DeleteDeploymentAsync(entity);
+
+            var pool = _pools[entity.Spec.PoolName];
+            pool.IsRegistered = false;
+
+            // Best-effort unregister at the controller. We're here because the
+            // CommunicationPool CR is already gone, so the controller may also
+            // have nothing to unregister: typical case is the tenant-delete
+            // cascade, where the tenant doesn't exist anymore by the time we
+            // call back and the hub answers with TenantException. Treat any
+            // HubException as a soft failure — still close the local connection
+            // and clear our cache entry, otherwise the KubeOps queue would
+            // retry the delete reconcile until it gives up.
             try
             {
-                await DeleteDeploymentAsync(entity);
-
-                var pool = _pools[entity.Spec.PoolName];
-                pool.IsRegistered = false;
                 await pool.PoolHubClient.UnregisterPoolOperatorAsync(entity.Spec.PoolName);
-                await pool.PoolHubClient.StopAsync();
             }
             catch (HubException e)
             {
-                throw PoolServiceException.ConnectionError(entity.Spec.PoolName, e);
+                logger.LogWarning(e,
+                    "Controller refused unregister for pool {PoolName} (likely tenant gone); closing connection anyway",
+                    entity.Spec.PoolName);
+            }
+
+            try
+            {
+                await pool.PoolHubClient.StopAsync();
             }
             catch (Exception e)
             {
-                throw PoolServiceException.DeployFailed(entity.Spec.PoolName, e);
+                logger.LogWarning(e,
+                    "Failed to stop pool hub client for {PoolName}; ignoring",
+                    entity.Spec.PoolName);
             }
-            finally
-            {
-                _pools.Remove(entity.Spec.PoolName);
-            }
+        }
+        catch (Exception e)
+        {
+            throw PoolServiceException.DeployFailed(entity.Spec.PoolName, e);
+        }
+        finally
+        {
+            _pools.Remove(entity.Spec.PoolName);
         }
     }
 

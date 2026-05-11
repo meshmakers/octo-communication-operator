@@ -45,6 +45,8 @@ The operator's primary resource is `V1CommunicationPoolEntity` (group `octo-mesh
 4. `AdapterReconciler` creates/updates Kubernetes `Deployment` + `Service` objects for each adapter, reading the broker credentials from the `<tenantId>-<poolName>-octo-mesh-connection` `Secret`.
 5. On pool deletion, all adapter deployments and services labelled with the pool are removed.
 
+`PoolService.UnRegisterPoolAsync` (called from `CommunicationPoolController.DeletedAsync`) treats any `HubException` from the controller-side `UnregisterPoolOperatorAsync` call as a **soft failure** and only logs it. Reason: the CR is already gone when `DeletedAsync` fires, and during the tenant-delete cascade the tenant itself no longer exists at the controller — so the unregister roundtrip will respond with `TenantException`. Re-throwing would put the entity back in the KubeOps retry queue forever. The local connection is still stopped and the pool removed from `_pools` regardless.
+
 ### Central Operator Mode (AutoManagePools)
 
 When `OPERATOR__AUTOMANAGEPOOLS=true`, `OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` and:
