@@ -7,6 +7,7 @@ using KubeOps.KubernetesClient;
 using KubeOps.Operator;
 using KubeOps.Operator.Web.Builder;
 using KubeOps.Operator.Web.Certificates;
+using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
@@ -112,6 +113,9 @@ try
     });
     builder.Services.AddSingleton<ICommunicationPoolKubernetesGateway, CommunicationPoolKubernetesGateway>();
     builder.Services.AddSingleton<ICommunicationPoolManager, CommunicationPoolManager>();
+    builder.Services.AddSingleton<IHelmProcessInvoker, HelmProcessInvoker>();
+    builder.Services.AddSingleton<IHelmRunner, HelmRunner>();
+    builder.Services.AddSingleton<IWorkloadReconciler, WorkloadReconciler>();
     builder.Services.AddSingleton<IOperatorHubClientFactory, OperatorHubClientFactory>();
     builder.Services.AddHostedService<OperatorHubService>();
     builder.Services.AddScoped<IDiagnosticsService, DiagnosticsService>();

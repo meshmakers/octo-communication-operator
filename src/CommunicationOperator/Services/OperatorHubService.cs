@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Options;
+using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
 using Microsoft.Extensions.Options;
 
@@ -17,17 +18,20 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
     private readonly OperatorOptions _options;
     private readonly IOperatorHubClientFactory _clientFactory;
     private readonly ICommunicationPoolManager _poolManager;
+    private readonly IWorkloadReconciler _workloadReconciler;
 
     public OperatorHubService(
         ILogger<OperatorHubService> logger,
         IOptions<OperatorOptions> options,
         IOperatorHubClientFactory clientFactory,
-        ICommunicationPoolManager poolManager)
+        ICommunicationPoolManager poolManager,
+        IWorkloadReconciler workloadReconciler)
     {
         _logger = logger;
         _options = options.Value;
         _clientFactory = clientFactory;
         _poolManager = poolManager;
+        _workloadReconciler = workloadReconciler;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -133,24 +137,39 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
         }
     }
 
-    // Phase 1 stub: the controller does not send these yet (Phase 2 wires
-    // PoolService.DeployPoolAsync to enumerate managed workloads and fire
-    // WorkloadDeployedAsync). Phase 3 replaces this with the real Helm
-    // reconciler.
-    public Task WorkloadDeployedAsync(WorkloadDeployedDto workload)
+    public async Task WorkloadDeployedAsync(WorkloadDeployedDto workload)
     {
         _logger.LogInformation(
-            "Workload deployed event received (phase-1 stub): tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
+            "Workload deployed event received: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
             workload.TenantId, workload.PoolName, workload.WorkloadName,
             workload.WorkloadType, workload.ChartName, workload.ChartVersion);
-        return Task.CompletedTask;
+        try
+        {
+            await _workloadReconciler.DeployAsync(workload, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Don't let a single bad workload crash the hub connection.
+            _logger.LogError(ex,
+                "Failed to deploy workload '{WorkloadName}' for tenant '{TenantId}', pool '{PoolName}'",
+                workload.WorkloadName, workload.TenantId, workload.PoolName);
+        }
     }
 
-    public Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)
+    public async Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)
     {
         _logger.LogInformation(
-            "Workload undeployed event received (phase-1 stub): tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}'",
+            "Workload undeployed event received: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}'",
             workload.TenantId, workload.PoolName, workload.WorkloadName, workload.WorkloadType);
-        return Task.CompletedTask;
+        try
+        {
+            await _workloadReconciler.UndeployAsync(workload, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to undeploy workload '{WorkloadName}' for tenant '{TenantId}', pool '{PoolName}'",
+                workload.WorkloadName, workload.TenantId, workload.PoolName);
+        }
     }
 }

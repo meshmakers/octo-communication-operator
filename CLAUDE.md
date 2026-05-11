@@ -47,6 +47,71 @@ The operator's primary resource is `V1CommunicationPoolEntity` (group `octo-mesh
 
 `PoolService.UnRegisterPoolAsync` (called from `CommunicationPoolController.DeletedAsync`) treats any `HubException` from the controller-side `UnregisterPoolOperatorAsync` call as a **soft failure** and only logs it. Reason: the CR is already gone when `DeletedAsync` fires, and during the tenant-delete cascade the tenant itself no longer exists at the controller — so the unregister roundtrip will respond with `TenantException`. Re-throwing would put the entity back in the KubeOps retry queue forever. The local connection is still stopped and the pool removed from `_pools` regardless.
 
+### Helm Workload Reconciliation (Phase 3)
+
+Workloads (Adapters + Applications) deployed to a Cloud pool are driven by
+the `WorkloadReconciler` over the `helm` CLI, fully decoupled from the old
+raw-K8s `AdapterReconciler`.
+
+**Layers:**
+- `Helm/IHelmProcessInvoker` + `HelmProcessInvoker` — low-level
+  `System.Diagnostics.Process` wrapper around the `helm` binary on PATH.
+  Captures stdout / stderr, masks `--username` / `--password` values from
+  the debug log line.
+- `Helm/IHelmRunner` + `HelmRunner` — high-level operations:
+  `EnsureRepoAsync` (idempotent `helm repo add --force-update` + `helm repo update`),
+  `UpgradeInstallAsync` (with `-f`, `--set`, `--atomic`, `--create-namespace`),
+  `UninstallAsync` (uses `--ignore-not-found`). Non-zero exit codes become
+  `HelmException` with full stderr.
+- `Reconcilers/WorkloadOverrideYamlBuilder` — turns the structured
+  `ValueOverride[]` from the controller into a `values-overrides.yaml`
+  file. Secret-flagged entries become a `valueFrom: secretKeyRef`
+  envelope pointing at the operator-owned `{release}-octo-secrets`
+  Kubernetes Secret. Non-secret entries become literal values. Nested
+  dotted paths (e.g. `oauth.clientSecret`) become nested maps.
+- `Reconcilers/WorkloadReconciler` — the orchestrator:
+  1. `ReconcileSecretAsync` materializes / refreshes / removes the
+     operator-owned K8s Secret for the workload's secret values.
+  2. `EnsureRepoAsync` registers the chart repository (alias derived
+     stably from the URL via a short SHA-1 hash, so repeated calls are
+     idempotent across operator pods).
+  3. Writes the base `ValuesYaml` and the overrides YAML to two temp
+     files; both are passed via `-f` so the overrides win.
+  4. `helm upgrade --install {tenant}-{workload} {alias}/{chartName}`.
+  5. Cleans up the temp directory.
+
+  Release names: `{tenantId}-{workloadName}`, DNS-sanitised and truncated
+  to Helm's 53-char limit.
+
+**Hookup:** `OperatorHubService.WorkloadDeployedAsync` /
+`WorkloadUndeployedAsync` now invoke the reconciler. Reconciler exceptions
+are logged but **not propagated** — same rule as for tenant lifecycle
+callbacks, one bad workload must not crash the hub connection.
+
+**Docker image** (`src/CommunicationOperator/Dockerfile`) installs the
+official `helm` package from `baltocdn.com` into the runtime image, and
+sets `HELM_CONFIG_HOME` / `HELM_CACHE_HOME` / `HELM_DATA_HOME` under
+`/operator/` so the non-root `operator-user` can write the repo cache.
+
+**Internals visible to tests:** `InternalsVisibleTo` for the test
+assembly was added so `WorkloadReconciler.ReleaseName` /
+`SecretName` / `RepoAlias` (the deterministic helpers) can be asserted
+directly.
+
+Phase-3 tests:
+- `Helm/HelmRunnerTests` — argument construction for repo-add (with /
+  without auth), upgrade-install (files + `--set` escaping), uninstall;
+  non-zero exit-code → `HelmException`.
+- `Reconcilers/WorkloadReconcilerTests/DeployAsyncTests` — secret
+  materialization (create / replace / cleanup-on-empty), repo
+  registration with optional auth, upgrade call with correct release /
+  chart-ref / values-file count.
+- `Reconcilers/WorkloadReconcilerTests/UndeployAsyncTests` — `helm uninstall`
+  invocation, secret-cleanup branches.
+- `Reconcilers/WorkloadReconcilerTests/WorkloadOverrideYamlBuilderTests`
+  — plain values, secret references, deep nesting, plaintext never
+  appearing in the output for secret entries.
+
 ### Central Operator Mode (AutoManagePools)
 
 When `OPERATOR__AUTOMANAGEPOOLS=true`, `OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` and:

@@ -1,0 +1,39 @@
+namespace Meshmakers.Octo.Communication.Operator.Helm;
+
+/// <summary>
+/// High-level wrapper around the <c>helm</c> CLI. Knows how to register chart
+/// repositories, install/upgrade releases and uninstall them. Errors surface
+/// as <see cref="HelmException"/> — never silent failures.
+/// </summary>
+public interface IHelmRunner
+{
+    /// <summary>
+    /// Idempotently registers a Helm chart repository and refreshes its index.
+    /// Equivalent to:
+    /// <code>
+    /// helm repo add {alias} {url} [--username --password]   # or --force-update
+    /// helm repo update {alias}
+    /// </code>
+    /// </summary>
+    Task EnsureRepoAsync(string alias, string url, string? username, string? password,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs <c>helm upgrade --install</c> for the given release.
+    /// </summary>
+    /// <param name="release">Helm release name (typically <c>{tenant}-{workload}</c>).</param>
+    /// <param name="chart">Chart reference, e.g. <c>{alias}/{chartName}</c>.</param>
+    /// <param name="version">Chart version.</param>
+    /// <param name="namespace">Kubernetes namespace.</param>
+    /// <param name="valuesFiles">Files passed via <c>-f</c>. Later files override earlier ones.</param>
+    /// <param name="setValues">Inline overrides passed via <c>--set</c>.</param>
+    Task UpgradeInstallAsync(string release, string chart, string version, string @namespace,
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs <c>helm uninstall</c>. A release that does not exist is treated
+    /// as success.
+    /// </summary>
+    Task UninstallAsync(string release, string @namespace, CancellationToken cancellationToken);
+}
