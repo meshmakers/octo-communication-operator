@@ -1,31 +1,37 @@
 # E2E Smoke Test — Central Operator Mode
 
 This runbook validates the central-operator code path end-to-end against a
-real local stack: tenant lifecycle events flow from the Communication
-Controller via SignalR into the Operator, and the Operator creates / deletes
-`CommunicationPool` custom resources and broker secrets in a kind cluster.
+real local stack: deploying a Cloud pool from the Refinery Studio triggers
+the Communication Controller to push a SignalR event to the Operator, and
+the Operator creates a `CommunicationPool` custom resource and broker secret
+in a kind cluster. Undeploying tears them down.
 
 The test is **manual** — it is not part of CI. Run it after non-trivial
-changes in `OperatorHubService`, `CommunicationPoolManager`, or any of the
-SDK / Controller plumbing they depend on.
+changes in `OperatorHubService`, `CommunicationPoolManager`, `PoolService`
+(controller), or any of the SDK / Helm plumbing they depend on.
 
 ## What we verify
 
 ```
-[POST /system/v1/communication/enable?tenantId=e2etest]   ← octo-cli
+[Refinery Studio → POST {tenantId}/v1/pool/deploy?poolRtId=<id>]
             ↓
-[Communication Controller → /operatorHub SignalR push]
+[Controller PoolService.DeployPoolAsync]
+            ↓  (only when RtPool.Environment == Cloud)
+[Controller /operatorHub SignalR push → PoolDeployedAsync]
             ↓
-[OperatorHubService.TenantCreatedAsync]
+[OperatorHubService.PoolDeployedAsync]
             ↓
-[CommunicationPoolManager.CreateCommunicationPoolAsync]
+[CommunicationPoolManager.CreatePoolAsync(tenantId, poolName)]
             ↓
 [real k8s API call via ICommunicationPoolKubernetesGateway]
             ↓
-[CR + Secret in 'octo' namespace of the kind cluster]   ← kubectl assertion
+[CR + Secret in 'octo' namespace of the kind cluster]  ← kubectl assertion
 ```
 
-The same path in reverse for `DisableCommunication`.
+The same path in reverse for `Undeploy Pool`. **Edge pools** transition
+state without an operator notification — they are installed and run by an
+external operator outside the central cluster and are explicitly out of
+scope for this runbook.
 
 ## Prerequisites
 
@@ -35,10 +41,11 @@ The same path in reverse for `DisableCommunication`.
 | `helm` on PATH | Installs the `octo-mesh-crds` chart |
 | `kubectl` on PATH | Cluster assertions |
 | `docker` running | Mongo + RabbitMQ containers |
-| `octo-cli` on PATH | Login + `EnableCommunication` / `DisableCommunication` |
+| `octo-cli` on PATH | Login + tenant create |
 | `octo-tools` PowerShell modules loaded | `Install-OctoInfrastructure`, `Install-OctoKubernetes`, `Invoke-BuildAll`, `Start-Octo` |
 | `.NET 10 SDK` | Builds and runs all services |
-| `octo-communication-operator`, `octo-helm-core`, plus all `octo-*` backend repos checked out under `$rootPath` | Source for build + chart |
+| Node 22+ and a recent npm | Refinery Studio dev server |
+| `octo-communication-operator`, `octo-communication-controller-services`, `octo-helm-core`, `octo-frontend-refinery-studio`, plus all `octo-*` backend repos checked out under `$rootPath` | Source for build + chart + UI |
 
 ## One-time setup
 
@@ -58,8 +65,8 @@ Install-OctoKubernetes
 Invoke-BuildAll -configuration DebugL
 ```
 
-`Install-OctoKubernetes` prints the active kubectl context at the end. If it
-is not `kind-kind`, run:
+`Install-OctoKubernetes` prints the active kubectl context at the end. If
+it is not `kind-kind`, run:
 
 ```powershell
 kubectl config use-context kind-kind
@@ -67,9 +74,21 @@ kubectl config use-context kind-kind
 
 before continuing.
 
+Also: kill any stale **MutatingWebhookConfiguration** / **ValidatingWebhookConfiguration**
+that point at a previous in-cluster operator deployment — otherwise the
+kube-apiserver will try to call a dead webhook URL and `CR create` returns
+500. Both deletes are idempotent:
+
+```powershell
+kubectl get mutatingwebhookconfiguration  | Select-String dev-mutators
+kubectl get validatingwebhookconfiguration | Select-String dev-validators
+kubectl delete mutatingwebhookconfiguration  dev-mutators   --ignore-not-found
+kubectl delete validatingwebhookconfiguration dev-validators --ignore-not-found
+```
+
 ## Run the stack
 
-In one terminal:
+In one terminal — backend services:
 
 ```powershell
 Start-Octo -configuration DebugL
@@ -82,7 +101,7 @@ that way. The configurations must match — both scripts read binaries from
 Wait until each backend service prints its "Now listening on …" line and
 status is `Running` for every job.
 
-In a second terminal:
+In a second terminal — the operator (NOT auto-started by `Start-Octo`):
 
 ```powershell
 cd $rootPath/octo-communication-operator
@@ -97,11 +116,21 @@ Controller's `/operatorHub` SignalR endpoint at `https://localhost:5015`.
 
 ```
 info: Meshmakers.Octo.Communication.Operator.Services.OperatorHubService[0]
-      Operator hub connected, waiting for tenant events
+      Operator hub connected, waiting for pool events
 ```
 
 If this line never appears, the Controller is not reachable — see
 [Troubleshooting](#troubleshooting).
+
+In a third terminal — the Refinery Studio dev server:
+
+```powershell
+cd $rootPath/octo-frontend-refinery-studio/src/octo-mesh-refinery-studio
+npm start
+```
+
+Wait until Angular reports "Compiled successfully" and serves on
+`https://localhost:4200`.
 
 ## Test procedure
 
@@ -120,47 +149,48 @@ octo-cli -c AuthStatus
 octo-cli -c Create -tid e2etest -db e2etest
 ```
 
-Without `--no-provision`, the OctoSystem user that just authenticated is
-auto-provisioned as admin in the new tenant. If the tenant already exists,
-the command reports "already exists" and is safe to skip.
+The OctoSystem user that just authenticated is auto-provisioned as admin in
+the new tenant. If the tenant already exists, the command reports "already
+exists" and is safe to skip.
 
-### 1b. Switch CLI context to the test tenant
+### 2. Create a Cloud pool
 
-`EnableCommunication` operates on the CLI's current tenant context, so we
-re-login with `e2etest` as the active tenant. The same identity (now an
-admin in `e2etest` after step 1a) is reused.
+In the Refinery Studio, sign in to the `e2etest` tenant and navigate to:
+
+```
+https://localhost:4200/e2etest/communication/pools
+```
+
+Click **New Pool** in the toolbar, then fill out the form:
+
+| Field | Value |
+|---|---|
+| Name | `default` |
+| Description | (anything, e.g. "E2E smoke test pool") |
+| **Environment** | **Cloud** |
+
+Save the pool. It appears in the list with `Environment = CLOUD`,
+`DeploymentState = UNDEPLOYED`.
+
+### 3. Deploy the pool
+
+Right-click the pool row (or use the action menu) → **Deploy Pool** →
+confirm the dialog.
+
+**Within 1–2 seconds**, the operator log should print:
+
+```
+Pool deployed event received: tenant 'e2etest', pool 'default'
+Creating broker secret 'e2etest-default-octo-mesh-connection' in namespace 'octo'
+Creating CommunicationPool CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest', pool 'default'
+CommunicationPool CR 'e2etest-default' created successfully
+```
+
+The pool row in the list refreshes to `DeploymentState = DEPLOYED`.
+
+### 4. Verify the cluster state
 
 ```powershell
-Invoke-OctoCliLoginLocal -tenantId e2etest
-octo-cli -c AuthStatus
-# Expected tenant: e2etest
-```
-
-### 2. Trigger CommunicationPool creation
-
-```powershell
-octo-cli -c EnableCommunication
-```
-
-The tenant is taken from the CLI context set in step 1b; no `-tid` flag
-needed.
-
-The operator's log should print, within a second or two:
-
-```
-info: Meshmakers.Octo.Communication.Operator.Services.OperatorHubService[0]
-      Tenant created event received: e2etest
-info: Meshmakers.Octo.Communication.Operator.Services.CommunicationPoolManager[0]
-      Creating broker secret 'e2etest-default-octo-mesh-connection' in namespace 'octo'
-info: Meshmakers.Octo.Communication.Operator.Services.CommunicationPoolManager[0]
-      Creating CommunicationPool CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest'
-info: Meshmakers.Octo.Communication.Operator.Services.CommunicationPoolManager[0]
-      CommunicationPool CR 'e2etest-default' created successfully
-```
-
-### 3. Verify the cluster state
-
-```bash
 kubectl get communicationpool -n octo
 ```
 
@@ -171,14 +201,14 @@ NAME              AGE
 e2etest-default   3s
 ```
 
-```bash
-kubectl get secret -n octo e2etest-default-octo-mesh-connection \
+```powershell
+kubectl get secret -n octo e2etest-default-octo-mesh-connection `
   -o jsonpath='{.data.brokerusername}' | base64 -d
 ```
 
 Expected: `guest` (matches `appsettings.Development.json`).
 
-```bash
+```powershell
 kubectl get communicationpool e2etest-default -n octo -o yaml
 ```
 
@@ -194,30 +224,34 @@ spec:
   brokerVirtualHost: /
 ```
 
-### 4. Trigger CommunicationPool deletion
+And the labels on both the CR and the secret should include:
+
+```yaml
+labels:
+  octo-mesh.meshmakers.io/tenant: e2etest
+  octo-mesh.meshmakers.io/pool: default
+  octo-mesh.meshmakers.io/managed-by: communication-operator
+```
+
+### 5. Undeploy the pool
+
+Back in the Refinery Studio pool list, right-click the pool → **Undeploy
+Pool** → confirm.
+
+The operator log should print:
+
+```
+Pool undeployed event received: tenant 'e2etest', pool 'default'
+Deleting CommunicationPool CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest', pool 'default'
+Deleting broker secret 'e2etest-default-octo-mesh-connection' in namespace 'octo'
+CommunicationPool CR 'e2etest-default' deleted successfully
+```
+
+The pool row refreshes to `DeploymentState = UNDEPLOYED`.
+
+### 6. Verify cleanup
 
 ```powershell
-octo-cli -c DisableCommunication
-```
-
-Same context rule as enable: tenant comes from the CLI's `e2etest` context.
-
-The operator's log should print:
-
-```
-info: Meshmakers.Octo.Communication.Operator.Services.OperatorHubService[0]
-      Tenant deleted event received: e2etest
-info: Meshmakers.Octo.Communication.Operator.Services.CommunicationPoolManager[0]
-      Deleting CommunicationPool CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest'
-info: Meshmakers.Octo.Communication.Operator.Services.CommunicationPoolManager[0]
-      Deleting broker secret 'e2etest-default-octo-mesh-connection' in namespace 'octo'
-info: Meshmakers.Octo.Communication.Operator.Services.CommunicationPoolManager[0]
-      CommunicationPool CR 'e2etest-default' deleted successfully
-```
-
-### 5. Verify cleanup
-
-```bash
 kubectl get communicationpool -n octo
 # expected: No resources found in octo namespace.
 
@@ -225,24 +259,47 @@ kubectl get secret -n octo e2etest-default-octo-mesh-connection
 # expected: NotFound error
 ```
 
+### 7. Bonus — tenant-delete cascade
+
+If you delete the `e2etest` tenant from the OctoSystem context while it
+still has a deployed Cloud pool, the controller's `TenantManagementConsumer`
+calls `PoolService.UndeployAllCloudPoolsAsync(tenantId)` in the
+`PreDeleteTenant` consumer. That fires a `PoolUndeployedAsync` event for
+every Cloud pool of the tenant, so the operator cleans up its CRs/secrets
+before the tenant data is gone.
+
+To verify: redeploy the pool (step 3), then from the OctoSystem CLI context:
+
+```powershell
+Invoke-OctoCliLoginLocal -tenantId OctoSystem
+octo-cli -c Delete -tid e2etest -y
+```
+
+Expect the same "Deleting CommunicationPool CR …" log lines as in step 5,
+followed by an empty `kubectl get communicationpool -n octo`.
+
 ## Stopping the stack
 
 Press a key in the `Start-Octo` terminal to stop the backend jobs. Press
-`Ctrl+C` in the `start-operator.ps1` terminal to stop the operator.
+`Ctrl+C` in the `start-operator.ps1` terminal to stop the operator. Stop
+the Studio dev server with `Ctrl+C` as well.
 
-The kind cluster, Helm release, and docker containers stay up — re-runs are
-fast.
+The kind cluster, Helm release, and docker containers stay up — re-runs
+are fast.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| Operator log never prints "Operator hub connected" | Controller not running, port 5015 blocked, or `appsettings.Development.json` URI mismatch. Check `logFiles/CommunicationControllerServices.log`. |
-| `Tenant created event received` fires but no CR appears | RBAC against kind. Run `kubectl auth can-i create communicationpools.octo-mesh.meshmakers.io -n octo`. With kind's default kubeconfig you should be cluster-admin. |
+| Operator log never prints "Operator hub connected, waiting for pool events" | Controller not running, port 5015 blocked, or `appsettings.Development.json` URI mismatch. Check `logFiles/CommunicationControllerServices.log`. |
+| `Pool deployed event received` fires but no CR appears | RBAC against kind. Run `kubectl auth can-i create communicationpools.octo-mesh.meshmakers.io -n octo`. With kind's default kubeconfig you should be cluster-admin. |
+| Operator log: `Internal error occurred: failed calling webhook "mutate.communicationpool…": connect: connection refused` | A stale `dev-mutators` / `dev-validators` webhook config from a previous in-cluster operator deploy still points at a dead URL. Delete both (see [One-time setup](#one-time-setup)). |
 | `kubectl get communicationpool` returns `error: the server doesn't have a resource type "communicationpool"` | CRDs chart not installed. Re-run `Install-OctoKubernetes`. |
-| `octo-cli -c EnableCommunication` returns 401 / 403 | Re-run `octo-cli -c LogIn -i`. The device-code token is short-lived. |
-| `octo-cli` cannot find the controller | Re-run `Invoke-OctoCliLoginLocal` to point at `https://localhost:5015`. |
-| `CR' already exists` log entry | Previous run did not clean up. Either re-issue `DisableCommunication` or `kubectl delete communicationpool e2etest-default -n octo` and rerun. |
+| **Deploy Pool** does nothing — operator log silent | The pool's `Environment` is set to `Edge`. Open the form, switch to `Cloud`, save, then redeploy. |
+| Refinery Studio `Deploy Pool` action missing from the context menu | The `@meshmakers/octo-services` library was not rebuilt or `npm install` was not run in `octo-mesh-refinery-studio` after the library change. From `octo-frontend-libraries/src/frontend-libraries/`: `npm run build:octo-services`. From `octo-mesh-refinery-studio/`: `npm install`. |
+| `octo-cli` cannot find the controller | Re-run `Invoke-OctoCliLoginLocal -tenantId <tenant>` to point at `https://localhost:5015`. |
+| `CR already exists` log entry on redeploy | Previous run did not clean up. Click **Undeploy Pool** in the Studio (or `kubectl delete communicationpool e2etest-default -n octo`) and retry. |
 
 Operator log: stdout of the `start-operator.ps1` terminal. Other services
 log to `$rootPath/logFiles/<ServiceName>.log` (managed by `Start-Octo`).
+Studio log: stdout of the `npm start` terminal plus the browser dev tools.
