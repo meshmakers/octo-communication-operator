@@ -1,328 +1,281 @@
-# Deployment Management Concept
+# Helm-Based Workload Deployment
 
-## Overview
+## Status
 
-The Communication Operator manages Kubernetes deployments for OctoMesh tenants. Beyond mesh adapters, it should also deploy **tenant-specific applications** (customer/third-party apps) with optional ingress and TLS.
+**Concept — implementation pending.** Replaces the earlier raw-K8s draft of this document.
 
-This document covers:
-1. CK model extension for deployable applications
-2. Helm-based deployment strategy
-3. Ingress and DNS management
-4. Version lifecycle
+## Goals
 
-## Current State
+The Communication Operator should deploy two kinds of tenant-scoped workloads to Kubernetes via Helm:
 
-### CK Type Hierarchy (System.Communication)
+1. **Adapters** — existing concept (ETL pipeline executors that connect back to the controller via SignalR).
+2. **Applications** — tenant-specific web apps (energy-community, voest-app, maco-app, …).
 
-```
-Entity (System)
-  └── DeployableEntity (abstract)
-        ├── Adapter          — ETL pipeline executor (ImageName, ImageVersion, CommunicationState, ...)
-        ├── Pool             — Device group (CommunicationState, ...)
-        └── Pipeline         — Data processing definition
-```
+Both are packaged as Helm charts hosted on GitHub Pages (classic HTTP Helm repositories — both **public** Pages sites for releases and **private** Pages sites for dev builds, the latter requiring auth). The chart source is configurable per tenant so dev builds and releases can be served from different repositories.
 
-`DeployableEntity` provides: `DeploymentState`, `Name`, `Description`, `StatusMessage`
+Out of scope for this concept:
 
-`Adapter` adds deployment-specific attributes: `ImageName`, `ImageVersion`
+- **System-wide variables** for instance-specific values (URIs, secrets). Tracked separately under `project-octo-mesh-variables.md`; deferred until the base Helm-deploy mechanic is in place.
+- **External Secret References** (Vault, ESO). Phase 4 / nice-to-have. Initial release uses encrypted-at-rest values in MongoDB.
 
-Current `DeploymentState` values: `Undeployed (0)`, `Pending (1)`, `Deployed (2)`, `Error (3)`
+## CK Model Changes (`System.Communication`)
 
-### Problem
-
-- `ImageName`/`ImageVersion` are on `Adapter`, not on `DeployableEntity`
-- No concept for deploying general applications (only adapters)
-- No Helm chart support — operator creates raw K8s Deployments/Services
-- No ingress management for deployed workloads
-
-## Proposed CK Model Changes
-
-### New Base Type: DeployableWorkload
-
-Extract the deployment attributes from `Adapter` into a shared base type:
+### New hierarchy
 
 ```
 Entity (System)
-  └── DeployableEntity (abstract)
-        ├── DeployableWorkload (abstract, NEW)
-        │     ├── Adapter        — ETL pipeline executor
-        │     └── Application    — Tenant-specific application (NEW)
-        ├── Pool
+  └── DeployableEntity (abstract, existing)        DeploymentState, Name, Description, StatusMessage
+        ├── DeployableWorkload (abstract, NEW)     ChartName, ChartVersion, ValuesYaml,
+        │     │                                     Values → List<ValueOverride>,
+        │     │                                     HelmRepository → HelmRepositoryConfiguration
+        │     ├── Adapter                          (adapter-specific attributes stay)
+        │     └── Application (NEW)                Hostname (optional, override default)
+        ├── Pool                                   Manages → DeployableWorkload (widen from Adapter)
         └── Pipeline
 ```
 
-**DeployableWorkload** (new abstract type, inherits DeployableEntity):
+**Removed from `Adapter`:**
+
+- `Deployment.ImageName`
+- `Deployment.ImageVersion`
+
+Both move to the Helm chart's `values.yaml` and are no longer first-class CK attributes. **Hard switch** — there is no migration path; the feature was barely used in production.
+
+### New types
+
+**`DeployableWorkload`** (abstract, derives from `DeployableEntity`):
 
 | Attribute | Type | Required | Description |
-|-----------|------|----------|-------------|
-| ImageName | string | yes | Container image name (e.g., `mycompany/energy-dashboard`) |
-| ImageVersion | string | yes | Container image tag (e.g., `2.1.0`) |
-| HelmChartName | string | yes | Helm chart reference (e.g., `oci://registry/charts/energy-dashboard`) |
-| HelmChartVersion | string | yes | Helm chart version (e.g., `1.0.0`) |
-| Replicas | int | no | Number of replicas (default: 1) |
+|---|---|---|---|
+| `ChartName` | string | yes | Chart reference path within the registry, e.g. `voest-app`. |
+| `ChartVersion` | string | yes | Chart version, e.g. `1.2.3`. |
+| `ValuesYaml` | string (large) | no | Full `values.yaml` content. UI offers a code editor + a file-upload. |
+| `Values` | association → `ValueOverride[]` | no | Structured key-path / value list, merged on top of `ValuesYaml`. |
+| `HelmRepository` | association → `HelmRepositoryConfiguration` | yes | Which registry / channel to pull the chart from. |
 
-**Application** (new concrete type, inherits DeployableWorkload):
+**`Application`** (derives from `DeployableWorkload`, final):
 
 | Attribute | Type | Required | Description |
-|-----------|------|----------|-------------|
-| IngressEnabled | bool | no | Whether to create an Ingress (default: false) |
-| IngressName | string | no | DNS prefix for the ingress (e.g., `energy` → `energy.prod-1.octo-mesh.com`) |
-| Port | int | no | Container port (default: 80) |
-| EnvironmentVariables | string (JSON) | no | JSON object of env vars: `{"API_KEY": "...", "MODE": "production"}` |
-| ValuesOverride | string (JSON/YAML) | no | Helm values override (JSON or YAML string) |
+|---|---|---|---|
+| `Hostname` | string | no | Optional override for the public hostname (otherwise the chart's own ingress defaults are used). Operator does not currently manage ingress separately — the chart is expected to declare its own Ingress. |
 
-**Adapter** changes:
-- `ImageName` and `ImageVersion` move to `DeployableWorkload` (breaking change in CK model, but backwards compatible via inheritance)
-- Adapter-specific attributes (`CommunicationState`, `Configuration`, etc.) stay on `Adapter`
+> The first iteration intentionally keeps `Application` thin. URIs, OAuth client IDs, database connection strings etc. live in `ValuesYaml` / `Values`. Once the Variables feature lands, those become referenceable as `${variable.name}`.
 
-### Association: Pool → Application
+**`HelmRepositoryConfiguration`** (derives from `${System}/Configuration`, final, in `System.Communication`):
 
-Extend the existing Pool → Adapter "Manages" association pattern:
+| Attribute | Type | Required | Description |
+|---|---|---|---|
+| `RepositoryUrl` | string | yes | HTTP(S) URL of a Helm repository index, e.g. `https://meshmakers.github.io/octo-helm-core` (public) or a private GitHub Pages site. |
+| `Channel` | enum `HelmChannel` | yes | `Dev` or `Release`. Pure label; the operator does not derive behavior from it, but the UI uses it to colour-code. |
+| `Username` | string | no | Optional basic-auth username (for private GH Pages — typically a GitHub username or PAT-bearer name). |
+| `Password` | string (secret) | no | Optional basic-auth password / PAT. Encrypted at rest (see Secrets section). |
 
-| Association | From | To | Multiplicity | Description |
-|-------------|------|----|-------------|-------------|
-| Manages (existing) | Pool | Adapter | N:1 | Pool manages adapters |
-| Deploys (new) | Pool | Application | N:1 | Pool deploys applications |
+Tenant-scoped, like every other `*Configuration` subtype today. Workloads in tenant `acme` pick from `acme`'s repositories.
 
-Alternatively, both `Adapter` and `Application` inherit from `DeployableWorkload`, and the "Manages" association is from Pool to DeployableWorkload — one association for both types.
+### New record
 
-### DeploymentState Extension
+**`ValueOverride`** (CK record):
 
-Extend the `DeploymentState` enum with a new value for manually installed workloads:
+| Field | Type | Description |
+|---|---|---|
+| `Path` | string | Helm dotted-path, e.g. `image.tag`, `service.port`, `oauth.clientId`. |
+| `Value` | string | The override value (always a string in storage; Helm coerces). |
+| `IsSecret` | boolean | If true, `Value` is encrypted at rest and rendered as a Kubernetes Secret reference at deploy time. |
 
-| Value | Code | Meaning | Operator behavior |
-|-------|------|---------|-------------------|
-| `Undeployed` | 0 | Not deployed, waiting for operator | Operator deploys via Helm |
-| `Pending` | 1 | Deployment in progress | Operator is working on it |
-| `Deployed` | 2 | Operator deployed and running | Operator manages lifecycle (upgrade, delete) |
-| `Error` | 3 | Deployment failed | Operator retries |
-| `ManuallyDeployed` | 4 | Installed outside the operator (NEW) | **Operator ignores** — no deploy, upgrade, or delete |
+### New enum
 
-When a workload is set to `ManuallyDeployed`, the operator skips it entirely. This supports:
-- **Edge deployments** where adapters are installed via Helm manually
-- **Customer-managed adapters** with custom configurations
-- **Migration**: Set state from `ManuallyDeployed` to `Undeployed` to hand over to the operator
+**`HelmChannel`** — `Dev (0)`, `Release (1)`.
 
-## Deployment Strategy: Helm Charts
+### Pool ↔ Workload association
 
-### Why Helm
-
-- Standard packaging format for Kubernetes applications
-- Supports templated values (environment-specific configuration)
-- Built-in rollback, versioning, release management
-- Customer applications likely already have Helm charts
-- The operator can use the Helm SDK to install/upgrade/uninstall releases
-
-### Deployment Mode
-
-All workloads (adapters and applications) are deployed via Helm charts. There is no image-only mode — every deployable workload requires a Helm chart reference. This means:
-
-- **Adapters**: The existing `octo-mesh-adapter` Helm chart (from `octo-helm-core`) is used. The operator passes tenant-specific values (tenantId, broker config, adapter IDs).
-- **Applications**: Customer-provided or standard Helm charts. The operator passes application-specific values.
-
-This eliminates the dual code path (raw K8s resources vs. Helm) and gives all workloads the same lifecycle: `helm install` → `helm upgrade` → `helm uninstall`.
-
-**Consequence for CK model:** `HelmChartName` and `HelmChartVersion` become **required** attributes on `DeployableWorkload` (not optional).
-
-### Helm Values Generation
-
-The operator generates a Helm values file from the workload attributes:
+`Pool` currently has `Manages → Adapter`. We widen the target to `DeployableWorkload` so a Pool can manage both Adapters and Applications.
 
 ```yaml
-# Auto-generated by Communication Operator
-image:
-  repository: {{ ImageName }}
-  tag: {{ ImageVersion }}
-replicaCount: {{ Replicas }}
-service:
-  port: {{ Port }}
-ingress:
-  enabled: {{ IngressEnabled }}
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: {{ clusterIssuer }}
-  hosts:
-    - host: {{ IngressName }}.{{ clusterDomain }}
-      paths:
-        - path: /
-          pathType: Prefix
-  tls:
-    - secretName: {{ IngressName }}-tls
-      hosts:
-        - {{ IngressName }}.{{ clusterDomain }}
-env:
-  {{ EnvironmentVariables as key-value pairs }}
+# types/pool.yaml
+associations:
+- id: ${this}/Manages
+  targetCkTypeId: ${this}/DeployableWorkload  # was: ${this}/Adapter
 ```
 
-If `ValuesOverride` is set, it is merged on top of the generated values (deep merge, override takes precedence).
+CK runtime supports polymorphic associations — listing a Pool's managed workloads returns a mixed collection of `RtAdapter` + `RtApplication`. Consumers (Studio, Operator) discriminate by `ckTypeId`.
 
-### Helm Release Naming
+### Model version bump
 
-Pattern: `{tenantId}-{applicationName}` (DNS-safe, lowercase)
+`System.Communication` goes from `3.14.0` → `3.15.0`. All consumers (`octo-sdk`, controller, operator, studio) get rebuilt.
 
-Example: Tenant `acme-energy`, Application `dashboard` → Helm release `acme-energy-dashboard`
+## Secrets — Phase-1 Approach (Encrypted at Rest)
 
-## Ingress and DNS Management
+Every `ValueOverride` with `IsSecret = true` is stored encrypted in MongoDB. Same mechanism is reused for any other CK attribute that needs at-rest encryption in the future (e.g. configuration passwords, OAuth client secrets) — the key is **not** Helm-specific.
 
-### DNS Pattern
+The encryption is symmetric (AES-256-GCM) with a master key supplied to the controller via configuration. Reference name: **`InstanceSecretKey`** (one shared symmetric key per OctoMesh instance, scoped to a deployment of the controller).
 
-```
-{IngressName}.{clusterDomain}
-```
+**Encryption boundary:** controller-side. The controller encrypts on write, decrypts only at the moment it ships values down to the operator over SignalR (which is TLS).
 
-Examples:
-- Application `energy` on `prod-1.octo-mesh.com` → `energy.prod-1.octo-mesh.com`
-- Application `dashboard` on `prod-1.octo-mesh.com` → `dashboard.prod-1.octo-mesh.com`
+**Master-key delivery:**
 
-### TLS Certificate
+- Local dev: `OCTO_INSTANCESECRETKEY` environment variable (base64-encoded 32-byte key).
+- Production: K8s Secret mounted into the controller. Recommended path: external Vault `meshmakers/{cluster}/instance-secret-key` → synced via the existing infrastructure pipeline.
 
-Handled automatically by cert-manager via the Ingress annotation:
-```yaml
-cert-manager.io/cluster-issuer: letsencrypt-prod
-```
+The **operator does not need the key** — values arrive already decrypted over the SignalR channel (which is TLS-secured). This keeps the trust boundary clean: the key lives only where the data lives (controller + DB).
 
-The operator sets this annotation based on the cluster's cert-manager configuration (from OperatorOptions or auto-detected).
+**UI behaviour:**
 
-### DNS Record
+- Secret fields are write-only. After save, the UI shows `••••••••` and an "Update" button that opens a separate input.
+- A "Reveal" button can be added later (after permission gating) — not in v1.
 
-If `external-dns` is deployed (as on prod-1), the DNS record is created automatically from the Ingress host. No manual DNS configuration needed.
+**Operator behaviour at deploy time:**
 
-### Multi-Tenant Isolation
+For every `ValueOverride { IsSecret: true }`:
 
-Each tenant's applications run in a separate namespace or with tenant-scoped labels:
-- Namespace: `{tenantId}` or shared namespace with labels
-- Labels: `octo-mesh.meshmakers.io/tenant: {tenantId}`
-- Network policies can isolate tenant workloads (future)
+1. Controller already decrypted the value just before sending it via SignalR.
+2. Operator collects all secret overrides into a single Kubernetes `Secret` named `{releaseName}-octo-secrets`.
+3. Operator rewrites the Helm value at `Path` to a placeholder that the chart resolves via `secretKeyRef` — convention: the chart's value at `Path` must accept either an inline string or `{ valueFrom: { secretKeyRef: { name, key } } }`.
+
+This shifts a small contract requirement onto every chart we deploy: secret-bearing values must be `valueFrom`-aware. Acceptable, because both energy-community / voest / maco charts are ours.
+
+> Phase 4 (with Variables): add a `vault://...` reference syntax so `ValueOverride.Value` can be a pointer instead of an encrypted blob.
+
+## Helm Engine
+
+Choice: **shell-exec `helm` CLI** from the operator container, not a .NET Helm SDK.
+
+Why:
+
+- No production-grade Helm SDK for .NET exists (only Go SDK).
+- `helm` CLI is small, well-maintained, and supports OCI + HTTP repos natively.
+- Operator already runs as a single container — adding `helm` to the image is trivial.
+- Easy to debug: same commands an SRE would type by hand.
+
+Operator wraps `helm` with a thin abstraction (`IHelmRunner`) so tests can substitute it. The runner invokes:
+
+- `helm repo add {alias} {repositoryUrl} [--username --password]` (once per `HelmRepositoryConfiguration`; alias derived from the configuration's RtId)
+- `helm repo update {alias}` (before every deploy, to pick up new chart versions)
+- `helm upgrade --install {release} {alias}/{chartName} --version {v} -f values.yaml --namespace {ns}`
+- `helm uninstall {release} --namespace {ns}`
+
+For private GitHub Pages, `Username` + `Password` flow into `--username` / `--password`. GitHub Pages basic-auth typically wants a username + a PAT with `repo` scope.
 
 ## Operator Flow
 
-### Application Deployment (via SignalR)
+### Workload Deploy (Adapter or Application)
 
 ```
-1. Admin creates Application entity in OctoMesh (via GraphQL/UI)
-   → RtApplication stored in MongoDB with ImageName, HelmChartName, IngressName, etc.
+1. User creates / updates an Adapter or Application entity in OctoMesh (Studio GraphQL).
+   The entity belongs to a Pool. The Pool has Environment = Cloud.
 
-2. Communication Controller notifies connected Operator
-   → DeployApplicationAsync(tenantId, ApplicationDto)
+2. User clicks "Deploy Pool" (existing flow) OR explicitly deploys a single workload
+   (new: "Deploy Workload" context menu action).
 
-3. Operator receives callback:
-   - Generate values.yaml from Application attributes
-   - helm install/upgrade {tenantId}-{appName} {chartRef} -f values.yaml
-   - Ingress is part of the Helm chart (enabled via values when IngressEnabled=true)
+3. Controller PoolService.DeployPoolAsync:
+   - Sets DeploymentState=Deployed on the Pool (existing).
+   - Enumerates managed workloads of the Pool.
+   - For each Cloud workload, sends WorkloadDeployedAsync(tenantId, workloadDto)
+     to connected operators via OperatorConnectionManager. The DTO carries:
+       * tenantId, poolName, workloadName, workloadType (Adapter|Application)
+       * chartName, chartVersion, registryUri (resolved from HelmRepositoryConfiguration)
+       * valuesYaml, valueOverrides (with secrets already decrypted server-side)
 
-4. Operator reports deployment state back to Controller
-   → UpdateApplicationDeploymentStateAsync(...)
+4. Operator receives WorkloadDeployedAsync:
+   - Logs in to the OCI registry if credentials are present.
+   - Writes effective values to a temp file (Yaml merged with overrides, secrets
+     swapped for secretKeyRef placeholders).
+   - Creates the {release}-octo-secrets K8s Secret if any IsSecret values exist.
+   - helm upgrade --install {tenant}-{workloadName} {chart} --version {v} -f values.yaml
+       --namespace {poolNamespace}.
+   - Reports back via PoolHub.UpdateWorkloadDeploymentStateAsync(workloadRtId, state).
+
+5. Studio refetches the pool, the workload shows DeploymentState = Deployed.
 ```
 
-### Application Update
+### Workload Undeploy
 
-```
-1. Admin updates Application entity (e.g., new ImageVersion)
-   → Controller sends UpdateApplicationAsync callback
+Mirror of deploy. Operator runs `helm uninstall {release}` and `kubectl delete secret {release}-octo-secrets` (if it existed).
 
-2. Operator: helm upgrade with new values
-3. Kubernetes handles rolling update
-```
+### Tenant Delete Cascade
 
-### Application Removal
-
-```
-1. Admin deletes Application entity
-   → Controller sends UndeployApplicationAsync callback
-
-2. Operator: helm uninstall
-```
-
-## Version Management
-
-Extends the adapter version concept to applications:
-
-### Per-Application Versioning
-
-Each Application instance has its own `ImageVersion` / `HelmChartVersion`. Updates are explicit — the admin (or CD pipeline) updates the version in OctoMesh.
-
-### Global Version Update (CD Pipeline)
-
-For OctoMesh-managed applications (e.g., standard adapters), the CD pipeline can trigger a bulk update via the OperatorHub:
-
-```csharp
-// IOperatorHubCallbacks extension
-Task WorkloadVersionUpdatedAsync(string imageName, string newVersion);
-```
-
-The operator updates all workloads (adapters + applications) matching the image name.
-
-### Version Pinning
-
-Applications can have `AutoUpdate: false` to prevent automatic version updates. Only explicit version changes via the OctoMesh API trigger updates.
-
-## Configuration Summary
-
-### OperatorOptions (extended)
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `ClusterDomain` | Domain suffix for ingress hostnames | _(required)_ |
-| `CertManagerClusterIssuer` | ClusterIssuer name for TLS certificates | `letsencrypt-prod` |
-| `DefaultNamespacePattern` | Namespace for tenant workloads (`{tenantId}` or fixed) | `octo-mesh` |
-| `HelmRepositoryUrl` | Default Helm repository URL | _(optional)_ |
-| `HelmRegistryCredentials` | Credentials for OCI Helm registries | _(optional)_ |
-
-### IOperatorHubCallbacks (extended)
-
-| Callback | Description |
-|----------|-------------|
-| `TenantCreatedAsync(tenantId)` | Create CommunicationPool CR (existing) |
-| `TenantDeletedAsync(tenantId)` | Delete CommunicationPool CR (existing) |
-| `DeployApplicationAsync(tenantId, appDto)` | Deploy a tenant application |
-| `UpdateApplicationAsync(tenantId, appDto)` | Update a tenant application |
-| `UndeployApplicationAsync(tenantId, appDto)` | Remove a tenant application |
-| `WorkloadVersionUpdatedAsync(imageName, version)` | Bulk version update |
+Already in place from the previous fix — the controller's
+`UndeployAllCloudPoolsAsync` notifies the operator. New: when the pool is
+torn down, the operator additionally enumerates all managed workloads of
+the pool and `helm uninstall`s each.
 
 ## Implementation Phases
 
-### Phase 1: CK Model (System.Communication)
-- Create `DeployableWorkload` abstract type
-- Create `Application` type with ingress/helm attributes
-- Refactor `Adapter` to inherit from `DeployableWorkload`
-- Migrate `ImageName`/`ImageVersion` from Adapter to DeployableWorkload
+Five phases. Each phase is committable on its own and leaves the system in a working state (the next phase builds on it but doesn't require backporting).
 
-### Phase 2: Controller (Communication Controller Services)
-- Add `ApplicationService` (CRUD for Application entities)
-- Extend `PoolHub`/`OperatorHub` with application deployment callbacks
-- Add Application deployment DTOs to SDK contracts
+### Phase 1 — CK Model + SDK Contracts
 
-### Phase 3: Operator (Communication Operator)
-- Add Helm SDK dependency (`Helm.Sdk` or shell-exec `helm` CLI)
-- Implement `ApplicationReconciler` (Helm install/upgrade/uninstall)
-- Implement ingress creation with cert-manager and DNS
-- Extend `OperatorHubService` to handle application callbacks
+**Repos:** `octo-communication-controller-services` (CK model), `octo-sdk` (DTOs).
 
-### Phase 4: Version Lifecycle
-- Add `WorkloadVersionUpdatedAsync` callback
-- CD pipeline integration (API endpoint for version announcements)
-- Auto-update vs. pinned version support
+1. `System.Communication-3.15.0`:
+   - New enum `HelmChannel`.
+   - New attributes: `ChartName`, `ChartVersion`, `ValuesYaml`, `RegistryUri`, `Hostname`, `IsSecret`, `Path`, `Value`, `Channel`.
+   - New record `ValueOverride`.
+   - New types: `HelmRepositoryConfiguration`, `DeployableWorkload`, `Application`.
+   - Refactor `Adapter`: now derives from `DeployableWorkload`, drops `ImageName` / `ImageVersion`.
+   - Widen `Pool.Manages` to target `DeployableWorkload`.
+2. SDK DTOs:
+   - `WorkloadDeployedDto`, `WorkloadUndeployedDto` (carry chart + values).
+   - `ValueOverrideDto` (`{ Path, Value, IsSecret }`).
+   - Extend `IOperatorHubCallbacks` with `WorkloadDeployedAsync` / `WorkloadUndeployedAsync`.
+3. Build + push.
 
-## Example: Deploying a Customer Energy Dashboard
+**Exit criteria:** All consumers compile against new model; no UI yet. Existing pools/adapters still deploy via the old path (no Helm code yet → operator stubs the new callbacks).
 
-1. Admin creates Application in OctoMesh for tenant `acme-energy`:
-   ```
-   Name: energy-dashboard
-   ImageName: acme/energy-dashboard
-   ImageVersion: 2.1.0
-   IngressEnabled: true
-   IngressName: energy
-   Port: 8080
-   EnvironmentVariables: {"API_URL": "https://api.prod-1.octo-mesh.com/acme-energy/v1/graphql"}
-   ```
+### Phase 2 — Controller-side: HelmRepository CRUD + Encryption
 
-2. Communication Controller notifies Operator via SignalR
+**Repo:** `octo-communication-controller-services`.
 
-3. Operator creates:
-   - Deployment: `acme-energy-energy-dashboard` with image `acme/energy-dashboard:2.1.0`
-   - Service: ClusterIP on port 8080
-   - Ingress: `energy.prod-1.octo-mesh.com` with TLS via cert-manager
+1. `HelmRepositoryService` (CRUD over GraphQL/REST).
+2. `WorkloadEncryptionService` — AES-256-GCM, master key from `OCTO_HELM_SECRET_KEY`.
+3. `ApplicationService` (CRUD over GraphQL).
+4. Extend `PoolService.DeployPoolAsync` to walk managed workloads, build per-workload DTOs, decrypt secrets, fire `WorkloadDeployedAsync`.
+5. Tests: encryption round-trip, workload DTO assembly.
 
-4. External-DNS creates DNS record automatically
+**Exit criteria:** Operator receives `WorkloadDeployedAsync` calls with fully-resolved values; operator still stubs the actual helm work.
 
-5. Result: `https://energy.prod-1.octo-mesh.com` is live with valid TLS certificate
+### Phase 3 — Operator-side: Helm Reconciliation
+
+**Repo:** `octo-communication-operator`.
+
+1. Bake `helm` binary into the operator Dockerfile.
+2. `IHelmRunner` + `HelmRunner` (process-exec wrapper).
+3. `WorkloadReconciler` — replaces `AdapterReconciler`. Same lifecycle (deploy / upgrade / delete) but speaks Helm.
+4. Secret materialization: build the `{release}-octo-secrets` K8s Secret from `IsSecret`-flagged overrides; rewrite `valuesYaml` references on the fly.
+5. Hook into the existing `PoolHub` callbacks so reconciler triggers on `WorkloadDeployedAsync` / `WorkloadUndeployedAsync`.
+6. Remove old `AdapterReconciler` raw-K8s code path.
+7. E2E run-through: kind cluster, OCI registry (use `ghcr.io` test repo), validate one Adapter chart + one Application chart deploys.
+
+**Exit criteria:** Pool deploy / undeploy works end-to-end via Helm. `kubectl get all -n octo` shows Helm-released resources, not operator-built ones.
+
+### Phase 4 — Studio UI
+
+**Repo:** `octo-frontend-refinery-studio`.
+
+1. `HelmRepositoryConfiguration` form (analogous to existing `*ConfigurationForm`s).
+2. `Application` list + form. Form has:
+   - Basic fields (Name, Description, Pool, HelmRepository, ChartName, ChartVersion).
+   - `ValuesYaml` editor (monaco / codemirror, YAML mode + file upload).
+   - `ValueOverrides` table editor (Path / Value / IsSecret column; rows addable/removable).
+   - Secret fields rendered as `••••••••` after save.
+3. Adapter form: drop `ImageName` / `ImageVersion`, add the same Helm fields shared with Application (component reuse).
+4. Pool list: existing Deployment column already shows aggregate state.
+
+**Exit criteria:** Full create / edit / deploy / undeploy / delete workflow from the UI for both Adapters and Applications.
+
+### Phase 5 — Documentation + Smoke Test
+
+1. Update `octo-communication-operator/docs/E2E-SMOKE-TEST.md` to cover the Helm deploy flow.
+2. Update per-repo CLAUDE.md files (CK model section, Operator reconciler section, Studio form patterns).
+3. Add a runbook: "How to publish a new Helm chart version and roll it out."
+
+## Open Questions / TODOs
+
+- **HelmRepositoryConfiguration scoping** is tenant-scoped per the decision above. When the Variables feature lands, we'll add a system-scope config that tenants can opt into instead of providing their own.
+- **Chart contract for secrets**: every chart we deploy must support `secretKeyRef` for secret-flagged values. Captured separately in `project-helm-chart-secret-contract.md` (memory) — TODO before the Phase-3 E2E test.
+- **Multiple replicas of the operator**: tracking of `OperatorConnectionManager.GetDeployedPools()` is process-local. Pre-existing TODO; not introduced by this refactor.
+
+## References
+
+- Previous draft of this doc (raw-K8s deployment) was replaced 2026-05-11 to reflect the Helm-based direction.
+- Related memory: `project-octo-mesh-variables.md` (instance-scoped variables, deferred).
+- Related memory: `project-communication-operator-status.md` (E2E passed 2026-05-11).

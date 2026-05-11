@@ -132,4 +132,25 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
                 tenantId, poolName);
         }
     }
+
+    // Phase 1 stub: the controller does not send these yet (Phase 2 wires
+    // PoolService.DeployPoolAsync to enumerate managed workloads and fire
+    // WorkloadDeployedAsync). Phase 3 replaces this with the real Helm
+    // reconciler.
+    public Task WorkloadDeployedAsync(WorkloadDeployedDto workload)
+    {
+        _logger.LogInformation(
+            "Workload deployed event received (phase-1 stub): tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
+            workload.TenantId, workload.PoolName, workload.WorkloadName,
+            workload.WorkloadType, workload.ChartName, workload.ChartVersion);
+        return Task.CompletedTask;
+    }
+
+    public Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)
+    {
+        _logger.LogInformation(
+            "Workload undeployed event received (phase-1 stub): tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}'",
+            workload.TenantId, workload.PoolName, workload.WorkloadName, workload.WorkloadType);
+        return Task.CompletedTask;
+    }
 }
