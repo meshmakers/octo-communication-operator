@@ -1,14 +1,21 @@
 # E2E Smoke Test — Central Operator Mode
 
 This runbook validates the central-operator code path end-to-end against a
-real local stack: deploying a Cloud pool from the Refinery Studio triggers
-the Communication Controller to push a SignalR event to the Operator, and
-the Operator creates a `CommunicationPool` custom resource and broker secret
-in a kind cluster. Undeploying tears them down.
+real local stack. Deploying a Cloud pool from the Refinery Studio triggers
+two things on the Communication Operator:
+
+1. **Pool CR + broker secret** — the operator creates a `CommunicationPool`
+   custom resource and a broker-credentials `Secret` in the kind cluster
+   (steps 2–6 below).
+2. **Helm-based workload deploys** — for every Adapter / Application
+   managed by the pool, the operator runs `helm upgrade --install` (step 7).
+
+Undeploying tears all of that down in reverse order.
 
 The test is **manual** — it is not part of CI. Run it after non-trivial
 changes in `OperatorHubService`, `CommunicationPoolManager`, `PoolService`
-(controller), or any of the SDK / Helm plumbing they depend on.
+(controller), `WorkloadReconciler`, or any of the SDK / Helm plumbing they
+depend on.
 
 ## What we verify
 
@@ -26,10 +33,27 @@ changes in `OperatorHubService`, `CommunicationPoolManager`, `PoolService`
 [real k8s API call via ICommunicationPoolKubernetesGateway]
             ↓
 [CR + Secret in 'octo' namespace of the kind cluster]  ← kubectl assertion
+
+       …then, for every workload managed by the pool:
+
+[Controller PoolService.DeployManagedWorkloadsAsync]
+            ↓
+[Controller /operatorHub SignalR push → WorkloadDeployedAsync(WorkloadDeployedDto)]
+            ↓
+[OperatorHubService.WorkloadDeployedAsync]
+            ↓
+[WorkloadReconciler.DeployAsync]
+            ├─ materialize K8s Secret '{release}-octo-secrets' for IsSecret values
+            ├─ helm repo add (alias derived from URL hash) + helm repo update
+            └─ helm upgrade --install --atomic '{tenantId}-{workloadName}' {alias}/{chart}
+            ↓
+[Helm release + chart-defined Deployment / Service / … in 'octo' namespace]  ← helm + kubectl assertions
 ```
 
-The same path in reverse for `Undeploy Pool`. **Edge pools** transition
-state without an operator notification — they are installed and run by an
+The same path in reverse for `Undeploy Pool` — workloads are
+`helm uninstall`-ed first (so the operator can still resolve the pool's
+namespace), then the pool CR is removed. **Edge pools** transition state
+without any operator notification — they are installed and run by an
 external operator outside the central cluster and are explicitly out of
 scope for this runbook.
 
@@ -259,24 +283,168 @@ kubectl get secret -n octo e2etest-default-octo-mesh-connection
 # expected: NotFound error
 ```
 
-### 7. Bonus — tenant-delete cascade
+### 7. Workload deploy via Helm
+
+This step validates the Phase-3 Helm path: the operator runs
+`helm upgrade --install` for every Adapter or Application that is
+`Manages`-associated with the pool when it is deployed.
+
+#### 7.1 Prerequisites — a chart you can deploy
+
+You need at least one reachable Helm chart. Easiest options:
+
+- **A published meshmakers chart** (e.g. an Adapter or an App chart that
+  CI already publishes to GitHub Pages). Both anonymous releases-Pages and
+  private dev-Pages (HTTP basic auth — `Username` / `Password` on the
+  `HelmRepositoryConfiguration`) work.
+- **Any public test chart**, e.g. `https://charts.bitnami.com/bitnami`
+  with chart `nginx`. Useful purely to prove that the Helm pipe is alive
+  — the chart does not have to know anything about OctoMesh.
+
+The chart URL needs to be reachable **from inside the kind container's
+network**. GitHub Pages and `charts.bitnami.com` are reachable through
+the standard kind egress (the operator runs on the host, not in-cluster,
+so it uses the host's network — this is usually a non-issue with kind).
+
+#### 7.2 Create a `HelmRepositoryConfiguration`
+
+In Refinery Studio: **General → Configuration → New Configuration → Helm
+Repository**. Fill in:
+
+| Field | Example |
+|---|---|
+| Name | `e2e-test-repo` |
+| Repository URL | `https://charts.bitnami.com/bitnami` |
+| Channel | `stable` (free text — purely informational) |
+| Username | _(leave empty for public repos)_ |
+| Password | _(leave empty for public repos; if set, stored encrypted at rest via the controller's `encrypt-value` endpoint)_ |
+
+Save. The configuration appears in the General → Configuration list.
+
+#### 7.3 Create an Application bound to the pool
+
+**Communication → Applications → New Application**. Fill in:
+
+| Field | Example |
+|---|---|
+| Name | `e2e-nginx` |
+| Description | "E2E smoke test workload" |
+| Pool | `default` (the pool from step 2) |
+| Helm Repository | `e2e-test-repo` (the config from step 7.2) |
+| Chart Name | `nginx` |
+| Chart Version | _(leave empty to use latest, or pin to a known-good version)_ |
+| Hostname | _(empty)_ |
+| values.yaml | _(empty for the bitnami sanity test, or paste structured values for a real adapter/app chart)_ |
+| Value Overrides | _(empty for the smoke test — but if you add a `Secret`-flagged row, validate in step 7.5 that the operator-owned Secret is materialized)_ |
+
+Save. The Application appears in `Communication → Applications` with
+`DeploymentState = UNDEPLOYED`.
+
+> Same form, same checks for an Adapter — the Adapter form added the
+> Helm-fields surface in Phase-4. Pick whichever entity you have a chart
+> for.
+
+#### 7.4 Deploy the pool (now with workloads)
+
+Right-click the pool row from step 2 → **Deploy Pool** → confirm.
+
+The operator log should print the pool-CR creation lines from step 3,
+**immediately followed by** one log block per workload:
+
+```
+Workload deployed event received: tenant 'e2etest', release 'e2etest-e2e-nginx'
+Ensuring helm repo 'r-<hash>' (https://charts.bitnami.com/bitnami)
+Running 'helm upgrade --install e2etest-e2e-nginx r-<hash>/nginx --namespace octo --create-namespace --atomic -f <values.yaml> -f <overrides.yaml>'
+Helm release 'e2etest-e2e-nginx' deployed successfully
+```
+
+The Application row in the Studio refreshes to `DeploymentState = DEPLOYED`.
+
+#### 7.5 Verify the workload in the cluster
+
+```powershell
+helm --kube-context kind-kind list -n octo
+```
+
+Expected: a release named `e2etest-e2e-nginx` (or however many workloads
+the pool manages), `STATUS = deployed`.
+
+```powershell
+kubectl --context kind-kind get all -n octo -l app.kubernetes.io/instance=e2etest-e2e-nginx
+```
+
+Expected: whatever resources the chart renders (for `bitnami/nginx`:
+a `Deployment`, `ReplicaSet`, `Pod`, `Service`). For a meshmakers Adapter
+chart, expect the adapter `Deployment` + `Service` + `ConfigMap`. Wait for
+pods to reach `Ready 1/1`.
+
+**If the Application has secret-flagged value overrides**, also assert the
+operator-owned secret was materialized:
+
+```powershell
+kubectl --context kind-kind get secret -n octo e2etest-e2e-nginx-octo-secrets -o yaml
+```
+
+Expected: one entry under `data` per secret-flagged override path. The
+ciphertext (`enc:v1:…`) has been decrypted by the controller before being
+sent to the operator, so the secret's value here is the plaintext that
+the chart will consume via `valueFrom: secretKeyRef`.
+
+#### 7.6 Undeploy the pool (workloads come down first)
+
+Right-click the pool → **Undeploy Pool** → confirm.
+
+The operator log should print the workload-uninstall lines **before** the
+pool-CR delete lines:
+
+```
+Workload undeployed event received: tenant 'e2etest', release 'e2etest-e2e-nginx'
+Running 'helm uninstall e2etest-e2e-nginx --namespace octo --ignore-not-found'
+Helm release 'e2etest-e2e-nginx' uninstalled
+…
+Pool undeployed event received: tenant 'e2etest', pool 'default'
+Deleting CommunicationPool CR 'e2etest-default' …
+```
+
+The ordering matters: the operator removes the workload releases first so
+the pool's namespace and broker secret are still resolvable while
+`helm uninstall` runs.
+
+#### 7.7 Verify cleanup
+
+```powershell
+helm --kube-context kind-kind list -n octo
+# expected: no e2etest-* releases
+
+kubectl --context kind-kind get all -n octo -l app.kubernetes.io/instance=e2etest-e2e-nginx
+# expected: No resources found
+
+kubectl --context kind-kind get secret -n octo e2etest-e2e-nginx-octo-secrets
+# expected: NotFound — the operator-owned secret is removed alongside the helm release
+```
+
+### 8. Bonus — tenant-delete cascade
 
 If you delete the `e2etest` tenant from the OctoSystem context while it
 still has a deployed Cloud pool, the controller's `TenantManagementConsumer`
 calls `PoolService.UndeployAllCloudPoolsAsync(tenantId)` in the
-`PreDeleteTenant` consumer. That fires a `PoolUndeployedAsync` event for
-every Cloud pool of the tenant, so the operator cleans up its CRs/secrets
-before the tenant data is gone.
+`PreDeleteTenant` consumer. That fires a `WorkloadUndeployedAsync` event
+for every tracked workload, then a `PoolUndeployedAsync` event for every
+Cloud pool of the tenant, so the operator cleans up its Helm releases,
+CRs, and secrets before the tenant data is gone.
 
-To verify: redeploy the pool (step 3), then from the OctoSystem CLI context:
+To verify: redeploy the pool (step 3) and at least one workload
+(steps 7.3 + 7.4), then from the OctoSystem CLI context:
 
 ```powershell
 Invoke-OctoCliLoginLocal -tenantId OctoSystem
 octo-cli -c Delete -tid e2etest -y
 ```
 
-Expect the same "Deleting CommunicationPool CR …" log lines as in step 5,
-followed by an empty `kubectl get communicationpool -n octo`.
+Expect the same `helm uninstall …` log lines as in step 7.6 followed by
+the `Deleting CommunicationPool CR …` lines from step 5, then an empty
+`kubectl get communicationpool -n octo` and an empty
+`helm --kube-context kind-kind list -n octo`.
 
 ## Stopping the stack
 
@@ -299,6 +467,11 @@ are fast.
 | Refinery Studio `Deploy Pool` action missing from the context menu | The `@meshmakers/octo-services` library was not rebuilt or `npm install` was not run in `octo-mesh-refinery-studio` after the library change. From `octo-frontend-libraries/src/frontend-libraries/`: `npm run build:octo-services`. From `octo-mesh-refinery-studio/`: `npm install`. |
 | `octo-cli` cannot find the controller | Re-run `Invoke-OctoCliLoginLocal -tenantId <tenant>` to point at `https://localhost:5015`. |
 | `CR already exists` log entry on redeploy | Previous run did not clean up. Click **Undeploy Pool** in the Studio (or `kubectl delete communicationpool e2etest-default -n octo`) and retry. |
+| **Workload-deploy step 7.4**: pool CR appears but no `Workload deployed event received` log entry | The Application/Adapter is not associated with the pool. Open the Application form, set **Pool** to the pool you deployed, save, then undeploy and redeploy the pool. The controller fan-out only enumerates workloads connected via the `Manages` association. |
+| `HelmException: 'helm repo add' exited with code 1`, stderr mentions `failed to fetch` | The chart repository URL is wrong, requires auth that wasn't provided, or is not reachable from the host. Test from the host: `helm repo add test <url> && helm search repo test`. For a private repo, ensure `Username` / `Password` are set on the `HelmRepositoryConfiguration` (they are stored encrypted; the controller decrypts before pushing on the wire). |
+| `HelmException: 'helm upgrade --install' exited with code 1`, stderr mentions `chart "X" matching <version>` not found | Wrong `Chart Name` / `Chart Version` on the Application. Test from the host: `helm search repo <alias>/<chart> --versions`. Leave `Chart Version` empty to grab the latest published version. |
+| `helm upgrade --install` succeeds but pods never reach Ready | Chart-side issue — wrong `values.yaml` for the chart, missing dependencies, image-pull failure. Inspect: `kubectl describe pod -n octo -l app.kubernetes.io/instance=<release>` and `kubectl logs -n octo <pod>`. The operator only owns the helm-side; the chart owns runtime correctness. |
+| Operator-owned `<release>-octo-secrets` secret is missing despite secret-flagged overrides | The override row in the Application form had `IsSecret = false`, or the value was empty. The reconciler only materializes the secret when at least one override has `IsSecret = true` and a non-empty value. Re-edit, save, redeploy. |
 
 Operator log: stdout of the `start-operator.ps1` terminal. Other services
 log to `$rootPath/logFiles/<ServiceName>.log` (managed by `Start-Octo`).
