@@ -22,7 +22,7 @@ Octo.CommunicationOperator.sln
 │   ├── Finalizer/     CommunicationPoolFinalizer
 │   ├── Models/        Pool, K8Pool, PoolDescriptor (DTO-side models)
 │   ├── Options/       OperatorOptions (configuration binding)
-│   ├── Reconcilers/   AdapterReconciler (creates Deployments + Services per adapter)
+│   ├── Reconcilers/   WorkloadReconciler (Helm-based deploy for Adapters + Applications)
 │   ├── Services/      CommunicationPoolManager, OperatorHubService, PoolService, DiagnosticsService
 │   ├── Webhooks/      CommunicationPoolValidator, CommunicationPoolMutator (admission webhooks)
 │   └── scripts/       kind cluster bootstrap scripts
@@ -41,17 +41,18 @@ The operator's primary resource is `V1CommunicationPoolEntity` (group `octo-mesh
 
 1. A `CommunicationPool` CR is created (manually, or via `OperatorHubService` when `AutoManagePools=true`).
 2. The operator's pool service registers the pool with the Communication Controller via the `PoolHub` SignalR client.
-3. The Controller pushes the list of adapters to deploy into the pool.
-4. `AdapterReconciler` creates/updates Kubernetes `Deployment` + `Service` objects for each adapter, reading the broker credentials from the `<tenantId>-<poolName>-octo-mesh-connection` `Secret`.
-5. On pool deletion, all adapter deployments and services labelled with the pool are removed.
+3. The Controller fans out a `WorkloadDeployedAsync` event on `/operatorHub` for each Adapter and Application managed by the pool.
+4. `WorkloadReconciler` materializes any secret-flagged values into an operator-owned `Secret`, registers the chart repository and runs `helm upgrade --install` per workload (see [Helm Workload Reconciliation](#helm-workload-reconciliation) below).
+5. On pool deletion, the operator receives matching `WorkloadUndeployedAsync` events and runs `helm uninstall` for every release.
+
+There is no longer a raw-K8s `AdapterReconciler` path; Adapters and Applications are deployed exclusively via Helm releases.
 
 `PoolService.UnRegisterPoolAsync` (called from `CommunicationPoolController.DeletedAsync`) treats any `HubException` from the controller-side `UnregisterPoolOperatorAsync` call as a **soft failure** and only logs it. Reason: the CR is already gone when `DeletedAsync` fires, and during the tenant-delete cascade the tenant itself no longer exists at the controller — so the unregister roundtrip will respond with `TenantException`. Re-throwing would put the entity back in the KubeOps retry queue forever. The local connection is still stopped and the pool removed from `_pools` regardless.
 
-### Helm Workload Reconciliation (Phase 3)
+### Helm Workload Reconciliation
 
 Workloads (Adapters + Applications) deployed to a Cloud pool are driven by
-the `WorkloadReconciler` over the `helm` CLI, fully decoupled from the old
-raw-K8s `AdapterReconciler`.
+the `WorkloadReconciler` over the `helm` CLI.
 
 **Layers:**
 - `Helm/IHelmProcessInvoker` + `HelmProcessInvoker` — low-level
@@ -84,7 +85,7 @@ raw-K8s `AdapterReconciler`.
   to Helm's 53-char limit.
 
 **Hookup:** `OperatorHubService.WorkloadDeployedAsync` /
-`WorkloadUndeployedAsync` now invoke the reconciler. Reconciler exceptions
+`WorkloadUndeployedAsync` invoke the reconciler. Reconciler exceptions
 are logged but **not propagated** — same rule as for tenant lifecycle
 callbacks, one bad workload must not crash the hub connection.
 
@@ -98,7 +99,7 @@ assembly was added so `WorkloadReconciler.ReleaseName` /
 `SecretName` / `RepoAlias` (the deterministic helpers) can be asserted
 directly.
 
-Phase-3 tests:
+Tests:
 - `Helm/HelmRunnerTests` — argument construction for repo-add (with /
   without auth), upgrade-install (files + `--set` escaping), uninstall;
   non-zero exit-code → `HelmException`.
@@ -137,13 +138,12 @@ Key options:
 |--------|---------|
 | `AutoManagePools` | Enables `OperatorHubService` (central mode) |
 | `CommunicationControllerUri` | SignalR endpoint of the Controller (required when `AutoManagePools=true`) |
-| `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs, per-tenant broker secrets, and adapter Deployments/Services live (default `octo`) |
+| `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |
-| `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter pods |
-| `BrokerUser`, `BrokerPassword` | Credentials baked into `<tenantId>-<poolName>-octo-mesh-connection` secret |
-| `ImagePullSecretName` | Optional pull secret added to adapter `Deployment` pod specs |
-| `InstancePrefix` | Forwarded to adapter pods as `OCTO_ADAPTER__INSTANCEPREFIX` |
-| `AdapterIgnoreCertificateValidation` | Forwarded to adapter pods |
+| `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter/application pods |
+| `BrokerUser`, `BrokerPassword` | Credentials baked into `<tenantId>-<poolName>-octo-mesh-connection` secret consumed by the Helm charts |
+| `InstancePrefix` | Forwarded to workload pods via the Helm chart values |
+| `AdapterIgnoreCertificateValidation` | Forwarded to workload pods via the Helm chart values |
 
 ## Build & Test
 
@@ -237,7 +237,7 @@ Pure-logic + callback surfaces:
 
 Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, not against the k8s SDK):
 
-- `Reconcilers/AdapterReconcilerTests/` — pool teardown, single-adapter teardown, reconcile flow (idempotent delete-then-recreate, image-pull-secret wiring, adapter env vars, pool-hub deployment-state callback in success and error paths). Mocks `IKubernetesClient` (KubeOps) directly — the interface is generic and ergonomic.
+- `Reconcilers/WorkloadReconcilerTests/` — see the [Helm Workload Reconciliation](#helm-workload-reconciliation) section above for the test layout (deploy + undeploy + override-yaml builder).
 - `Services/CommunicationPoolManagerTests/` — auto-create/delete CR + broker secret, idempotency (no-op when already present), CR/Secret content. Mocks `ICommunicationPoolKubernetesGateway` (see below).
 - `Services/OperatorHubServiceTests/ExecuteAsyncTests` — early-return paths (AutoManagePools off, controller URI missing), client creation, on-connect registration + per-tenant pool creation, clean shutdown via `IHostedService.StopAsync`. Mocks `IOperatorHubClientFactory` to substitute the SignalR client (see below).
 

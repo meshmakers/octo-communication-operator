@@ -1,6 +1,6 @@
 # OctoMesh Communication Operator
 
-The Communication Operator is a Kubernetes operator that manages mesh adapter deployments. It watches `CommunicationPool` custom resources and automatically deploys/undeploys adapter pods based on the configuration received from the Communication Controller via SignalR.
+The Communication Operator is a Kubernetes operator that manages Helm-based mesh workload deployments. It watches `CommunicationPool` custom resources and runs `helm upgrade --install` / `helm uninstall` for each Adapter and Application managed by the pool, driven by events the Communication Controller fires on the `/operatorHub` SignalR channel.
 
 The operator supports both **edge deployment** (running on remote edge clusters connecting to a central controller) and **central deployment** (running alongside the Communication Controller in the same cluster, where CRs are auto-created on tenant creation).
 
@@ -10,14 +10,13 @@ The operator can be configured via environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPERATOR__IMAGEPULLSECRETNAME` | Name of image pull secret for adapter pods | _(none)_ |
 | `OPERATOR__AUTOMANAGEPOOLS` | Auto-create CommunicationPool CRs on tenant creation | `false` |
-| `OPERATOR__POOLNAMESPACE` | Namespace where auto-created CRs, broker secrets and adapter Deployments/Services live | `octo` |
+| `OPERATOR__POOLNAMESPACE` | Namespace where auto-created CRs and per-tenant broker secrets live. Helm releases default to the same namespace unless the chart overrides it. | `octo` |
 | `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
 | `OPERATOR__DEFAULTPOOLNAME` | Pool name for auto-created CRs | `default` |
-| `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to adapter pods | _(none)_ |
-| `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Adapter pods skip TLS validation when connecting to controller (dev only) | `false` |
-| `OPERATOR__BROKERHOST` | RabbitMQ host for adapter pods | _(required when AutoManagePools=true)_ |
+| `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to workload pods via the Helm chart values | _(none)_ |
+| `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Forwarded to workload pods via the Helm chart values (dev only) | `false` |
+| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManagePools=true)_ |
 | `OPERATOR__BROKERVIRTUALHOST` | RabbitMQ virtual host | `/` |
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
 | `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |

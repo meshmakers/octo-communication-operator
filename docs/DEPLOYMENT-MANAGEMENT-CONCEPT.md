@@ -2,7 +2,7 @@
 
 ## Status
 
-**Concept — implementation pending.** Replaces the earlier raw-K8s draft of this document.
+**Implemented.** The Helm-based deploy flow is the only deploy path for Adapters and Applications; the previous raw-K8s `AdapterReconciler` was removed in System.Communication CK 3.16.0. The Phase-3 E2E smoke test on a real cluster is the remaining validation step.
 
 ## Goals
 
@@ -237,12 +237,12 @@ Five phases. Each phase is committable on its own and leaves the system in a wor
 
 **Repo:** `octo-communication-operator`.
 
-1. Bake `helm` binary into the operator Dockerfile.
-2. `IHelmRunner` + `HelmRunner` (process-exec wrapper).
-3. `WorkloadReconciler` — replaces `AdapterReconciler`. Same lifecycle (deploy / upgrade / delete) but speaks Helm.
-4. Secret materialization: build the `{release}-octo-secrets` K8s Secret from `IsSecret`-flagged overrides; rewrite `valuesYaml` references on the fly.
-5. Hook into the existing `PoolHub` callbacks so reconciler triggers on `WorkloadDeployedAsync` / `WorkloadUndeployedAsync`.
-6. Remove old `AdapterReconciler` raw-K8s code path.
+1. Bake `helm` binary into the operator Dockerfile. ✅
+2. `IHelmRunner` + `HelmRunner` (process-exec wrapper). ✅
+3. `WorkloadReconciler` — same lifecycle (deploy / upgrade / delete) but speaks Helm. ✅
+4. Secret materialization: build the `{release}-octo-secrets` K8s Secret from `IsSecret`-flagged overrides; rewrite `valuesYaml` references on the fly. ✅
+5. Hook into the existing operator-hub callbacks so the reconciler triggers on `WorkloadDeployedAsync` / `WorkloadUndeployedAsync`. ✅
+6. The old `AdapterReconciler` raw-K8s code path has been removed. ✅
 7. E2E run-through: kind cluster, OCI registry (use `ghcr.io` test repo), validate one Adapter chart + one Application chart deploys.
 
 **Exit criteria:** Pool deploy / undeploy works end-to-end via Helm. `kubectl get all -n octo` shows Helm-released resources, not operator-built ones.
