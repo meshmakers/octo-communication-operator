@@ -3,9 +3,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 
 /// <summary>
-/// Drives Helm-based workload deployments. Replaces the raw-K8s
-/// <see cref="AdapterReconciler"/> path for Adapters and brings Applications
-/// in under the same lifecycle.
+/// Drives Helm-based workload deployments for Adapters and Applications.
 /// </summary>
 public interface IWorkloadReconciler
 {

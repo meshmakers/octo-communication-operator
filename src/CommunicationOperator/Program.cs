@@ -95,7 +95,6 @@ try
 
     builder.Services.Configure<OperatorOptions>(builder.Configuration.GetSection("Operator"));
     builder.Services.AddSingleton<IPoolService, PoolService>();
-    builder.Services.AddSingleton<IAdapterReconciler, AdapterReconciler>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
     builder.Services.AddSingleton<IKubernetes>(_ =>
     {
