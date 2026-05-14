@@ -89,10 +89,14 @@ the `WorkloadReconciler` over the `helm` CLI.
 are logged but **not propagated** — same rule as for tenant lifecycle
 callbacks, one bad workload must not crash the hub connection.
 
-**Docker image** (`src/CommunicationOperator/Dockerfile`) installs the
-official `helm` package from `baltocdn.com` into the runtime image, and
-sets `HELM_CONFIG_HOME` / `HELM_CACHE_HOME` / `HELM_DATA_HOME` under
-`/operator/` so the non-root `operator-user` can write the repo cache.
+**Docker image** (`src/CommunicationOperator/Dockerfile`) downloads the
+official `helm` binary tarball from `get.helm.sh` (CNAME for the helm
+GitHub Releases) — the previous baltocdn.com apt-repo path was blocked
+on the `meshmakers-ci-agents` pool. Version is pinned via the
+`HELM_VERSION` build-arg (default `v3.16.4`); multi-arch builds work
+because `TARGETARCH` is forwarded by Buildx. `HELM_CONFIG_HOME` /
+`HELM_CACHE_HOME` / `HELM_DATA_HOME` are set under `/operator/` so the
+non-root `operator-user` can write the repo cache.
 
 **Internals visible to tests:** `InternalsVisibleTo` for the test
 assembly was added so `WorkloadReconciler.ReleaseName` /

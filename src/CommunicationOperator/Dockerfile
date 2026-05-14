@@ -20,12 +20,20 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS final
 # every workload deployment (helm upgrade --install / helm uninstall). Helm
 # needs a writable config / cache directory, hence the HELM_*_HOME env vars
 # below pointing at paths under /operator that the non-root operator-user owns.
+#
+# We pull the binary directly from get.helm.sh (CNAME for the official GitHub
+# Releases) rather than via the baltocdn.com apt repo — the meshmakers-ci-agents
+# pool does not allow outbound DNS to baltocdn.com.
+ARG HELM_VERSION=v3.16.4
+ARG TARGETARCH
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
-    && curl -fsSL https://baltocdn.com/helm/signing.asc | gpg --dearmor -o /usr/share/keyrings/helm.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" > /etc/apt/sources.list.d/helm-stable-debian.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends helm \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${TARGETARCH}.tar.gz" \
+        | tar -xz -C /tmp \
+    && mv "/tmp/linux-${TARGETARCH}/helm" /usr/local/bin/helm \
+    && rm -rf "/tmp/linux-${TARGETARCH}" \
+    && chmod +x /usr/local/bin/helm \
+    && helm version --short \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
