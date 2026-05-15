@@ -18,6 +18,17 @@ public class OperatorOptions
     public bool AutoManagePools { get; set; }
 
     /// <summary>
+    /// Restricts the operator's CR watcher to a single Kubernetes namespace.
+    /// When set, the operator only reconciles <c>CommunicationPool</c> resources
+    /// in that namespace; CRs in other namespaces are ignored. When null or
+    /// empty (the default), the operator watches all namespaces cluster-wide.
+    /// Required when running multiple operator instances on the same cluster
+    /// (e.g. one per target controller on an edge device) to prevent them
+    /// from racing on the same CRs.
+    /// </summary>
+    public string? WatchNamespace { get; set; }
+
+    /// <summary>
     /// Kubernetes namespace into which auto-created CommunicationPool CRs,
     /// per-tenant broker secrets, and adapter Deployments/Services are placed.
     /// All artefacts of a managed pool live in this namespace.

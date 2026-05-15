@@ -3,6 +3,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using k8s;
+using KubeOps.Abstractions.Builder;
 using KubeOps.KubernetesClient;
 using KubeOps.Operator;
 using KubeOps.Operator.Web.Builder;
@@ -81,7 +82,14 @@ try
     builder.Host.UseNLog();
     
     builder.Services
-        .AddKubernetesOperator()
+        .AddKubernetesOperator(settings =>
+        {
+            var watchNamespace = builder.Configuration["Operator:WatchNamespace"];
+            if (!string.IsNullOrWhiteSpace(watchNamespace))
+            {
+                settings.WithNamespace(watchNamespace);
+            }
+        })
         .RegisterComponents()
 #if DEBUG || DEBUGL
         .UseCertificateProvider(port, ip, generator)

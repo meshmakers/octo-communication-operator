@@ -8,7 +8,7 @@ The **Octo Communication Operator** is a Kubernetes operator that manages mesh a
 
 It supports two deployment modes:
 
-- **Edge deployment**: the operator runs on a remote edge cluster. `CommunicationPool` CRs are managed manually (or by an external system); the operator only reconciles existing CRs into adapter deployments and services.
+- **Edge deployment**: the operator runs on a remote edge cluster. `CommunicationPool` CRs are managed manually (or by an external system); the operator only reconciles existing CRs into adapter deployments and services. When multiple operator instances share one edge cluster (one per target controller), each must set `OPERATOR__WATCHNAMESPACE` so they only reconcile CRs in their own namespace and don't race on each other's resources.
 - **Central deployment**: the operator runs alongside the Communication Controller in the same cluster. With `OPERATOR__AUTOMANAGEPOOLS=true` it connects to the Controller's `/operatorHub` SignalR hub and creates/deletes `CommunicationPool` CRs and broker secrets in response to `TenantCreated` / `TenantDeleted` events.
 
 ## Solution Layout
@@ -159,6 +159,7 @@ Key options:
 | Option | Purpose |
 |--------|---------|
 | `AutoManagePools` | Enables `OperatorHubService` (central mode) |
+| `WatchNamespace` | Restricts the CR watcher to a single namespace. When null/empty (default), the operator watches all namespaces cluster-wide. Required when running multiple operator instances on the same cluster (e.g. one per target controller on an edge device) so they don't race on the same CRs. Wired via `KubeOps.Abstractions.Builder.OperatorSettingsBuilder.WithNamespace()`. |
 | `CommunicationControllerUri` | SignalR endpoint of the Controller (required when `AutoManagePools=true`) |
 | `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |

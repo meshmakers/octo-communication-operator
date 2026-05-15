@@ -9,7 +9,6 @@ using Meshmakers.Octo.Communication.Operator.Services;
 namespace Meshmakers.Octo.Communication.Operator.Controller;
 
 [EntityRbac(typeof(V1CommunicationPoolEntity), Verbs = RbacVerb.All)]
-[EntityRbac(typeof(V1Namespace), Verbs = RbacVerb.All)]
 [EntityRbac(typeof(V1StatefulSet), Verbs = RbacVerb.All)]
 [EntityRbac(typeof(V1Deployment), Verbs = RbacVerb.All)]
 [EntityRbac(typeof(V1Service), Verbs = RbacVerb.All)]

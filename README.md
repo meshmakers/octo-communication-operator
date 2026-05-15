@@ -11,6 +11,7 @@ The operator can be configured via environment variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPERATOR__AUTOMANAGEPOOLS` | Auto-create CommunicationPool CRs on tenant creation | `false` |
+| `OPERATOR__WATCHNAMESPACE` | Restricts the CR watcher to a single namespace. Required when multiple operator instances share one cluster (e.g. edge devices running one operator per target controller) so they don't race on each other's CRs. Leave empty to watch all namespaces. | _(empty — watch all)_ |
 | `OPERATOR__POOLNAMESPACE` | Namespace where auto-created CRs and per-tenant broker secrets live. Helm releases default to the same namespace unless the chart overrides it. | `octo` |
 | `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
 | `OPERATOR__DEFAULTPOOLNAME` | Pool name for auto-created CRs | `default` |
