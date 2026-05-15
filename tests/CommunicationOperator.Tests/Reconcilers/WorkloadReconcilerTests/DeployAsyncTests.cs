@@ -163,4 +163,47 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }
+
+    [Test]
+    public async Task DeployAsync_WithOperatorContext_PassesContextFileFirst()
+    {
+        Options.InstancePrefix = "test-2";
+        Options.ClusterDependencies.MongodbHost = "mongo:27017";
+
+        var dto = BaseDto(new[]
+        {
+            new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false },
+        });
+
+        await Reconciler.DeployAsync(dto, CancellationToken.None);
+
+        // 3 files: context (operator defaults) + base ValuesYaml + structured overrides.
+        await Helm.Received(1).UpgradeInstallAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<string>>(files =>
+                files.Count == 3
+                && files[0].EndsWith("values-context.yaml")
+                && files[1].EndsWith("values-base.yaml")
+                && files[2].EndsWith("values-overrides.yaml")),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployAsync_NoOperatorContext_OmitsContextFile()
+    {
+        // OperatorOptions in base class is created with no context fields set.
+        var dto = BaseDto();
+
+        await Reconciler.DeployAsync(dto, CancellationToken.None);
+
+        // 1 file: base ValuesYaml only.
+        await Helm.Received(1).UpgradeInstallAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<string>>(files =>
+                files.Count == 1
+                && files[0].EndsWith("values-base.yaml")),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
+    }
 }

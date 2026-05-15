@@ -64,6 +64,14 @@ the `WorkloadReconciler` over the `helm` CLI.
   `UpgradeInstallAsync` (with `-f`, `--set`, `--atomic`, `--create-namespace`),
   `UninstallAsync` (uses `--ignore-not-found`). Non-zero exit codes become
   `HelmException` with full stderr.
+- `Reconcilers/WorkloadContextValuesBuilder` — turns the operator's own
+  `OperatorOptions` (cluster-internal Mongo/RabbitMQ/CrateDB hosts,
+  reporting service URI, instance prefix, ingress defaults) into a
+  `values-context.yaml` file. Every field is optional: only those that
+  are set get projected, so an edge operator that leaves them empty
+  passes no context layer at all. Secrets are deliberately **not**
+  handled here — they flow through `WorkloadOverrideYamlBuilder` and the
+  per-release secret.
 - `Reconcilers/WorkloadOverrideYamlBuilder` — turns the structured
   `ValueOverride[]` from the controller into a `values-overrides.yaml`
   file. Secret-flagged entries become a `valueFrom: secretKeyRef`
@@ -76,8 +84,13 @@ the `WorkloadReconciler` over the `helm` CLI.
   2. `EnsureRepoAsync` registers the chart repository (alias derived
      stably from the URL via a short SHA-1 hash, so repeated calls are
      idempotent across operator pods).
-  3. Writes the base `ValuesYaml` and the overrides YAML to two temp
-     files; both are passed via `-f` so the overrides win.
+  3. Writes up to three values files to a temp dir and passes them via
+     `-f` in this order — Helm later-args win, so order = precedence:
+     - `values-context.yaml` (operator-managed cluster defaults; lowest)
+     - `values-base.yaml` (the workload's own `ValuesYaml` from the CK
+        entity)
+     - `values-overrides.yaml` (structured per-value overrides from the
+        Studio form; highest)
   4. `helm upgrade --install {tenant}-{workload} {alias}/{chartName}`.
   5. Cleans up the temp directory.
 
@@ -116,6 +129,11 @@ Tests:
 - `Reconcilers/WorkloadReconcilerTests/WorkloadOverrideYamlBuilderTests`
   — plain values, secret references, deep nesting, plaintext never
   appearing in the output for secret entries.
+- `Reconcilers/WorkloadReconcilerTests/WorkloadContextValuesBuilderTests`
+  — empty options → null, partial options → only set keys emitted, full
+  options → complete YAML with cluster dependencies + ingress
+  annotations. `DeployAsyncTests` also asserts file ordering (context →
+  base → overrides) when operator context is set.
 
 ### Central Operator Mode (AutoManagePools)
 
@@ -148,6 +166,9 @@ Key options:
 | `BrokerUser`, `BrokerPassword` | Credentials baked into `<tenantId>-<poolName>-octo-mesh-connection` secret consumed by the Helm charts |
 | `InstancePrefix` | Forwarded to workload pods via the Helm chart values |
 | `AdapterIgnoreCertificateValidation` | Forwarded to workload pods via the Helm chart values |
+| `ReportingServiceUri` | Cluster-internal URI of the reporting service. When set, projected into each workload's Helm values as `reportingServiceUri`. |
+| `ClusterDependencies.MongodbHost` / `MongodbReplicaSet` / `RabbitMqHost` / `RabbitMqUser` / `StreamDataHost` / `StreamDataUser` | Cluster-internal service endpoints projected into each workload's `clusterDependencies.*` values. All optional — edge operators leave them empty and let per-workload `ValuesYaml` supply local equivalents. |
+| `Ingress.ClassName` / `ClusterIssuer` / `Tls` | Cluster-wide ingress defaults projected into each workload's `ingress.*` values. `ClusterIssuer` is rendered into the `cert-manager.io/cluster-issuer` annotation. |
 
 ## Build & Test
 

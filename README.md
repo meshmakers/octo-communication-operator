@@ -21,6 +21,18 @@ The operator can be configured via environment variables:
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
 | `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |
 | `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
+| `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__MONGODBHOST` | MongoDB connection string projected into workload `clusterDependencies.mongodbHost`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__MONGODBREPLICASET` | MongoDB replica-set name projected into workload `clusterDependencies.mongodbReplicaSet`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__RABBITMQHOST` | RabbitMQ host projected into workload `clusterDependencies.rabbitMqHost`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__RABBITMQUSER` | RabbitMQ user projected into workload `clusterDependencies.rabbitMqUser`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATAHOST` | CrateDB host projected into workload `clusterDependencies.streamDataHost`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATAUSER` | CrateDB user projected into workload `clusterDependencies.streamDataUser`. | _(none)_ |
+| `OPERATOR__INGRESS__CLASSNAME` | Ingress class projected into workload `ingress.className`. | _(none)_ |
+| `OPERATOR__INGRESS__CLUSTERISSUER` | cert-manager ClusterIssuer projected into workload `ingress.annotations["cert-manager.io/cluster-issuer"]`. | _(none)_ |
+| `OPERATOR__INGRESS__TLS` | TLS flag projected into workload `ingress.tls`. Leave unset to keep the chart default. | _(unset)_ |
+
+The cluster-dependency, reporting-URI and ingress fields are all optional. Each value that is set is injected into every deployed workload's Helm values as the **lowest** precedence layer — the workload's own `ValuesYaml` and structured overrides win over it. Edge operators typically leave the cloud-side dependency hosts empty so per-workload values supply edge-local equivalents.
 
 For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
 

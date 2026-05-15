@@ -52,13 +52,22 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         await _helm.EnsureRepoAsync(alias, workload.RepositoryUrl,
             workload.RepositoryUsername, workload.RepositoryPassword, cancellationToken);
 
-        // 3. Assemble values files. The workload's base ValuesYaml is the
-        //    first layer; structured overrides are written to a second file
-        //    and override the first.
+        // 3. Assemble values files. Helm later args win — so order is:
+        //    context (operator-managed cluster defaults) → workload
+        //    ValuesYaml → structured overrides. Workload-side input always
+        //    has the final say.
         var tempDir = Directory.CreateTempSubdirectory("octo-helm-").FullName;
         try
         {
             var valuesFiles = new List<string>();
+
+            var contextYaml = WorkloadContextValuesBuilder.Build(_options);
+            if (!string.IsNullOrEmpty(contextYaml))
+            {
+                var contextFile = Path.Combine(tempDir, "values-context.yaml");
+                await File.WriteAllTextAsync(contextFile, contextYaml, cancellationToken);
+                valuesFiles.Add(contextFile);
+            }
 
             if (!string.IsNullOrWhiteSpace(workload.ValuesYaml))
             {
