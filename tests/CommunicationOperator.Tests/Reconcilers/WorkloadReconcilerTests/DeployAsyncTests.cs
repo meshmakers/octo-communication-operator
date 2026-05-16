@@ -133,9 +133,10 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
-    public async Task DeployAsync_PassesBaseAndOverrideValuesFiles()
+    public async Task DeployAsync_PassesContextBaseAndOverrideValuesFiles()
     {
-        // 2 files passed: base ValuesYaml + structured overrides.
+        // 3 files passed: workload-identity context (tenantId is always set
+        // on the DTO) + base ValuesYaml + structured overrides.
         var dto = BaseDto(new[]
         {
             new ValueOverrideDto { Path = "image.tag", Value = "abc", IsSecret = false },
@@ -145,15 +146,35 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Is<IReadOnlyList<string>>(files => files.Count == 2),
+            Arg.Is<IReadOnlyList<string>>(files => files.Count == 3),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }
 
     [Test]
-    public async Task DeployAsync_EmptyValuesYaml_NoBaseFilePassed()
+    public async Task DeployAsync_EmptyValuesYaml_OnlyContextFilePassed()
     {
+        // ValuesYaml empty + no structured overrides → just the workload-
+        // identity context file remains (tenantId is always present).
         var dto = BaseDto() with { ValuesYaml = string.Empty };
+
+        await Reconciler.DeployAsync(dto, CancellationToken.None);
+
+        await Helm.Received(1).UpgradeInstallAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<string>>(files =>
+                files.Count == 1 && files[0].EndsWith("values-context.yaml")),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployAsync_NoOperatorContextNoIdentity_OmitsContextFile()
+    {
+        // Edge case: operator has no cluster context AND the DTO has no
+        // tenantId / WorkloadRtId set. Nothing for the builder to emit, so
+        // no context file gets written.
+        var dto = BaseDto() with { TenantId = string.Empty, WorkloadRtId = string.Empty, ValuesYaml = string.Empty };
 
         await Reconciler.DeployAsync(dto, CancellationToken.None);
 
@@ -190,19 +211,22 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
-    public async Task DeployAsync_NoOperatorContext_OmitsContextFile()
+    public async Task DeployAsync_NoOperatorContextButHasWorkloadIdentity_StillEmitsContextFile()
     {
-        // OperatorOptions in base class is created with no context fields set.
+        // OperatorOptions in the base class are empty, but the DTO always
+        // carries TenantId / WorkloadName — so the context layer is built
+        // anyway and ordered before the base ValuesYaml.
         var dto = BaseDto();
 
         await Reconciler.DeployAsync(dto, CancellationToken.None);
 
-        // 1 file: base ValuesYaml only.
+        // 2 files: identity context + base ValuesYaml.
         await Helm.Received(1).UpgradeInstallAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Is<IReadOnlyList<string>>(files =>
-                files.Count == 1
-                && files[0].EndsWith("values-base.yaml")),
+                files.Count == 2
+                && files[0].EndsWith("values-context.yaml")
+                && files[1].EndsWith("values-base.yaml")),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }

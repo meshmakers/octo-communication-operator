@@ -66,12 +66,14 @@ the `WorkloadReconciler` over the `helm` CLI.
   `HelmException` with full stderr.
 - `Reconcilers/WorkloadContextValuesBuilder` — turns the operator's own
   `OperatorOptions` (cluster-internal Mongo/RabbitMQ/CrateDB hosts,
-  reporting service URI, instance prefix, ingress defaults) into a
-  `values-context.yaml` file. Every field is optional: only those that
-  are set get projected, so an edge operator that leaves them empty
-  passes no context layer at all. Secrets are deliberately **not**
-  handled here — they flow through `WorkloadOverrideYamlBuilder` and the
-  per-release secret.
+  reporting service URI, instance prefix, ingress defaults) plus
+  workload identity from `WorkloadDeployedDto` (`tenantId`,
+  `adapterRtId` from `WorkloadRtId`) into a `values-context.yaml` file.
+  Every field is optional: only those that are set get projected, so an
+  edge operator with an empty DTO context (which should not happen in
+  production) passes no context layer at all. Secrets are deliberately
+  **not** handled here — they flow through `WorkloadOverrideYamlBuilder`
+  and the per-release secret.
 - `Reconcilers/WorkloadOverrideYamlBuilder` — turns the structured
   `ValueOverride[]` from the controller into a `values-overrides.yaml`
   file. Secret-flagged entries become a `valueFrom: secretKeyRef`

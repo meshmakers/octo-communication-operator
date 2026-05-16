@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 
@@ -99,6 +100,31 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml).IsNotNull();
         await Assert.That(yaml!).Contains("className: nginx");
         await Assert.That(yaml!).DoesNotContain("tls:");
+    }
+
+    [Test]
+    public async Task Build_WorkloadIdentity_EmitsTenantIdAndAdapterRtId()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions(), new WorkloadDeployedDto
+        {
+            TenantId = "meshtest",
+            WorkloadRtId = "5f1c4e1a4d3b2a1b8f9c1234",
+            WorkloadName = "mesh-adapter",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("tenantId: meshtest");
+        await Assert.That(yaml!).Contains("adapterRtId: 5f1c4e1a4d3b2a1b8f9c1234");
+    }
+
+    [Test]
+    public async Task Build_NullWorkload_OmitsIdentityKeys()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions { InstancePrefix = "test-2" });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("tenantId");
+        await Assert.That(yaml!).DoesNotContain("adapterRtId");
     }
 
     [Test]

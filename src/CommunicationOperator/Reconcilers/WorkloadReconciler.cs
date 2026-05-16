@@ -68,7 +68,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         {
             var valuesFiles = new List<string>();
 
-            var contextYaml = WorkloadContextValuesBuilder.Build(_options);
+            var contextYaml = WorkloadContextValuesBuilder.Build(_options, workload);
             if (!string.IsNullOrEmpty(contextYaml))
             {
                 var contextFile = Path.Combine(tempDir, "values-context.yaml");

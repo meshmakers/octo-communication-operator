@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Operator.Options;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -6,10 +7,11 @@ namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 
 /// <summary>
 /// Builds the cluster-context YAML the operator passes to <c>helm upgrade</c>
-/// as the <i>first</i> <c>-f</c> file. Carries non-secret values that the
-/// operator already knows about its cluster (Mongo / RabbitMQ / CrateDB hosts,
-/// reporting service URI, instance prefix, ingress defaults) so that
-/// per-workload <c>ValuesYaml</c> does not have to repeat them.
+/// as the <i>first</i> <c>-f</c> file. Carries non-secret values the operator
+/// already knows about either the cluster (Mongo / RabbitMQ / CrateDB hosts,
+/// reporting service URI, instance prefix, ingress defaults) or the workload
+/// itself (tenant id, runtime entity id) so the per-workload
+/// <c>ValuesYaml</c> does not have to repeat them.
 ///
 /// Helm value precedence is preserved by file order: this layer is the
 /// lowest, the workload's own <c>ValuesYaml</c> overrides it, and structured
@@ -22,12 +24,37 @@ namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 public static class WorkloadContextValuesBuilder
 {
     /// <summary>
-    /// Returns the assembled context YAML, or <c>null</c> when no option is
-    /// set (e.g. an edge operator that lets the workload supply everything).
+    /// Returns the assembled context YAML, or <c>null</c> when neither the
+    /// operator options nor the workload identity yield any value (e.g. an
+    /// edge operator with empty options and a missing workload — which should
+    /// not happen in practice).
     /// </summary>
-    public static string? Build(OperatorOptions options)
+    /// <param name="options">Operator-side cluster context.</param>
+    /// <param name="workload">
+    /// Workload being deployed. Supplies <c>tenantId</c> / <c>adapterRtId</c>
+    /// at the top level so the chart can reference them without duplicating
+    /// the values on the CK entity. Pass <c>null</c> only for unit tests that
+    /// want to exercise the options layer in isolation.
+    /// </param>
+    public static string? Build(OperatorOptions options, WorkloadDeployedDto? workload = null)
     {
         var root = new Dictionary<string, object>();
+
+        if (workload != null)
+        {
+            if (!string.IsNullOrWhiteSpace(workload.TenantId))
+            {
+                root["tenantId"] = workload.TenantId;
+            }
+            if (!string.IsNullOrWhiteSpace(workload.WorkloadRtId))
+            {
+                // Chart-side path stays "adapterRtId" — historical naming.
+                // The value is the workload's runtime id regardless of
+                // whether it is an Adapter or an Application; Application
+                // charts that need it can read the same key.
+                root["adapterRtId"] = workload.WorkloadRtId;
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(options.InstancePrefix))
         {
