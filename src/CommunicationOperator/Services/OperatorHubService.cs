@@ -12,18 +12,20 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 /// Receives Cloud pool deploy / undeploy events and creates/deletes CommunicationPool CRs accordingly.
 /// Only active when AutoManagePools is enabled.
 /// </summary>
-public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
+public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOperatorHubInvoker
 {
     private readonly ILogger<OperatorHubService> _logger;
     private readonly OperatorOptions _options;
     private readonly IOperatorHubClientFactory _clientFactory;
     private readonly ICommunicationPoolManager _poolManager;
     private readonly IWorkloadReconciler _workloadReconciler;
+    private readonly IServiceProvider _serviceProvider;
 
     // Set in ExecuteAsync once the client is constructed; consumed by the
     // workload-deploy callback to report success / failure back to the
-    // controller. Stays null when AutoManagePools is disabled (the service
-    // returns early and never builds a client).
+    // controller, and by IOperatorHubInvoker for pool register / unregister.
+    // Stays null when AutoManagePools is disabled (the service returns early
+    // and never builds a client).
     private IOperatorHubClient? _client;
 
     public OperatorHubService(
@@ -31,13 +33,50 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
         IOptions<OperatorOptions> options,
         IOperatorHubClientFactory clientFactory,
         ICommunicationPoolManager poolManager,
-        IWorkloadReconciler workloadReconciler)
+        IWorkloadReconciler workloadReconciler,
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _options = options.Value;
         _clientFactory = clientFactory;
         _poolManager = poolManager;
         _workloadReconciler = workloadReconciler;
+        // IPoolService is resolved lazily to break the DI cycle: PoolService
+        // depends on IOperatorHubInvoker (this class), and we depend on
+        // IPoolService here. Both are singletons; lazy resolution defers the
+        // lookup until ExecuteAsync runs.
+        _serviceProvider = serviceProvider;
+    }
+
+    /// <inheritdoc />
+    public bool IsConnected => _client?.IsAlive ?? false;
+
+    /// <inheritdoc />
+    public async Task RegisterPoolAsync(string tenantId, string poolName)
+    {
+        var client = _client;
+        if (client == null || !client.IsAlive)
+        {
+            _logger.LogDebug(
+                "Operator-hub not connected; skipping RegisterPoolAsync for tenant '{TenantId}', pool '{PoolName}' (will be replayed on reconnect)",
+                tenantId, poolName);
+            return;
+        }
+        await client.RegisterPoolAsync(tenantId, poolName);
+    }
+
+    /// <inheritdoc />
+    public async Task UnregisterPoolAsync(string tenantId, string poolName)
+    {
+        var client = _client;
+        if (client == null || !client.IsAlive)
+        {
+            _logger.LogDebug(
+                "Operator-hub not connected; skipping UnregisterPoolAsync for tenant '{TenantId}', pool '{PoolName}'",
+                tenantId, poolName);
+            return;
+        }
+        await client.UnregisterPoolAsync(tenantId, poolName);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -76,6 +115,26 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
             foreach (var pool in deployedPools)
             {
                 await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolName);
+            }
+
+            // Replay pool registrations for every CommunicationPool CR the
+            // operator currently owns. On a fresh connect this is empty (CRs
+            // arrive via PoolDeployedAsync afterwards), on a reconnect this
+            // is what flips every pool back to Online.
+            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
+            foreach (var pool in poolService.GetPools())
+            {
+                try
+                {
+                    await client.RegisterPoolAsync(pool.Entity.Spec.TenantId, pool.Entity.Spec.PoolName);
+                    pool.IsRegistered = true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to re-register pool '{PoolName}' for tenant '{TenantId}' on reconnect",
+                        pool.Entity.Spec.PoolName, pool.Entity.Spec.TenantId);
+                }
             }
         };
 
@@ -222,6 +281,24 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
             _logger.LogError(ex,
                 "Failed to undeploy workload '{WorkloadName}' for tenant '{TenantId}', pool '{PoolName}'",
                 workload.WorkloadName, workload.TenantId, workload.PoolName);
+        }
+    }
+
+    public async Task PreUpdateTenantAsync(string tenantId)
+    {
+        _logger.LogInformation("Pre-update tenant event received: tenant '{TenantId}'", tenantId);
+        try
+        {
+            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
+            if (poolService is IOperatorHubCallbacks_PreUpdateTenantHandler handler)
+            {
+                await handler.PreUpdateTenantAsync(tenantId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to handle pre-update event for tenant '{TenantId}'", tenantId);
         }
     }
 }

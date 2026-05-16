@@ -124,7 +124,13 @@ try
     builder.Services.AddSingleton<IHelmRunner, HelmRunner>();
     builder.Services.AddSingleton<IWorkloadReconciler, WorkloadReconciler>();
     builder.Services.AddSingleton<IOperatorHubClientFactory, OperatorHubClientFactory>();
-    builder.Services.AddHostedService<OperatorHubService>();
+    // OperatorHubService is the SignalR client lifecycle owner AND the
+    // IOperatorHubInvoker implementation that other services (PoolService)
+    // call into. Register as a concrete singleton, then expose both
+    // interface forwards + the hosted-service registration.
+    builder.Services.AddSingleton<OperatorHubService>();
+    builder.Services.AddSingleton<IOperatorHubInvoker>(sp => sp.GetRequiredService<OperatorHubService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<OperatorHubService>());
     builder.Services.AddScoped<IDiagnosticsService, DiagnosticsService>();
 
     var app = builder.Build();
