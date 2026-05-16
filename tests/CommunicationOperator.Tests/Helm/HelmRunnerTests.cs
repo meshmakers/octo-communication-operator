@@ -75,7 +75,6 @@ internal class HelmRunnerTests
                     "upgrade", "--install", "acme-app", "acme/voest-app",
                     "--version", "1.2.3",
                     "--namespace", "octo",
-                    "--create-namespace",
                     "--atomic",
                     "-f", "/tmp/values-a.yaml",
                     "-f", "/tmp/values-b.yaml",
