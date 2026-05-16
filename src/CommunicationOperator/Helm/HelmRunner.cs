@@ -44,12 +44,16 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
         CancellationToken cancellationToken)
     {
+        // Note: no `--create-namespace` — the pool namespace is owned by the
+        // operator's namespace-scoped service account, which cannot create
+        // cluster-scoped resources. The pool's namespace is guaranteed to
+        // exist before any workload deploy: CommunicationPoolManager creates
+        // it (or asserts it) when the CommunicationPool CR is created.
         var args = new List<string>
         {
             "upgrade", "--install", release, chart,
             "--version", version,
             "--namespace", @namespace,
-            "--create-namespace",
             "--atomic",
         };
 
