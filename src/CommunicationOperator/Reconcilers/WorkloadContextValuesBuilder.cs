@@ -71,6 +71,17 @@ public static class WorkloadContextValuesBuilder
             root["reportingServiceUri"] = options.ReportingServiceUri!;
         }
 
+        if (!string.IsNullOrWhiteSpace(options.ImageRegistry))
+        {
+            // Adapter / application charts read `.Values.image.privateRegistry`
+            // and prepend it to the image reference. The leaf path is nested
+            // under `image` to match the chart's existing values shape.
+            root["image"] = new Dictionary<string, object>
+            {
+                ["privateRegistry"] = options.ImageRegistry!,
+            };
+        }
+
         var deps = BuildClusterDependencies(options.ClusterDependencies);
         if (deps.Count > 0)
         {

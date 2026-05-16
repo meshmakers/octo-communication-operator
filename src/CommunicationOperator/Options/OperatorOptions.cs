@@ -101,6 +101,17 @@ public class OperatorOptions
     public string? ReportingServiceUri { get; set; }
 
     /// <summary>
+    /// Private container registry the cluster uses to pull workload images
+    /// (e.g. <c>docker.mm.cloud</c>). When set, the operator projects this
+    /// into each workload's Helm values as <c>image.privateRegistry</c>, so
+    /// the chart renders the image reference as
+    /// <c>{registry}/{repository}:{tag}</c> instead of pulling from
+    /// docker.io. Leave empty when the cluster pulls from a public
+    /// registry.
+    /// </summary>
+    public string? ImageRegistry { get; set; }
+
+    /// <summary>
     /// Cluster-internal service endpoints (Mongo, RabbitMQ, CrateDB) that
     /// workloads need. Each field is optional: only those that are set are
     /// projected into the workload's Helm values at deploy time. Edge

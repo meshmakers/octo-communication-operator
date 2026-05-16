@@ -128,6 +128,19 @@ internal class WorkloadContextValuesBuilderTests
     }
 
     [Test]
+    public async Task Build_ImageRegistry_EmitsImagePrivateRegistry()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            ImageRegistry = "docker.mm.cloud",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("image:");
+        await Assert.That(yaml!).Contains("privateRegistry: docker.mm.cloud");
+    }
+
+    [Test]
     public async Task Build_ControllerAndReportingUris_EmitsTopLevelKeys()
     {
         var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
