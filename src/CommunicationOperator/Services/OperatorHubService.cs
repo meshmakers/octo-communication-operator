@@ -20,6 +20,12 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
     private readonly ICommunicationPoolManager _poolManager;
     private readonly IWorkloadReconciler _workloadReconciler;
 
+    // Set in ExecuteAsync once the client is constructed; consumed by the
+    // workload-deploy callback to report success / failure back to the
+    // controller. Stays null when AutoManagePools is disabled (the service
+    // returns early and never builds a client).
+    private IOperatorHubClient? _client;
+
     public OperatorHubService(
         ILogger<OperatorHubService> logger,
         IOptions<OperatorOptions> options,
@@ -58,6 +64,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
         };
 
         var client = _clientFactory.Create(clientOptions, this);
+        _client = client;
 
         var onReconnect = async (bool isReconnect) =>
         {
@@ -143,9 +150,14 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
             "Workload deployed event received: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
             workload.TenantId, workload.PoolName, workload.WorkloadName,
             workload.WorkloadType, workload.ChartName, workload.ChartVersion);
+
+        bool success;
+        string? statusMessage;
         try
         {
             await _workloadReconciler.DeployAsync(workload, CancellationToken.None);
+            success = true;
+            statusMessage = null;
         }
         catch (Exception ex)
         {
@@ -153,7 +165,47 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks
             _logger.LogError(ex,
                 "Failed to deploy workload '{WorkloadName}' for tenant '{TenantId}', pool '{PoolName}'",
                 workload.WorkloadName, workload.TenantId, workload.PoolName);
+            success = false;
+            statusMessage = ex.Message;
         }
+
+        // Report the outcome back to the controller so the workload's
+        // DeploymentState / StatusMessage on the runtime entity reflect what
+        // actually happened in the cluster. Wrap the report in its own
+        // try/catch — if the round-trip itself fails (e.g. the connection
+        // dropped), the operator log already has the deploy outcome and the
+        // next deploy attempt will set the state.
+        try
+        {
+            await ReportDeploymentStatusAsync(workload, success, statusMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to report deployment status for workload '{WorkloadName}' (tenant '{TenantId}')",
+                workload.WorkloadName, workload.TenantId);
+        }
+    }
+
+    private async Task ReportDeploymentStatusAsync(WorkloadDeployedDto workload, bool success, string? statusMessage)
+    {
+        var client = _client;
+        if (client == null)
+        {
+            // No active hub connection (service never started or already
+            // stopped); nothing to report to.
+            return;
+        }
+
+        await client.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = workload.TenantId,
+            PoolName = workload.PoolName,
+            WorkloadName = workload.WorkloadName,
+            WorkloadRtId = workload.WorkloadRtId,
+            Success = success,
+            StatusMessage = statusMessage,
+        });
     }
 
     public async Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)
