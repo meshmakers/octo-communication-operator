@@ -32,8 +32,13 @@ The operator can be configured via environment variables:
 | `OPERATOR__INGRESS__CLASSNAME` | Ingress class projected into workload `ingress.className`. | _(none)_ |
 | `OPERATOR__INGRESS__CLUSTERISSUER` | cert-manager ClusterIssuer projected into workload `ingress.annotations["cert-manager.io/cluster-issuer"]`. | _(none)_ |
 | `OPERATOR__INGRESS__TLS` | TLS flag projected into workload `ingress.tls`. Leave unset to keep the chart default. | _(unset)_ |
+| `OPERATOR__CLUSTERSECRETS__MONGODBUSERPASSWORD` | MongoDB user password injected as secret-flagged override `secrets.databaseUser` when the workload's `ReceivesClusterSecrets` flag is true. | _(none)_ |
+| `OPERATOR__CLUSTERSECRETS__MONGODBADMINPASSWORD` | MongoDB admin password injected as `secrets.databaseAdmin` when the flag is true. | _(none)_ |
+| `OPERATOR__CLUSTERSECRETS__STREAMDATAPASSWORD` | CrateDB password injected as `secrets.streamDataPassword` when the flag is true. | _(none)_ |
 
 The cluster-dependency, reporting-URI and ingress fields are all optional. Each value that is set is injected into every deployed workload's Helm values as the **lowest** precedence layer — the workload's own `ValuesYaml` and structured overrides win over it. Edge operators typically leave the cloud-side dependency hosts empty so per-workload values supply edge-local equivalents.
+
+The `ClusterSecrets.*` settings (plus the existing `BrokerPassword`) are different: they are injected only when the workload itself opts in via the `ReceivesClusterSecrets` flag on its CK Adapter entity. They appear in the rendered manifest as `valueFrom.secretKeyRef` envelopes pointing at the per-release operator-managed Secret (`{release}-octo-secrets`), not as plain values. The adapter chart's `secrets.*` paths must accept both plaintext strings (legacy) and `valueFrom` maps — see the `octo-mesh.secretEnv` helper in `octo-mesh-adapter` / `octo-eda-adapter` chart templates.
 
 For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
 

@@ -97,6 +97,24 @@ the `WorkloadReconciler` over the `helm` CLI.
   Release names: `{tenantId}-{workloadName}`, DNS-sanitised and truncated
   to Helm's 53-char limit.
 
+  Before the override builder runs, the reconciler also calls
+  `AppendClusterSecrets`. When the workload's
+  `WorkloadDeployedDto.ReceivesClusterSecrets` flag is true (set by the
+  controller from the Adapter CK entity's
+  `ReceivesClusterSecrets` attribute), the operator inserts
+  secret-flagged `ValueOverrideDto` entries for the cluster credentials
+  it has configured: `secrets.databaseUser` (Mongo user pwd),
+  `secrets.databaseAdmin` (Mongo admin pwd),
+  `secrets.streamDataPassword` (CrateDB pwd), `secrets.rabbitmq` (broker
+  pwd from the existing `BrokerPassword` setting). These are prepended,
+  so any entity-supplied override on the same path still wins. The
+  values then flow through the normal secret-flagged pipeline:
+  materialised into `{release}-octo-secrets`, referenced from the chart
+  via `valueFrom.secretKeyRef`. Each adapter chart's `secrets.*` block
+  must accept both plaintext strings (legacy) and `valueFrom` maps for
+  this contract to work; see `octo-mesh-adapter` /
+  `octo-eda-adapter` chart `templates/_helpers.tpl` (`octo-mesh.secretEnv`).
+
 **Hookup:** `OperatorHubService.WorkloadDeployedAsync` /
 `WorkloadUndeployedAsync` invoke the reconciler. Reconciler exceptions
 are logged but **not propagated** — same rule as for tenant lifecycle
@@ -170,6 +188,7 @@ Key options:
 | `ReportingServiceUri` | Cluster-internal URI of the reporting service. When set, projected into each workload's Helm values as `reportingServiceUri`. |
 | `ClusterDependencies.MongodbHost` / `MongodbReplicaSet` / `RabbitMqHost` / `RabbitMqUser` / `StreamDataHost` / `StreamDataUser` | Cluster-internal service endpoints projected into each workload's `clusterDependencies.*` values. All optional — edge operators leave them empty and let per-workload `ValuesYaml` supply local equivalents. |
 | `Ingress.ClassName` / `ClusterIssuer` / `Tls` | Cluster-wide ingress defaults projected into each workload's `ingress.*` values. `ClusterIssuer` is rendered into the `cert-manager.io/cluster-issuer` annotation. |
+| `ClusterSecrets.MongodbUserPassword` / `MongodbAdminPassword` / `StreamDataPassword` | Cluster credentials the operator injects as secret-flagged value overrides when a workload's `WorkloadDeployedDto.ReceivesClusterSecrets` is true. The RabbitMQ password reuses `BrokerPassword`. Each field is optional — unset values are skipped. Operator chart wires these from a per-release Kubernetes Secret. |
 
 ## Build & Test
 

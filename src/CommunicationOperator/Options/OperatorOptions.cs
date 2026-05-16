@@ -116,6 +116,17 @@ public class OperatorOptions
     /// still override individual annotations.
     /// </summary>
     public IngressDefaultsOptions Ingress { get; set; } = new();
+
+    /// <summary>
+    /// Cluster-internal credentials (Mongo, CrateDB, RabbitMQ) the operator can
+    /// inject into a workload's Helm values as secret-flagged value overrides
+    /// when the workload's Adapter entity opts in via
+    /// <c>ReceivesClusterSecrets</c>. The RabbitMQ password reuses the
+    /// existing <see cref="BrokerPassword"/> setting; everything else lives
+    /// here. Pair this with secrets in the operator's Kubernetes namespace
+    /// (typically populated by the deployment pipeline from Vault).
+    /// </summary>
+    public ClusterSecretsOptions ClusterSecrets { get; set; } = new();
 }
 
 /// <summary>
@@ -140,6 +151,21 @@ public class ClusterDependenciesOptions
 
     /// <summary>CrateDB username.</summary>
     public string? StreamDataUser { get; set; }
+}
+
+/// <summary>
+/// Cluster-side credentials the operator can inject into opted-in workloads.
+/// </summary>
+public class ClusterSecretsOptions
+{
+    /// <summary>MongoDB user password (the non-admin runtime user).</summary>
+    public string? MongodbUserPassword { get; set; }
+
+    /// <summary>MongoDB admin password.</summary>
+    public string? MongodbAdminPassword { get; set; }
+
+    /// <summary>CrateDB password for the stream-data user.</summary>
+    public string? StreamDataPassword { get; set; }
 }
 
 /// <summary>

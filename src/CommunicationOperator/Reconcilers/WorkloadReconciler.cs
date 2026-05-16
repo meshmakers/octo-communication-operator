@@ -41,6 +41,13 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             workload.TenantId, workload.PoolName, workload.WorkloadName,
             workload.ChartName, workload.ChartVersion, release, ns);
 
+        // 0. If the workload opts in, append secret-flagged overrides for
+        //    the cluster-internal credentials the operator knows about.
+        //    The resulting overrides flow through the normal secret-flagged
+        //    path: materialized into {release}-octo-secrets, referenced from
+        //    the chart via valueFrom secretKeyRef.
+        workload = workload with { Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets, _options) };
+
         // 1. Materialize / refresh the operator-owned secret. We replace it
         //    every deploy so a value rotation propagates without manual
         //    intervention. When no secret-flagged overrides exist, ensure any
@@ -171,6 +178,55 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         _logger.LogInformation("Creating secret '{Secret}' in namespace '{Namespace}' with {Count} entries",
             secretName, ns, data.Count);
         await _gateway.CreateSecretAsync(ns, secret, cancellationToken);
+    }
+
+    /// <summary>
+    /// Returns the workload's existing overrides plus any cluster-credential
+    /// overrides the operator can supply, when the workload opted in. Each
+    /// injected entry is marked <c>IsSecret = true</c> so it flows through
+    /// the per-release Kubernetes Secret rather than appearing as a plain
+    /// value in the rendered manifest. Entries the operator does not have
+    /// a value for are skipped silently.
+    /// </summary>
+    internal static IReadOnlyList<ValueOverrideDto> AppendClusterSecrets(
+        IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets, OperatorOptions options)
+    {
+        if (!receivesClusterSecrets)
+        {
+            return existing;
+        }
+
+        var injected = new List<ValueOverrideDto>(4);
+        if (!string.IsNullOrEmpty(options.ClusterSecrets.MongodbUserPassword))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.databaseUser", Value = options.ClusterSecrets.MongodbUserPassword, IsSecret = true });
+        }
+        if (!string.IsNullOrEmpty(options.ClusterSecrets.MongodbAdminPassword))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.databaseAdmin", Value = options.ClusterSecrets.MongodbAdminPassword, IsSecret = true });
+        }
+        if (!string.IsNullOrEmpty(options.ClusterSecrets.StreamDataPassword))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.streamDataPassword", Value = options.ClusterSecrets.StreamDataPassword, IsSecret = true });
+        }
+        if (!string.IsNullOrEmpty(options.BrokerPassword))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.rabbitmq", Value = options.BrokerPassword, IsSecret = true });
+        }
+
+        if (injected.Count == 0)
+        {
+            return existing;
+        }
+
+        // Workload-supplied overrides win — operator-injected entries are
+        // appended first so the same path coming from the entity overrides
+        // the operator's value. WorkloadOverrideYamlBuilder.SetNested keeps
+        // only the last value per path.
+        var merged = new List<ValueOverrideDto>(existing.Count + injected.Count);
+        merged.AddRange(injected);
+        merged.AddRange(existing);
+        return merged;
     }
 
     /// <summary>
