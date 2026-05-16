@@ -165,9 +165,9 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 NamespaceProperty = ns,
                 Labels = new Dictionary<string, string>
                 {
-                    ["octo-mesh.meshmakers.io/tenant"] = workload.TenantId,
-                    ["octo-mesh.meshmakers.io/pool"] = workload.PoolName,
-                    ["octo-mesh.meshmakers.io/workload"] = workload.WorkloadName,
+                    ["octo-mesh.meshmakers.io/tenant"] = SanitizeLabelValue(workload.TenantId),
+                    ["octo-mesh.meshmakers.io/pool"] = SanitizeLabelValue(workload.PoolName),
+                    ["octo-mesh.meshmakers.io/workload"] = SanitizeLabelValue(workload.WorkloadName),
                     ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator",
                 },
             },
@@ -246,6 +246,37 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     }
 
     internal static string SecretName(string release) => $"{release}-octo-secrets";
+
+    /// <summary>
+    /// Coerces an arbitrary string into a valid Kubernetes label value.
+    /// Kubernetes requires labels to match
+    /// <c>[A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9]</c> with length ≤ 63 — workload
+    /// names from the CK entity can contain spaces or other punctuation
+    /// (e.g. "meshtest Adapter"), which the apiserver rejects with a 422.
+    /// Everything outside the allowed alphabet becomes a dash; leading and
+    /// trailing dashes are trimmed; empty results become "unknown" so the
+    /// label is still set (omitting it entirely would lose the workload
+    /// identity in the labels API).
+    /// </summary>
+    internal static string SanitizeLabelValue(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "unknown";
+        }
+
+        var sb = new StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            sb.Append(char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '-');
+        }
+        var trimmed = sb.ToString().Trim('-', '_', '.');
+        if (trimmed.Length == 0)
+        {
+            return "unknown";
+        }
+        return trimmed.Length > 63 ? trimmed[..63].TrimEnd('-', '_', '.') : trimmed;
+    }
 
     /// <summary>
     /// Stable, DNS-safe alias derived from the repository URL. Same URL

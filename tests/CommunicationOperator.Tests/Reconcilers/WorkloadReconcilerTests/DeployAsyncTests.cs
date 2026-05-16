@@ -67,6 +67,27 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
+    public async Task DeployAsync_WithSecrets_SanitizesNonDnsLabelChars()
+    {
+        // Workload names from the CK entity can contain spaces or punctuation
+        // (e.g. "meshtest Adapter"). The K8s apiserver rejects those when used
+        // as a Secret label value with a 422. Sanitization replaces them with
+        // dashes so the deploy still lands.
+        var dto = BaseDto(new[]
+        {
+            new ValueOverrideDto { Path = "x", Value = "y", IsSecret = true },
+        }) with { WorkloadName = "meshtest Adapter" };
+
+        await Reconciler.DeployAsync(dto, CancellationToken.None);
+
+        await Gateway.Received(1).CreateSecretAsync(
+            Arg.Any<string>(),
+            Arg.Is<V1Secret>(s =>
+                s.Metadata.Labels["octo-mesh.meshmakers.io/workload"] == "meshtest-Adapter"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
     public async Task DeployAsync_WithSecrets_ReplacesExistingSecret()
     {
         Gateway.SecretExistsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
