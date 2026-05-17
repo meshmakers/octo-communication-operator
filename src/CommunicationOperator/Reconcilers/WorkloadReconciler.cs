@@ -191,27 +191,39 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     internal static IReadOnlyList<ValueOverrideDto> AppendClusterSecrets(
         IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets, OperatorOptions options)
     {
-        if (!receivesClusterSecrets)
-        {
-            return existing;
-        }
-
         var injected = new List<ValueOverrideDto>(4);
-        if (!string.IsNullOrEmpty(options.ClusterSecrets.MongodbUserPassword))
-        {
-            injected.Add(new ValueOverrideDto { Path = "secrets.databaseUser", Value = options.ClusterSecrets.MongodbUserPassword, IsSecret = true });
-        }
-        if (!string.IsNullOrEmpty(options.ClusterSecrets.MongodbAdminPassword))
-        {
-            injected.Add(new ValueOverrideDto { Path = "secrets.databaseAdmin", Value = options.ClusterSecrets.MongodbAdminPassword, IsSecret = true });
-        }
-        if (!string.IsNullOrEmpty(options.ClusterSecrets.StreamDataPassword))
-        {
-            injected.Add(new ValueOverrideDto { Path = "secrets.streamDataPassword", Value = options.ClusterSecrets.StreamDataPassword, IsSecret = true });
-        }
+
+        // The RabbitMQ broker password is part of the basic controller↔adapter
+        // contract — every adapter needs the command bus, regardless of whether
+        // it also touches data stores. Inject it whenever the operator has a
+        // BrokerPassword, independent of the ReceivesClusterSecrets opt-in.
+        // Previously this was lumped into the cluster-secrets gate, which made
+        // pure edge adapters (e.g. Modbus / Loxone) fail the chart's
+        // `secrets.rabbitmq must be set` validation unless the user enabled a
+        // flag whose name implies cluster-integration semantics it doesn't
+        // actually need.
         if (!string.IsNullOrEmpty(options.BrokerPassword))
         {
             injected.Add(new ValueOverrideDto { Path = "secrets.rabbitmq", Value = options.BrokerPassword, IsSecret = true });
+        }
+
+        // Data-store credentials (Mongo / CrateDB) only matter for adapters
+        // that actually open those connections. Gate on the explicit opt-in
+        // so a Mongo-less Modbus pod doesn't carry Mongo creds in its Secret.
+        if (receivesClusterSecrets)
+        {
+            if (!string.IsNullOrEmpty(options.ClusterSecrets.MongodbUserPassword))
+            {
+                injected.Add(new ValueOverrideDto { Path = "secrets.databaseUser", Value = options.ClusterSecrets.MongodbUserPassword, IsSecret = true });
+            }
+            if (!string.IsNullOrEmpty(options.ClusterSecrets.MongodbAdminPassword))
+            {
+                injected.Add(new ValueOverrideDto { Path = "secrets.databaseAdmin", Value = options.ClusterSecrets.MongodbAdminPassword, IsSecret = true });
+            }
+            if (!string.IsNullOrEmpty(options.ClusterSecrets.StreamDataPassword))
+            {
+                injected.Add(new ValueOverrideDto { Path = "secrets.streamDataPassword", Value = options.ClusterSecrets.StreamDataPassword, IsSecret = true });
+            }
         }
 
         if (injected.Count == 0)

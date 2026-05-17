@@ -18,11 +18,33 @@ internal class AppendClusterSecretsTests
     };
 
     [Test]
-    public async Task FlagOff_ReturnsOriginalListUnchanged()
+    public async Task FlagOff_BrokerPasswordSet_InjectsOnlyRabbitmq()
     {
+        // Regression for pure edge adapters (Modbus / Loxone): the broker
+        // password must be injected regardless of ReceivesClusterSecrets,
+        // because every adapter needs the controller command bus. Data-store
+        // secrets stay gated on the flag.
         var existing = new[] { new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false } };
 
         var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, FullClusterOptions());
+
+        var injected = result.Where(e => e.IsSecret).ToArray();
+        await Assert.That(injected.Length).IsEqualTo(1);
+        await Assert.That(injected[0].Path).IsEqualTo("secrets.rabbitmq");
+        await Assert.That(injected[0].Value).IsEqualTo("rabbit-pwd");
+        // Mongo + CrateDB stay out when the flag is off.
+        var paths = result.Select(e => e.Path).ToArray();
+        await Assert.That(paths).DoesNotContain("secrets.databaseUser");
+        await Assert.That(paths).DoesNotContain("secrets.databaseAdmin");
+        await Assert.That(paths).DoesNotContain("secrets.streamDataPassword");
+    }
+
+    [Test]
+    public async Task FlagOff_NoBrokerPassword_ReturnsOriginalListUnchanged()
+    {
+        var existing = new[] { new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false } };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, new OperatorOptions());
 
         await Assert.That(result).IsSameReferenceAs(existing);
     }
