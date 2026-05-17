@@ -10,18 +10,29 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Services.OperatorHubServi
 public class ExecuteAsyncTests : OperatorHubServiceTestsBase
 {
     [Test]
-    public async Task ExecuteAsync_AutoManagePoolsDisabled_DoesNotCreateClient()
+    public async Task ExecuteAsync_AutoManagePoolsDisabledButControllerUriSet_StillCreatesClient()
     {
+        // Regression: previously the service short-circuited when AutoManagePools=false,
+        // which meant the edge operator never opened a SignalR connection and pools
+        // claimed by edge-cluster CRs stayed Unregistered forever. AutoManagePools only
+        // gates auto-CR-creation; the hub connection itself is required in both modes.
         OperatorOptions.AutoManagePools = false;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+        var setup = SetupClient();
 
-        await StartAndStopAsync();
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
 
-        ClientFactory.DidNotReceive().Create(
-            Arg.Any<OperatorHubClientOptions>(), Arg.Any<IOperatorHubCallbacks>());
+        ClientFactory.Received(1).Create(
+            Arg.Is<OperatorHubClientOptions>(o => o.EndpointUri == "https://controller"),
+            Service);
+
+        await hosted.StopAsync(CancellationToken.None);
     }
 
     [Test]
-    public async Task ExecuteAsync_AutoManagePoolsEnabledButControllerUriMissing_DoesNotCreateClient()
+    public async Task ExecuteAsync_ControllerUriMissing_DoesNotCreateClient()
     {
         OperatorOptions.AutoManagePools = true;
         OperatorOptions.CommunicationControllerUri = "";

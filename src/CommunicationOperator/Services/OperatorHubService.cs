@@ -9,8 +9,12 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 
 /// <summary>
 /// Background service that maintains a SignalR management connection to the Communication Controller.
-/// Receives Cloud pool deploy / undeploy events and creates/deletes CommunicationPool CRs accordingly.
-/// Only active when AutoManagePools is enabled.
+/// Connects whenever <c>CommunicationControllerUri</c> is configured — required in both
+/// central and edge modes so that pool register/unregister, workload deploys, and tenant
+/// lifecycle events flow through the hub. The <c>AutoManagePools</c> flag only gates the
+/// secondary behavior of auto-creating/auto-deleting <c>CommunicationPool</c> CRs in
+/// response to <c>PoolDeployedAsync</c> / <c>PoolUndeployedAsync</c> events — used by the
+/// central operator, not by edge operators (which receive CRs manually).
 /// </summary>
 public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOperatorHubInvoker
 {
@@ -24,8 +28,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     // Set in ExecuteAsync once the client is constructed; consumed by the
     // workload-deploy callback to report success / failure back to the
     // controller, and by IOperatorHubInvoker for pool register / unregister.
-    // Stays null when AutoManagePools is disabled (the service returns early
-    // and never builds a client).
+    // Stays null when no CommunicationControllerUri is configured (the
+    // service returns early without building a client).
     private IOperatorHubClient? _client;
 
     public OperatorHubService(
@@ -81,20 +85,17 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.AutoManagePools)
-        {
-            _logger.LogInformation("AutoManagePools is disabled, operator hub service will not start");
-            return;
-        }
-
         if (string.IsNullOrWhiteSpace(_options.CommunicationControllerUri))
         {
-            _logger.LogError("CommunicationControllerUri is required when AutoManagePools is enabled");
+            _logger.LogWarning(
+                "CommunicationControllerUri is not configured, operator hub service will not start " +
+                "(pool register/unregister and workload-deploy events will be unavailable)");
             return;
         }
 
         _logger.LogInformation(
-            "Starting operator hub service, connecting to controller at {ControllerUri}",
+            "Starting operator hub service in {Mode} mode, connecting to controller at {ControllerUri}",
+            _options.AutoManagePools ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)",
             _options.CommunicationControllerUri);
 
         var clientOptions = new OperatorHubClientOptions
@@ -175,6 +176,19 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     {
         _logger.LogInformation("Pool deployed event received: tenant '{TenantId}', pool '{PoolName}'",
             pool.TenantId, pool.PoolName);
+
+        // Auto-CR-creation is the central-operator's job. Edge operators
+        // receive the same broadcast (the controller fans out to every
+        // connected operator) but must ignore it — CRs there are managed
+        // out-of-band (manually or by an external system).
+        if (!_options.AutoManagePools)
+        {
+            _logger.LogDebug(
+                "AutoManagePools=false: not auto-creating CR for tenant '{TenantId}', pool '{PoolName}'",
+                pool.TenantId, pool.PoolName);
+            return;
+        }
+
         try
         {
             await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolName);
@@ -191,6 +205,15 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     {
         _logger.LogInformation("Pool undeployed event received: tenant '{TenantId}', pool '{PoolName}'",
             tenantId, poolName);
+
+        if (!_options.AutoManagePools)
+        {
+            _logger.LogDebug(
+                "AutoManagePools=false: not auto-deleting CR for tenant '{TenantId}', pool '{PoolName}'",
+                tenantId, poolName);
+            return;
+        }
+
         try
         {
             await _poolManager.DeletePoolAsync(tenantId, poolName);

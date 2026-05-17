@@ -155,15 +155,18 @@ Tests:
   annotations. `DeployAsyncTests` also asserts file ordering (context →
   base → overrides) when operator context is set.
 
-### Central Operator Mode (AutoManagePools)
+### OperatorHubService Lifecycle (Central + Edge)
 
-When `OPERATOR__AUTOMANAGEPOOLS=true`, `OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` and:
+`OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` **whenever `OPERATOR__COMMUNICATIONCONTROLLERURI` is configured** — required in both central and edge modes. Without this connection the operator's `IOperatorHubInvoker.RegisterPoolAsync` no-ops, and pools registered through `CommunicationPoolController.ReconcileAsync` never reach the controller (the entity stays at `Unregistered` in the Studio UI). The previous early-return on `!AutoManagePools` was the cause of the regression where edge-cluster pools showed up as Unregistered indefinitely.
 
-- on connect/reconnect, calls `RegisterOperatorAsync()` and creates pools for any tenants that already exist;
-- on `TenantCreatedAsync(tenantId)`, calls `CommunicationPoolManager.CreateCommunicationPoolAsync` (creates the CR + broker secret, idempotent);
-- on `TenantDeletedAsync(tenantId)`, calls `CommunicationPoolManager.DeleteCommunicationPoolAsync` (deletes both, idempotent).
+`OPERATOR__AUTOMANAGEPOOLS` is now a narrower flag — it only gates the **side effect of auto-creating / -deleting `CommunicationPool` CRs** in response to controller broadcasts:
 
-The connection is auto-reconnecting via `OperatorHubClient`. Failures from the pool manager are logged but **not propagated** so that one bad tenant cannot break the hub connection.
+- `AutoManagePools=true` (central): `PoolDeployedAsync` → `CommunicationPoolManager.CreateCommunicationPoolAsync` (creates the CR + broker secret, idempotent). `PoolUndeployedAsync` → `DeleteCommunicationPoolAsync`. `RegisterOperatorAsync()` on (re)connect also fans out `CreatePoolAsync` for every already-deployed pool.
+- `AutoManagePools=false` (edge): both `PoolDeployedAsync` and `PoolUndeployedAsync` log + return without touching `ICommunicationPoolManager`. CRs on the edge cluster are managed manually or by an external system.
+
+Either way, the workload-deploy path (`WorkloadDeployedAsync` → `WorkloadReconciler.DeployAsync`) and the pool register/unregister round-trip from `CommunicationPoolController.ReconcileAsync` go through the same SignalR client.
+
+The connection is auto-reconnecting via `OperatorHubClient`. Failures from the pool manager and workload reconciler are logged but **not propagated** so that one bad event cannot break the hub connection.
 
 ### Webhooks
 
@@ -178,9 +181,9 @@ Key options:
 
 | Option | Purpose |
 |--------|---------|
-| `AutoManagePools` | Enables `OperatorHubService` (central mode) |
+| `AutoManagePools` | Enables auto-creating / -deleting `CommunicationPool` CRs in response to `PoolDeployedAsync` / `PoolUndeployedAsync` broadcasts from the controller. Central operator only. Edge operators leave this `false` — the SignalR connection itself runs in both modes (gated by `CommunicationControllerUri`), only the CR-management side effect is toggled. |
 | `WatchNamespace` | Restricts the CR watcher to a single namespace. When null/empty (default), the operator watches all namespaces cluster-wide. Required when running multiple operator instances on the same cluster (e.g. one per target controller on an edge device) so they don't race on the same CRs. Wired via `KubeOps.Abstractions.Builder.OperatorSettingsBuilder.WithNamespace()`. |
-| `CommunicationControllerUri` | SignalR endpoint of the Controller (required when `AutoManagePools=true`) |
+| `CommunicationControllerUri` | SignalR endpoint of the Controller. Required in **both** central and edge modes for `OperatorHubService` to start. When empty, the hub service logs a warning and exits, and `IOperatorHubInvoker.RegisterPoolAsync` becomes a no-op (CR-reconcile finishes locally but the controller never sees the pool). |
 | `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |
 | `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter/application pods |
