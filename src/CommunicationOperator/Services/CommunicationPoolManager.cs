@@ -114,13 +114,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             Spec = new CommunicationPoolSpec
             {
                 TenantId = tenantId,
-                PoolName = poolName,
-                CommunicationControllerUri = _options.CommunicationControllerUri,
-                InstancePrefix = _options.InstancePrefix ?? string.Empty,
-                IgnoreCertificateValidation = _options.AdapterIgnoreCertificateValidation,
-                BrokerHost = _options.BrokerHost,
-                BrokerVirtualHost = _options.BrokerVirtualHost,
-                BrokerPort = _options.BrokerPort
+                PoolName = poolName
             }
         };
 
@@ -182,27 +176,13 @@ internal class CommunicationPoolMetadata
 
 internal class CommunicationPoolSpec
 {
+    // Matches V1CommunicationPoolEntitySpec — CR only carries the pool's
+    // tenant+name identity. Everything else (controller URI, broker host,
+    // instancePrefix, …) is owned by the operator instance that services
+    // this CR and read from OperatorOptions at startup.
     [JsonPropertyName("tenantId")]
     public string TenantId { get; set; } = string.Empty;
 
     [JsonPropertyName("poolName")]
     public string PoolName { get; set; } = string.Empty;
-
-    [JsonPropertyName("communicationControllerUri")]
-    public string CommunicationControllerUri { get; set; } = string.Empty;
-
-    [JsonPropertyName("instancePrefix")]
-    public string InstancePrefix { get; set; } = string.Empty;
-
-    [JsonPropertyName("ignoreCertificateValidation")]
-    public bool IgnoreCertificateValidation { get; set; }
-
-    [JsonPropertyName("brokerHost")]
-    public string BrokerHost { get; set; } = string.Empty;
-
-    [JsonPropertyName("brokerVirtualHost")]
-    public string BrokerVirtualHost { get; set; } = string.Empty;
-
-    [JsonPropertyName("brokerPort")]
-    public int BrokerPort { get; set; } = 5672;
 }

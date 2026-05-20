@@ -79,19 +79,11 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
         {
             if (!_pools.TryGetValue(key, out var existing))
             {
-                existing = new Pool(new PoolDescriptor
+                existing = new Pool(new K8Pool
                 {
                     Namespace = entity.Metadata?.NamespaceProperty ?? string.Empty,
                     TenantId = entity.Spec.TenantId,
                     PoolName = entity.Spec.PoolName,
-                    ControllerUri = entity.Spec.CommunicationControllerUri,
-                    BrokerHost = entity.Spec.BrokerHost,
-                    BrokerVirtualHost = string.IsNullOrWhiteSpace(entity.Spec.BrokerVirtualHost)
-                        ? "/"
-                        : entity.Spec.BrokerVirtualHost,
-                    BrokerPort = entity.Spec.BrokerPort,
-                    InstancePrefix = entity.Spec.InstancePrefix,
-                    IgnoreCertificateValidation = entity.Spec.IgnoreCertificateValidation,
                 }, entity);
                 _pools[key] = existing;
             }

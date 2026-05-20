@@ -25,9 +25,6 @@ public class PoolServiceTests
             {
                 TenantId = tenantId,
                 PoolName = poolName,
-                CommunicationControllerUri = "https://controller.example",
-                BrokerHost = "rabbitmq.example",
-                BrokerPort = 5672,
             },
             Status = new V1CommunicationPoolEntity.V1CommunicationPoolEntityStatus()
         };
