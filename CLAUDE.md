@@ -148,6 +148,24 @@ assembly was added so `WorkloadReconciler.ReleaseName` /
 `SecretName` / `RepoAlias` (the deterministic helpers) can be asserted
 directly.
 
+**Shared k8s-name sanitiser** (`Common/K8sNaming`): both the workload
+reconciler and the `CommunicationPoolManager` derive Kubernetes resource
+names / label values from CK entity attributes (tenantId, poolName,
+workloadName) that may contain whitespace, uppercase letters, or other
+characters the apiserver rejects with a 422 (e.g. a pool literally
+named `"Communication Pool"` produced
+`sbeg-communication pool-octo-mesh-connection`, which fails RFC 1123).
+`K8sNaming.DnsName` returns a strict subdomain segment (lowercase,
+`[a-z0-9-]`, dashes collapsed, capped at 53 chars by default for
+parity with Helm's release-name limit). `K8sNaming.LabelValue` keeps
+the laxer label alphabet (also allows `_` and `.`, returns `"unknown"`
+for empty input, capped at 63). `WorkloadReconciler.ReleaseName` /
+`SanitizeLabelValue` are now thin delegates so both call sites stay in
+lockstep; the original CK pool/workload name is preserved on every
+generated resource as the
+`octo-mesh.meshmakers.io/pool-name` /
+`octo-mesh.meshmakers.io/workload-name` annotation.
+
 Tests:
 - `Helm/HelmRunnerTests` — argument construction for repo-add (with /
   without auth), upgrade-install (files + `--set` escaping), uninstall;

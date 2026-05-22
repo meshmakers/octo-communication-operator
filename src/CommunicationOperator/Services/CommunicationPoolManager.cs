@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using k8s.Models;
+using Meshmakers.Octo.Communication.Operator.Common;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Microsoft.Extensions.Options;
 
@@ -104,12 +105,8 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             {
                 Name = crName,
                 Namespace = ns,
-                Labels = new Dictionary<string, string>
-                {
-                    ["octo-mesh.meshmakers.io/tenant"] = tenantId,
-                    ["octo-mesh.meshmakers.io/pool"] = poolName,
-                    ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
-                }
+                Labels = BuildLabels(tenantId, poolName),
+                Annotations = BuildAnnotations(poolName)
             },
             Spec = new CommunicationPoolSpec
             {
@@ -125,12 +122,8 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             {
                 Name = secretName,
                 NamespaceProperty = ns,
-                Labels = new Dictionary<string, string>
-                {
-                    ["octo-mesh.meshmakers.io/tenant"] = tenantId,
-                    ["octo-mesh.meshmakers.io/pool"] = poolName,
-                    ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
-                }
+                Labels = BuildLabels(tenantId, poolName),
+                Annotations = BuildAnnotations(poolName)
             },
             Type = "Opaque",
             StringData = new Dictionary<string, string>
@@ -140,11 +133,35 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             }
         };
 
+    // K8s names and label values both reject raw CK attribute values that
+    // contain whitespace, uppercase, or other non-RFC-1123 characters
+    // (e.g. "Communication Pool"). Sanitize via the shared K8sNaming
+    // helper — same logic the WorkloadReconciler already uses for its
+    // helm release names and identity labels — and keep the original
+    // poolName as an annotation for UI/debugging.
+    private static Dictionary<string, string> BuildLabels(string tenantId, string poolName) =>
+        new()
+        {
+            ["octo-mesh.meshmakers.io/tenant"] = K8sNaming.LabelValue(tenantId),
+            ["octo-mesh.meshmakers.io/pool"] = K8sNaming.LabelValue(poolName),
+            ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
+        };
+
+    private static Dictionary<string, string> BuildAnnotations(string poolName) =>
+        new()
+        {
+            ["octo-mesh.meshmakers.io/pool-name"] = poolName
+        };
+
+    // CR name: {tenant}-{pool} as a strict RFC 1123 subdomain. We keep
+    // the 53-char cap from K8sNaming so the secret name (which appends
+    // "-octo-mesh-connection") still fits comfortably under the apiserver
+    // 253-char ceiling for any reasonable combination of inputs.
     private static string GetCrName(string tenantId, string poolName) =>
-        $"{tenantId}-{poolName}".ToLowerInvariant();
+        K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, poolName);
 
     private static string GetSecretName(string tenantId, string poolName) =>
-        $"{tenantId}-{poolName}-octo-mesh-connection".ToLowerInvariant();
+        $"{GetCrName(tenantId, poolName)}-octo-mesh-connection";
 }
 
 internal class CommunicationPoolResource
@@ -172,6 +189,9 @@ internal class CommunicationPoolMetadata
 
     [JsonPropertyName("labels")]
     public Dictionary<string, string>? Labels { get; set; }
+
+    [JsonPropertyName("annotations")]
+    public Dictionary<string, string>? Annotations { get; set; }
 }
 
 internal class CommunicationPoolSpec

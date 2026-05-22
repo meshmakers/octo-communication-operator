@@ -59,7 +59,8 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
             s.StringData["brokerpassword"] == "secret" &&
             s.Metadata.Labels["octo-mesh.meshmakers.io/tenant"] == TenantId &&
             s.Metadata.Labels["octo-mesh.meshmakers.io/pool"] == PoolName &&
-            s.Metadata.Labels["octo-mesh.meshmakers.io/managed-by"] == "communication-operator"));
+            s.Metadata.Labels["octo-mesh.meshmakers.io/managed-by"] == "communication-operator" &&
+            s.Metadata.Annotations["octo-mesh.meshmakers.io/pool-name"] == PoolName));
     }
 
     [Test]
@@ -86,6 +87,28 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
         await Manager.CreatePoolAsync("MixedCase", "MyPool");
 
         await Gateway.Received(1).CommunicationPoolExistsAsync(PoolNamespace, "mixedcase-mypool");
+        await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
+    }
+
+    [Test]
+    public async Task CreatePoolAsync_PoolNameWithWhitespace_NamesAreSanitisedAndOriginalLandsInAnnotation()
+    {
+        // sbeg + "Communication Pool" used to crash with apiserver 422 because
+        // the secret name was "sbeg-communication pool-octo-mesh-connection"
+        // (whitespace, mixed case) — invalid RFC 1123 subdomain. Verify the
+        // sanitiser collapses the space to '-', lowercases, and the original
+        // poolName is preserved in an annotation for UI/debugging.
+        const string crName = "sbeg-communication-pool";
+        const string secretName = "sbeg-communication-pool-octo-mesh-connection";
+        Gateway.CommunicationPoolExistsAsync(PoolNamespace, crName).Returns(false);
+        Gateway.SecretExistsAsync(PoolNamespace, secretName).Returns(false);
+
+        await Manager.CreatePoolAsync("sbeg", "Communication Pool");
+
+        await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Is<V1Secret>(s =>
+            s.Metadata.Name == secretName &&
+            s.Metadata.Labels["octo-mesh.meshmakers.io/pool"] == "Communication-Pool" &&
+            s.Metadata.Annotations["octo-mesh.meshmakers.io/pool-name"] == "Communication Pool"));
         await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
     }
 }

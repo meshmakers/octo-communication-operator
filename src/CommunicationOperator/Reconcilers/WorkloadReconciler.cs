@@ -1,6 +1,7 @@
 using System.Text;
 using k8s.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Operator.Common;
 using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Services;
@@ -243,52 +244,24 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
     /// <summary>
     /// Helm release name. DNS-safe: lowercase, alphanumeric + '-'. Truncated
-    /// to 53 chars (helm release name limit).
+    /// to 53 chars (helm release name limit). Delegates to
+    /// <see cref="K8sNaming.DnsName(int,string[])"/> so the reconciler and
+    /// the CommunicationPoolManager produce identical names for matching
+    /// CK identifiers.
     /// </summary>
-    internal static string ReleaseName(string tenantId, string workloadName)
-    {
-        var raw = ($"{tenantId}-{workloadName}").ToLowerInvariant();
-        var sb = new StringBuilder(raw.Length);
-        foreach (var c in raw)
-        {
-            sb.Append(char.IsLetterOrDigit(c) || c == '-' ? c : '-');
-        }
-        var trimmed = sb.ToString().Trim('-');
-        return trimmed.Length > 53 ? trimmed[..53] : trimmed;
-    }
+    internal static string ReleaseName(string tenantId, string workloadName) =>
+        K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, workloadName);
 
     internal static string SecretName(string release) => $"{release}-octo-secrets";
 
     /// <summary>
     /// Coerces an arbitrary string into a valid Kubernetes label value.
-    /// Kubernetes requires labels to match
-    /// <c>[A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9]</c> with length ≤ 63 — workload
-    /// names from the CK entity can contain spaces or other punctuation
-    /// (e.g. "meshtest Adapter"), which the apiserver rejects with a 422.
-    /// Everything outside the allowed alphabet becomes a dash; leading and
-    /// trailing dashes are trimmed; empty results become "unknown" so the
-    /// label is still set (omitting it entirely would lose the workload
-    /// identity in the labels API).
+    /// Thin wrapper around <see cref="K8sNaming.LabelValue"/> retained so
+    /// existing call sites in this file and the test assembly continue to
+    /// work; new code should call <see cref="K8sNaming.LabelValue"/>
+    /// directly.
     /// </summary>
-    internal static string SanitizeLabelValue(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return "unknown";
-        }
-
-        var sb = new StringBuilder(value.Length);
-        foreach (var c in value)
-        {
-            sb.Append(char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '-');
-        }
-        var trimmed = sb.ToString().Trim('-', '_', '.');
-        if (trimmed.Length == 0)
-        {
-            return "unknown";
-        }
-        return trimmed.Length > 63 ? trimmed[..63].TrimEnd('-', '_', '.') : trimmed;
-    }
+    internal static string SanitizeLabelValue(string value) => K8sNaming.LabelValue(value);
 
     /// <summary>
     /// Stable, DNS-safe alias derived from the repository URL. Same URL
