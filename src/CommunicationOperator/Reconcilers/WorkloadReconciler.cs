@@ -33,13 +33,14 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
     public async Task DeployAsync(WorkloadDeployedDto workload, CancellationToken cancellationToken)
     {
-        var release = ReleaseName(workload.TenantId, workload.WorkloadName);
+        var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
         var ns = _options.PoolNamespace;
         var secretName = SecretName(release);
 
         _logger.LogInformation(
-            "Deploying workload: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', chart '{ChartName}:{ChartVersion}', release '{Release}' in namespace '{Namespace}'",
-            workload.TenantId, workload.PoolName, workload.WorkloadName,
+            "Deploying workload: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}', release '{Release}' in namespace '{Namespace}'",
+            workload.TenantId, workload.PoolName, workload.PoolRtId,
+            workload.WorkloadName, workload.WorkloadRtId,
             workload.ChartName, workload.ChartVersion, release, ns);
 
         // 0. If the workload opts in, append secret-flagged overrides for
@@ -114,13 +115,14 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
     public async Task UndeployAsync(WorkloadUndeployedDto workload, CancellationToken cancellationToken)
     {
-        var release = ReleaseName(workload.TenantId, workload.WorkloadName);
+        var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
         var ns = _options.PoolNamespace;
         var secretName = SecretName(release);
 
         _logger.LogInformation(
-            "Undeploying workload: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', release '{Release}'",
-            workload.TenantId, workload.PoolName, workload.WorkloadName, release);
+            "Undeploying workload: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}'",
+            workload.TenantId, workload.PoolName, workload.PoolRtId,
+            workload.WorkloadName, workload.WorkloadRtId, release);
 
         await _helm.UninstallAsync(release, ns, cancellationToken);
 
@@ -167,9 +169,14 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 Labels = new Dictionary<string, string>
                 {
                     ["octo-mesh.meshmakers.io/tenant"] = SanitizeLabelValue(workload.TenantId),
-                    ["octo-mesh.meshmakers.io/pool"] = SanitizeLabelValue(workload.PoolName),
-                    ["octo-mesh.meshmakers.io/workload"] = SanitizeLabelValue(workload.WorkloadName),
+                    ["octo-mesh.meshmakers.io/pool-rt-id"] = workload.PoolRtId,
+                    ["octo-mesh.meshmakers.io/workload-rt-id"] = workload.WorkloadRtId,
                     ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator",
+                },
+                Annotations = new Dictionary<string, string>
+                {
+                    ["octo-mesh.meshmakers.io/pool-name"] = workload.PoolName,
+                    ["octo-mesh.meshmakers.io/workload-name"] = workload.WorkloadName,
                 },
             },
             Type = "Opaque",
@@ -243,14 +250,16 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     }
 
     /// <summary>
-    /// Helm release name. DNS-safe: lowercase, alphanumeric + '-'. Truncated
-    /// to 53 chars (helm release name limit). Delegates to
-    /// <see cref="K8sNaming.DnsName(int,string[])"/> so the reconciler and
-    /// the CommunicationPoolManager produce identical names for matching
-    /// CK identifiers.
+    /// Helm release name <c>{tenantId}-{workloadRtId}</c>. The workload's
+    /// runtime entity id is a 24-char lowercase hex string and always
+    /// RFC 1123 valid, so renaming the user-facing WorkloadName in the
+    /// Studio does not orphan the helm release. Delegates to
+    /// <see cref="K8sNaming.DnsName(int,string[])"/> so the reconciler
+    /// and the CommunicationPoolManager produce identical names for
+    /// matching CK identifiers.
     /// </summary>
-    internal static string ReleaseName(string tenantId, string workloadName) =>
-        K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, workloadName);
+    internal static string ReleaseName(string tenantId, string workloadRtId) =>
+        K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, workloadRtId);
 
     internal static string SecretName(string release) => $"{release}-octo-secrets";
 

@@ -11,8 +11,8 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     private static WorkloadDeployedDto BaseDto(IReadOnlyList<ValueOverrideDto>? overrides = null) => new()
     {
         TenantId = TenantId,
-        PoolName = PoolName,
-        WorkloadName = WorkloadName,
+        PoolRtId = PoolRtId, PoolName = PoolName,
+        WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
         RepositoryUrl = "https://meshmakers.github.io/charts",
         ChartName = "voest-app",
@@ -62,17 +62,22 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
                 && s.Data.ContainsKey("db.password")
                 && s.Type == "Opaque"
                 && s.Metadata.Labels["octo-mesh.meshmakers.io/tenant"] == TenantId
-                && s.Metadata.Labels["octo-mesh.meshmakers.io/workload"] == WorkloadName),
+                && s.Metadata.Labels["octo-mesh.meshmakers.io/pool-rt-id"] == PoolRtId
+                && s.Metadata.Labels["octo-mesh.meshmakers.io/workload-rt-id"] == WorkloadRtId
+                && s.Metadata.Annotations["octo-mesh.meshmakers.io/workload-name"] == WorkloadName
+                && s.Metadata.Annotations["octo-mesh.meshmakers.io/pool-name"] == PoolName),
             Arg.Any<CancellationToken>());
     }
 
     [Test]
-    public async Task DeployAsync_WithSecrets_SanitizesNonDnsLabelChars()
+    public async Task DeployAsync_WorkloadNameWithSpaces_LandsInAnnotationVerbatim()
     {
-        // Workload names from the CK entity can contain spaces or punctuation
-        // (e.g. "meshtest Adapter"). The K8s apiserver rejects those when used
-        // as a Secret label value with a 422. Sanitization replaces them with
-        // dashes so the deploy still lands.
+        // Workload names from the CK entity can contain spaces or
+        // punctuation (e.g. "meshtest Adapter"). The K8s apiserver
+        // used to reject those when used as a label value. Now the
+        // workload's identity label is the WorkloadRtId (always
+        // DNS-safe) and the user-facing name lands in an annotation
+        // verbatim.
         var dto = BaseDto(new[]
         {
             new ValueOverrideDto { Path = "x", Value = "y", IsSecret = true },
@@ -83,7 +88,8 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
         await Gateway.Received(1).CreateSecretAsync(
             Arg.Any<string>(),
             Arg.Is<V1Secret>(s =>
-                s.Metadata.Labels["octo-mesh.meshmakers.io/workload"] == "meshtest-Adapter"),
+                s.Metadata.Labels["octo-mesh.meshmakers.io/workload-rt-id"] == WorkloadRtId
+                && s.Metadata.Annotations["octo-mesh.meshmakers.io/workload-name"] == "meshtest Adapter"),
             Arg.Any<CancellationToken>());
     }
 
@@ -142,7 +148,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     {
         await Reconciler.DeployAsync(BaseDto(), CancellationToken.None);
 
-        var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadName);
+        var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
         await Helm.Received(1).UpgradeInstallAsync(
             Arg.Is<string>(r => r == expectedRelease),
             Arg.Is<string>(c => c.EndsWith("/voest-app")),
@@ -190,18 +196,19 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
-    public async Task DeployAsync_NoOperatorContextNoIdentity_OmitsContextFile()
+    public async Task DeployAsync_WithWorkloadIdentity_AlwaysWritesContextFile()
     {
-        // Edge case: operator has no cluster context AND the DTO has no
-        // tenantId / WorkloadRtId set. Nothing for the builder to emit, so
-        // no context file gets written.
-        var dto = BaseDto() with { TenantId = string.Empty, WorkloadRtId = string.Empty, ValuesYaml = string.Empty };
+        // The context builder always emits a tenantId / adapterRtId block
+        // when both are set, so a workload that has its identity (which
+        // any real workload does) but no ValuesYaml and no cluster
+        // context still gets a single values file passed to helm.
+        var dto = BaseDto() with { ValuesYaml = string.Empty };
 
         await Reconciler.DeployAsync(dto, CancellationToken.None);
 
         await Helm.Received(1).UpgradeInstallAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Is<IReadOnlyList<string>>(files => files.Count == 0),
+            Arg.Is<IReadOnlyList<string>>(files => files.Count == 1),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }

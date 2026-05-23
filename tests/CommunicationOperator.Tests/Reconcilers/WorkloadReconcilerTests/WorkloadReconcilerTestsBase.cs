@@ -11,7 +11,9 @@ internal abstract class WorkloadReconcilerTestsBase
 {
     protected const string TenantId = "acme";
     protected const string PoolName = "default";
+    protected const string PoolRtId = "65d5c447b420da3fb12381a1";
     protected const string WorkloadName = "voest-app";
+    protected const string WorkloadRtId = "65d5c447b420da3fb12381b1";
     protected const string PoolNamespace = "octo";
 
     protected readonly IHelmRunner Helm;

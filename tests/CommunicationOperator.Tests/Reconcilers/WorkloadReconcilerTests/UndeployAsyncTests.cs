@@ -9,15 +9,15 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
     private static WorkloadUndeployedDto BaseDto() => new()
     {
         TenantId = TenantId,
-        PoolName = PoolName,
-        WorkloadName = WorkloadName,
+        PoolRtId = PoolRtId, PoolName = PoolName,
+        WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
     };
 
     [Test]
     public async Task UndeployAsync_CallsHelmUninstallWithReleaseAndNamespace()
     {
-        var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadName);
+        var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
 
         await Reconciler.UndeployAsync(BaseDto(), CancellationToken.None);
 
