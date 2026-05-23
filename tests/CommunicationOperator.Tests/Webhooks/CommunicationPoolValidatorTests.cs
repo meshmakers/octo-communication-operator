@@ -18,9 +18,35 @@ public class CommunicationPoolValidatorTests
     }
 
     [Test]
-    public async Task Create_PoolNameWithSpace_ReturnsInvalidWithBadRequest()
+    public async Task Create_PoolNameWithSpace_ReturnsValid()
     {
-        var entity = NewEntity("invalid name");
+        // Spec.PoolName now carries the unsanitised user-friendly value;
+        // every derived k8s name is built from PoolRtId instead, so the
+        // apiserver no longer cares about whitespace. The webhook only
+        // rejects empty / whitespace-only names (those would break the
+        // controller-side lookup).
+        var entity = NewEntity("Default Cloud");
+
+        var result = _validator.Create(entity, dryRun: false);
+
+        await Assert.That(result.Valid).IsTrue();
+    }
+
+    [Test]
+    public async Task Create_EmptyPoolName_ReturnsInvalidWithBadRequest()
+    {
+        var entity = NewEntity(string.Empty);
+
+        var result = _validator.Create(entity, dryRun: false);
+
+        await Assert.That(result.Valid).IsFalse();
+        await Assert.That(result.Status?.Code).IsEqualTo(400);
+    }
+
+    [Test]
+    public async Task Create_WhitespaceOnlyPoolName_ReturnsInvalidWithBadRequest()
+    {
+        var entity = NewEntity("   ");
 
         var result = _validator.Create(entity, dryRun: false);
 

@@ -9,7 +9,7 @@ public class DeletePoolAsyncTests : CommunicationPoolManagerTestsBase
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
 
-        await Manager.DeletePoolAsync(TenantId, PoolName);
+        await Manager.DeletePoolAsync(TenantId, PoolRtId, PoolName);
 
         await Gateway.DidNotReceive().DeleteCommunicationPoolAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -23,7 +23,7 @@ public class DeletePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(true);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(true);
 
-        await Manager.DeletePoolAsync(TenantId, PoolName);
+        await Manager.DeletePoolAsync(TenantId, PoolRtId, PoolName);
 
         await Gateway.Received(1).DeleteCommunicationPoolAsync(PoolNamespace, ExpectedCrName);
         await Gateway.Received(1).DeleteSecretAsync(PoolNamespace, ExpectedSecretName);
@@ -35,7 +35,7 @@ public class DeletePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(true);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.DeletePoolAsync(TenantId, PoolName);
+        await Manager.DeletePoolAsync(TenantId, PoolRtId, PoolName);
 
         await Gateway.Received(1).DeleteCommunicationPoolAsync(PoolNamespace, ExpectedCrName);
         await Gateway.DidNotReceive().DeleteSecretAsync(

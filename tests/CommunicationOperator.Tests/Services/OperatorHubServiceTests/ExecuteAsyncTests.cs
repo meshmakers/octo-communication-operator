@@ -72,8 +72,8 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         var setup = SetupClient();
         setup.Client.RegisterOperatorAsync().Returns(new[]
         {
-            new DeployedPoolDto { TenantId = "tenant-a", PoolName = "default" },
-            new DeployedPoolDto { TenantId = "tenant-b", PoolName = "secondary" }
+            new DeployedPoolDto { TenantId = "tenant-a", PoolRtId = "65d5c447b420da3fb12381a1", PoolName = "default" },
+            new DeployedPoolDto { TenantId = "tenant-b", PoolRtId = "65d5c447b420da3fb12381a2", PoolName = "secondary" }
         });
 
         var hosted = (IHostedService)Service;
@@ -81,8 +81,8 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         await setup.Client.Received(1).RegisterOperatorAsync();
-        await PoolManager.Received(1).CreatePoolAsync("tenant-a", "default");
-        await PoolManager.Received(1).CreatePoolAsync("tenant-b", "secondary");
+        await PoolManager.Received(1).CreatePoolAsync("tenant-a", "65d5c447b420da3fb12381a1", "default");
+        await PoolManager.Received(1).CreatePoolAsync("tenant-b", "65d5c447b420da3fb12381a2", "secondary");
 
         await hosted.StopAsync(CancellationToken.None);
     }

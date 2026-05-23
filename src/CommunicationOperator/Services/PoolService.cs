@@ -97,7 +97,8 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
             // No-op when the hub connection is down — the reconnect
             // handler picks the pool up from GetPools() and re-registers
             // it then.
-            await _hubInvoker.RegisterPoolAsync(entity.Spec.TenantId, entity.Spec.PoolName);
+            await _hubInvoker.RegisterPoolAsync(entity.Spec.TenantId,
+                entity.Spec.PoolRtId, entity.Spec.PoolName);
             pool.IsRegistered = _hubInvoker.IsConnected;
         }
         catch (HubException e)
@@ -135,7 +136,8 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
         // controller queue doesn't retry the delete reconcile forever.
         try
         {
-            await _hubInvoker.UnregisterPoolAsync(entity.Spec.TenantId, entity.Spec.PoolName);
+            await _hubInvoker.UnregisterPoolAsync(entity.Spec.TenantId,
+                entity.Spec.PoolRtId, entity.Spec.PoolName);
         }
         catch (HubException e)
         {

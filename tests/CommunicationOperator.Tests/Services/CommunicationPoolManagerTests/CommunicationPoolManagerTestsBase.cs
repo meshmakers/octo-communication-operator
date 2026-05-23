@@ -9,9 +9,10 @@ public abstract class CommunicationPoolManagerTestsBase
 {
     protected const string TenantId = "acme";
     protected const string PoolName = "default";
+    protected const string PoolRtId = "65d5c447b420da3fb12381bc";
     protected const string PoolNamespace = "octo";
-    protected const string ExpectedCrName = "acme-default";
-    protected const string ExpectedSecretName = "acme-default-octo-mesh-connection";
+    protected const string ExpectedCrName = "acme-65d5c447b420da3fb12381bc";
+    protected const string ExpectedSecretName = "acme-65d5c447b420da3fb12381bc-octo-mesh-connection";
 
     protected readonly ICommunicationPoolKubernetesGateway Gateway;
     protected readonly OperatorOptions OperatorOptions;

@@ -21,8 +21,10 @@ public interface IOperatorHubInvoker
     /// <summary>
     /// Invokes <c>IOperatorHub.RegisterPoolAsync</c> on the controller for
     /// the given pool. Silently skips when the connection is down.
+    /// <paramref name="poolRtId"/> is the controller-side lookup key;
+    /// <paramref name="poolName"/> is the user-facing display name.
     /// </summary>
-    Task RegisterPoolAsync(string tenantId, string poolName);
+    Task RegisterPoolAsync(string tenantId, string poolRtId, string poolName);
 
     /// <summary>
     /// Invokes <c>IOperatorHub.UnregisterPoolAsync</c>. Silently skips when
@@ -30,5 +32,5 @@ public interface IOperatorHubInvoker
     /// the next time the operator-hub disconnects or when the next
     /// reconnect runs without that pool in the local list.
     /// </summary>
-    Task UnregisterPoolAsync(string tenantId, string poolName);
+    Task UnregisterPoolAsync(string tenantId, string poolRtId, string poolName);
 }

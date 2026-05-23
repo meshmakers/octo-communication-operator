@@ -7,15 +7,21 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Services.OperatorHubServi
 public class PoolDeployedAsyncTests : OperatorHubServiceTestsBase
 {
     private const string PoolName = "default";
+    private const string PoolRtId = "65d5c447b420da3fb12381bc";
+
+    private static DeployedPoolDto Pool() => new()
+    {
+        TenantId = TenantId, PoolRtId = PoolRtId, PoolName = PoolName,
+    };
 
     [Test]
     public async Task PoolDeployedAsync_AutoManagePoolsEnabled_DelegatesToPoolManager()
     {
         OperatorOptions.AutoManagePools = true;
 
-        await Service.PoolDeployedAsync(new DeployedPoolDto { TenantId = TenantId, PoolName = PoolName });
+        await Service.PoolDeployedAsync(Pool());
 
-        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolName);
+        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolRtId, PoolName);
     }
 
     [Test]
@@ -26,20 +32,20 @@ public class PoolDeployedAsyncTests : OperatorHubServiceTestsBase
         // auto-create CRs — edge CRs are managed manually or by an external system.
         OperatorOptions.AutoManagePools = false;
 
-        await Service.PoolDeployedAsync(new DeployedPoolDto { TenantId = TenantId, PoolName = PoolName });
+        await Service.PoolDeployedAsync(Pool());
 
-        await PoolManager.DidNotReceiveWithAnyArgs().CreatePoolAsync(default!, default!);
+        await PoolManager.DidNotReceiveWithAnyArgs().CreatePoolAsync(default!, default!, default!);
     }
 
     [Test]
     public async Task PoolDeployedAsync_AutoManagePoolsEnabledAndPoolManagerThrows_ExceptionIsSwallowed()
     {
         OperatorOptions.AutoManagePools = true;
-        PoolManager.CreatePoolAsync(TenantId, PoolName)
+        PoolManager.CreatePoolAsync(TenantId, PoolRtId, PoolName)
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        await Service.PoolDeployedAsync(new DeployedPoolDto { TenantId = TenantId, PoolName = PoolName });
+        await Service.PoolDeployedAsync(Pool());
 
-        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolName);
+        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolRtId, PoolName);
     }
 }

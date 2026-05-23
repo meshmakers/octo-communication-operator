@@ -22,9 +22,9 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         _gateway = gateway;
     }
 
-    public async Task CreatePoolAsync(string tenantId, string poolName)
+    public async Task CreatePoolAsync(string tenantId, string poolRtId, string poolName)
     {
-        var crName = GetCrName(tenantId, poolName);
+        var crName = GetCrName(tenantId, poolRtId);
         var ns = _options.PoolNamespace;
 
         if (await _gateway.CommunicationPoolExistsAsync(ns, crName))
@@ -35,19 +35,19 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        await CreateBrokerSecretIfMissingAsync(tenantId, poolName, ns);
+        await CreateBrokerSecretIfMissingAsync(tenantId, poolRtId, poolName, ns);
 
-        var resource = BuildCommunicationPoolResource(tenantId, poolName, crName, ns);
+        var resource = BuildCommunicationPoolResource(tenantId, poolRtId, poolName, crName, ns);
         _logger.LogInformation(
-            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}'",
-            crName, ns, tenantId, poolName);
+            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
+            crName, ns, tenantId, poolName, poolRtId);
         await _gateway.CreateCommunicationPoolAsync(ns, resource);
         _logger.LogInformation("CommunicationPool CR '{CrName}' created successfully", crName);
     }
 
-    public async Task DeletePoolAsync(string tenantId, string poolName)
+    public async Task DeletePoolAsync(string tenantId, string poolRtId, string poolName)
     {
-        var crName = GetCrName(tenantId, poolName);
+        var crName = GetCrName(tenantId, poolRtId);
         var ns = _options.PoolNamespace;
 
         if (!await _gateway.CommunicationPoolExistsAsync(ns, crName))
@@ -59,17 +59,17 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         }
 
         _logger.LogInformation(
-            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}'",
-            crName, ns, tenantId, poolName);
+            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
+            crName, ns, tenantId, poolName, poolRtId);
         await _gateway.DeleteCommunicationPoolAsync(ns, crName);
 
-        await DeleteBrokerSecretAsync(tenantId, poolName, ns);
+        await DeleteBrokerSecretAsync(tenantId, poolRtId, ns);
         _logger.LogInformation("CommunicationPool CR '{CrName}' deleted successfully", crName);
     }
 
-    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string poolName, string ns)
+    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string poolRtId, string poolName, string ns)
     {
-        var secretName = GetSecretName(tenantId, poolName);
+        var secretName = GetSecretName(tenantId, poolRtId);
         if (await _gateway.SecretExistsAsync(ns, secretName))
         {
             _logger.LogInformation(
@@ -77,15 +77,15 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        var secret = BuildBrokerSecret(secretName, ns, tenantId, poolName);
+        var secret = BuildBrokerSecret(secretName, ns, tenantId, poolRtId, poolName);
         _logger.LogInformation(
             "Creating broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
         await _gateway.CreateSecretAsync(ns, secret);
     }
 
-    private async Task DeleteBrokerSecretAsync(string tenantId, string poolName, string ns)
+    private async Task DeleteBrokerSecretAsync(string tenantId, string poolRtId, string ns)
     {
-        var secretName = GetSecretName(tenantId, poolName);
+        var secretName = GetSecretName(tenantId, poolRtId);
         if (!await _gateway.SecretExistsAsync(ns, secretName))
         {
             _logger.LogInformation(
@@ -98,31 +98,32 @@ public class CommunicationPoolManager : ICommunicationPoolManager
     }
 
     private CommunicationPoolResource BuildCommunicationPoolResource(
-        string tenantId, string poolName, string crName, string ns) =>
+        string tenantId, string poolRtId, string poolName, string crName, string ns) =>
         new()
         {
             Metadata = new CommunicationPoolMetadata
             {
                 Name = crName,
                 Namespace = ns,
-                Labels = BuildLabels(tenantId, poolName),
+                Labels = BuildLabels(tenantId, poolRtId),
                 Annotations = BuildAnnotations(poolName)
             },
             Spec = new CommunicationPoolSpec
             {
                 TenantId = tenantId,
+                PoolRtId = poolRtId,
                 PoolName = poolName
             }
         };
 
-    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId, string poolName) =>
+    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId, string poolRtId, string poolName) =>
         new()
         {
             Metadata = new V1ObjectMeta
             {
                 Name = secretName,
                 NamespaceProperty = ns,
-                Labels = BuildLabels(tenantId, poolName),
+                Labels = BuildLabels(tenantId, poolRtId),
                 Annotations = BuildAnnotations(poolName)
             },
             Type = "Opaque",
@@ -133,17 +134,17 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             }
         };
 
-    // K8s names and label values both reject raw CK attribute values that
-    // contain whitespace, uppercase, or other non-RFC-1123 characters
-    // (e.g. "Communication Pool"). Sanitize via the shared K8sNaming
-    // helper — same logic the WorkloadReconciler already uses for its
-    // helm release names and identity labels — and keep the original
-    // poolName as an annotation for UI/debugging.
-    private static Dictionary<string, string> BuildLabels(string tenantId, string poolName) =>
+    // K8s names and label values are derived from the runtime entity ids,
+    // not from user-facing names — CK attributes can carry whitespace,
+    // uppercase, and other characters the apiserver rejects with a 422
+    // (e.g. "Communication Pool"). RtIds are 24-char lowercase hex
+    // strings, always valid; the user-facing PoolName rides along as an
+    // annotation for UI/debugging.
+    private static Dictionary<string, string> BuildLabels(string tenantId, string poolRtId) =>
         new()
         {
             ["octo-mesh.meshmakers.io/tenant"] = K8sNaming.LabelValue(tenantId),
-            ["octo-mesh.meshmakers.io/pool"] = K8sNaming.LabelValue(poolName),
+            ["octo-mesh.meshmakers.io/pool-rt-id"] = poolRtId,
             ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
         };
 
@@ -153,15 +154,15 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             ["octo-mesh.meshmakers.io/pool-name"] = poolName
         };
 
-    // CR name: {tenant}-{pool} as a strict RFC 1123 subdomain. We keep
+    // CR name: {tenant}-{poolRtId} as a strict RFC 1123 subdomain. Keep
     // the 53-char cap from K8sNaming so the secret name (which appends
     // "-octo-mesh-connection") still fits comfortably under the apiserver
     // 253-char ceiling for any reasonable combination of inputs.
-    private static string GetCrName(string tenantId, string poolName) =>
-        K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, poolName);
+    private static string GetCrName(string tenantId, string poolRtId) =>
+        K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, poolRtId);
 
-    private static string GetSecretName(string tenantId, string poolName) =>
-        $"{GetCrName(tenantId, poolName)}-octo-mesh-connection";
+    private static string GetSecretName(string tenantId, string poolRtId) =>
+        $"{GetCrName(tenantId, poolRtId)}-octo-mesh-connection";
 }
 
 internal class CommunicationPoolResource
@@ -197,11 +198,14 @@ internal class CommunicationPoolMetadata
 internal class CommunicationPoolSpec
 {
     // Matches V1CommunicationPoolEntitySpec — CR only carries the pool's
-    // tenant+name identity. Everything else (controller URI, broker host,
-    // instancePrefix, …) is owned by the operator instance that services
-    // this CR and read from OperatorOptions at startup.
+    // tenant + rtId + display name. Everything else (controller URI,
+    // broker host, instancePrefix, …) is owned by the operator instance
+    // that services this CR and read from OperatorOptions at startup.
     [JsonPropertyName("tenantId")]
     public string TenantId { get; set; } = string.Empty;
+
+    [JsonPropertyName("poolRtId")]
+    public string PoolRtId { get; set; } = string.Empty;
 
     [JsonPropertyName("poolName")]
     public string PoolName { get; set; } = string.Empty;
