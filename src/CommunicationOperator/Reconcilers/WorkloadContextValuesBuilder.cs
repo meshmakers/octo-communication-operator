@@ -101,6 +101,7 @@ public static class WorkloadContextValuesBuilder
 
         var serializer = new SerializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .WithEventEmitter(next => new QuotedStringEventEmitter(next))
             .Build();
         return serializer.Serialize(root);
     }

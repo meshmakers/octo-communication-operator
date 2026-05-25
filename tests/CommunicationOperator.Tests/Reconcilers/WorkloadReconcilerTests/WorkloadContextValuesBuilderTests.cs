@@ -4,6 +4,13 @@ using Meshmakers.Octo.Communication.Operator.Reconcilers;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers.WorkloadReconcilerTests;
 
+// All assertions use the double-quoted form because the builder runs every string
+// scalar — keys included — through QuotedStringEventEmitter. The quoting is what
+// stops Go YAML (used by Helm) from coercing all-digit strings like the
+// blueprint-seeded RtId 670000000000000000000002 into float64 ("6.7e+23"), which
+// otherwise lands in the rendered Deployment env and crashes the adapter SDK with
+// "not a valid 24 digit hex string". Bools / numbers pass through unquoted —
+// quoting tls: true would change chart-side branching semantics.
 internal class WorkloadContextValuesBuilderTests
 {
     [Test]
@@ -22,7 +29,7 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("instancePrefix: test-2");
+        await Assert.That(yaml!).Contains("\"instancePrefix\": \"test-2\"");
         await Assert.That(yaml!).DoesNotContain("clusterDependencies");
         await Assert.That(yaml!).DoesNotContain("ingress");
     }
@@ -43,12 +50,12 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("clusterDependencies:");
-        await Assert.That(yaml!).Contains("mongodbHost:");
-        await Assert.That(yaml!).Contains("rabbitMqHost: rabbitmq.rabbitmq.svc.cluster.local");
-        await Assert.That(yaml!).Contains("rabbitMqUser: octo-mq-user");
-        await Assert.That(yaml!).Contains("streamDataHost:");
-        await Assert.That(yaml!).Contains("streamDataUser: octo-system");
+        await Assert.That(yaml!).Contains("\"clusterDependencies\":");
+        await Assert.That(yaml!).Contains("\"mongodbHost\":");
+        await Assert.That(yaml!).Contains("\"rabbitMqHost\": \"rabbitmq.rabbitmq.svc.cluster.local\"");
+        await Assert.That(yaml!).Contains("\"rabbitMqUser\": \"octo-mq-user\"");
+        await Assert.That(yaml!).Contains("\"streamDataHost\":");
+        await Assert.That(yaml!).Contains("\"streamDataUser\": \"octo-system\"");
     }
 
     [Test]
@@ -64,7 +71,7 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("mongodbHost: host-only");
+        await Assert.That(yaml!).Contains("\"mongodbHost\": \"host-only\"");
         await Assert.That(yaml!).DoesNotContain("rabbitMqHost");
         await Assert.That(yaml!).DoesNotContain("streamDataHost");
     }
@@ -83,10 +90,12 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("ingress:");
-        await Assert.That(yaml!).Contains("className: nginx");
-        await Assert.That(yaml!).Contains("tls: true");
-        await Assert.That(yaml!).Contains("cert-manager.io/cluster-issuer: mm-cloud-issuer");
+        await Assert.That(yaml!).Contains("\"ingress\":");
+        await Assert.That(yaml!).Contains("\"className\": \"nginx\"");
+        // Bool intentionally NOT quoted so the chart's {{ if .Values.ingress.tls }}
+        // branch still evaluates the bool, not the string "true".
+        await Assert.That(yaml!).Contains("\"tls\": true");
+        await Assert.That(yaml!).Contains("\"cert-manager.io/cluster-issuer\": \"mm-cloud-issuer\"");
     }
 
     [Test]
@@ -98,7 +107,7 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("className: nginx");
+        await Assert.That(yaml!).Contains("\"className\": \"nginx\"");
         await Assert.That(yaml!).DoesNotContain("tls:");
     }
 
@@ -113,8 +122,32 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("tenantId: meshtest");
-        await Assert.That(yaml!).Contains("adapterRtId: 5f1c4e1a4d3b2a1b8f9c1234");
+        await Assert.That(yaml!).Contains("\"tenantId\": \"meshtest\"");
+        await Assert.That(yaml!).Contains("\"adapterRtId\": \"5f1c4e1a4d3b2a1b8f9c1234\"");
+    }
+
+    [Test]
+    public async Task Build_AllDigitRtId_IsQuotedToPreventFloatCoercion()
+    {
+        // Regression test: the System.Communication blueprint seeds adapter
+        // RtIds like 670000000000000000000002 (24 decimal digits). Without
+        // forced quoting, YamlDotNet emits a plain scalar that Go YAML (used
+        // by Helm) parses as float64 → "6.7e+23". That value then flows into
+        // OCTO_ADAPTER__ADAPTERRTID in the rendered Deployment, and the SDK
+        // throws FormatException("not a valid 24 digit hex string") on every
+        // SignalR reconnect — the adapter never reaches CommunicationState
+        // Online.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions(), new WorkloadDeployedDto
+        {
+            TenantId = "meshtest",
+            WorkloadRtId = "670000000000000000000002",
+            WorkloadName = "mesh-adapter",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"adapterRtId\": \"670000000000000000000002\"");
+        await Assert.That(yaml!).DoesNotContain("6.7e+23");
+        await Assert.That(yaml!).DoesNotContain("6.7E+23");
     }
 
     [Test]
@@ -136,8 +169,8 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("image:");
-        await Assert.That(yaml!).Contains("privateRegistry: docker.mm.cloud");
+        await Assert.That(yaml!).Contains("\"image\":");
+        await Assert.That(yaml!).Contains("\"privateRegistry\": \"docker.mm.cloud\"");
     }
 
     [Test]
@@ -150,7 +183,7 @@ internal class WorkloadContextValuesBuilderTests
         });
 
         await Assert.That(yaml).IsNotNull();
-        await Assert.That(yaml!).Contains("communicationControllerServiceUri: http://octo-communication.octo.svc.cluster.local");
-        await Assert.That(yaml!).Contains("reportingServiceUri: http://octo-reporting.octo.svc.cluster.local");
+        await Assert.That(yaml!).Contains("\"communicationControllerServiceUri\": \"http://octo-communication.octo.svc.cluster.local\"");
+        await Assert.That(yaml!).Contains("\"reportingServiceUri\": \"http://octo-reporting.octo.svc.cluster.local\"");
     }
 }
