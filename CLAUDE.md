@@ -200,7 +200,14 @@ The connection is auto-reconnecting via `OperatorHubClient`. Failures from the p
 
 ### Webhooks
 
-- `CommunicationPoolValidator`: rejects pool names containing spaces.
+- `CommunicationPoolValidator`: enforces non-empty `Spec.PoolName` and
+  requires `Spec.PoolRtId` to be a 24-character lowercase hex MongoDB
+  ObjectId (the RtId of the controller-side `RtPool`). Whitespace in
+  the pool name is allowed — every derived k8s name is built from
+  `PoolRtId` via `K8sNaming.DnsName`, so the apiserver no longer cares.
+  An empty / malformed `PoolRtId` would otherwise surface only as a
+  hub-side `FormatException` from the controller's
+  `OperatorHub.RegisterPoolAsync` and leave the CR stuck Unregistered.
 - `CommunicationPoolMutator`: currently a no-op (`NoChanges()`).
 
 ## Configuration
@@ -309,7 +316,9 @@ Two reasons for this exact shape:
 Pure-logic + callback surfaces:
 
 - `Common/DictionaryExtensionsTests` — label-selector formatting.
-- `Webhooks/CommunicationPoolValidatorTests` — pool-name space rule.
+- `Webhooks/CommunicationPoolValidatorTests` — pool-name non-empty rule,
+  pool-rtId 24-char-hex rule (empty, too-short, uppercase, non-hex char),
+  same rules enforced on update.
 - `Webhooks/CommunicationPoolMutatorTests` — no-op invariant.
 - `Finalizer/CommunicationPoolFinalizerTests` — success result + entity passthrough.
 - `Controller/CommunicationPoolControllerTests` — `ReconcileAsync` happy/failure paths and `DeletedAsync` no-status-update contract. The delete callback must not call `IKubernetesClient.UpdateStatusAsync` because the CR is already gone when KubeOps invokes it; a status-update there 404s and makes KubeOps retry the delete reconcile indefinitely.
