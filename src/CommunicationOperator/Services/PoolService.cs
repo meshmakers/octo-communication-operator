@@ -20,18 +20,19 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
 {
     private readonly ILogger<PoolService> _logger;
     private readonly IOperatorHubInvoker _hubInvoker;
-    // Keyed by (tenantId, poolName) — NOT poolName alone. A single
+    // Keyed by (tenantId, poolRtId). PoolRtId is the canonical
+    // controller-side pool identity (24-char hex MongoDB ObjectId);
+    // it survives a controller-side rename of the pool, and a single
     // operator can manage multiple CommunicationPool CRs from different
-    // tenants that all share the same poolName (e.g. every tenant has
-    // its own `cloud` pool on the central cluster). Keying by poolName
-    // only caused later-reconciled CRs to overwrite earlier ones, so
-    // GetPools() returned a single entry and the reconnect replay
-    // only re-registered one of N tenants' pools on the hub.
-    private readonly Dictionary<(string TenantId, string PoolName), Pool> _pools = new();
+    // tenants without the keys colliding. PoolName alone collided
+    // across tenants (e.g. every tenant has its own `cloud` pool);
+    // PoolRtId never does. PoolName lives on the entity as a
+    // human-readable display label only.
+    private readonly Dictionary<(string TenantId, string PoolRtId), Pool> _pools = new();
     private readonly object _gate = new();
 
-    private static (string TenantId, string PoolName) KeyFor(V1CommunicationPoolEntity entity) =>
-        (entity.Spec.TenantId, entity.Spec.PoolName);
+    private static (string TenantId, string PoolRtId) KeyFor(V1CommunicationPoolEntity entity) =>
+        (entity.Spec.TenantId, entity.Spec.PoolRtId);
 
     public PoolService(ILogger<PoolService> logger, IOperatorHubInvoker hubInvoker)
     {
