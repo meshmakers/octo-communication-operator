@@ -16,14 +16,14 @@ public class PoolServiceException : Exception
     {
     }
 
-    public static Exception ConnectionError(string poolName, HubException hubException)
+    public static Exception ConnectionError(string poolRtId, HubException hubException)
     {
-        return new PoolServiceException($"Cannot connect to controller {poolName}", hubException); 
+        return new PoolServiceException($"Cannot connect to controller for pool rtId {poolRtId}", hubException);
     }
 
-    public static Exception DeployFailed(string poolName, Exception exception)
-    {       
-        return new PoolServiceException($"Cannot deploy pool {poolName}", exception);
+    public static Exception DeployFailed(string poolRtId, Exception exception)
+    {
+        return new PoolServiceException($"Cannot deploy pool rtId {poolRtId}", exception);
     }
 
     public static Exception PreUpdateTenantFailed(string tenantId, Exception exception)

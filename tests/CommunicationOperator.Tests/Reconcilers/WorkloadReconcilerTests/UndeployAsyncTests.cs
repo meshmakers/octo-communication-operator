@@ -9,7 +9,7 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
     private static WorkloadUndeployedDto BaseDto() => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId, PoolName = PoolName,
+        PoolRtId = PoolRtId,
         WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
     };

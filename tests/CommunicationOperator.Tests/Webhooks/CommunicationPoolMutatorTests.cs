@@ -14,7 +14,6 @@ public class CommunicationPoolMutatorTests
         {
             Spec = new V1CommunicationPoolEntity.V1CommunicationPoolEntitySpec
             {
-                PoolName = "default"
             }
         };
 

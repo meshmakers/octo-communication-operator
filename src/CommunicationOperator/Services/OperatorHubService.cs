@@ -56,31 +56,31 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public bool IsConnected => _client?.IsAlive ?? false;
 
     /// <inheritdoc />
-    public async Task RegisterPoolAsync(string tenantId, string poolRtId, string poolName)
+    public async Task RegisterPoolAsync(string tenantId, string poolRtId)
     {
         var client = _client;
         if (client == null || !client.IsAlive)
         {
             _logger.LogDebug(
-                "Operator-hub not connected; skipping RegisterPoolAsync for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}) (will be replayed on reconnect)",
-                tenantId, poolName, poolRtId);
+                "Operator-hub not connected; skipping RegisterPoolAsync for tenant '{TenantId}', pool rtId {PoolRtId} (will be replayed on reconnect)",
+                tenantId, poolRtId);
             return;
         }
-        await client.RegisterPoolAsync(tenantId, poolRtId, poolName);
+        await client.RegisterPoolAsync(tenantId, poolRtId);
     }
 
     /// <inheritdoc />
-    public async Task UnregisterPoolAsync(string tenantId, string poolRtId, string poolName)
+    public async Task UnregisterPoolAsync(string tenantId, string poolRtId)
     {
         var client = _client;
         if (client == null || !client.IsAlive)
         {
             _logger.LogDebug(
-                "Operator-hub not connected; skipping UnregisterPoolAsync for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                tenantId, poolName, poolRtId);
+                "Operator-hub not connected; skipping UnregisterPoolAsync for tenant '{TenantId}', pool rtId {PoolRtId}",
+                tenantId, poolRtId);
             return;
         }
-        await client.UnregisterPoolAsync(tenantId, poolRtId, poolName);
+        await client.UnregisterPoolAsync(tenantId, poolRtId);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -115,7 +115,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
 
             foreach (var pool in deployedPools)
             {
-                await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId, pool.PoolName);
+                await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId);
             }
 
             // Replay pool registrations for every CommunicationPool CR the
@@ -128,14 +128,14 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 try
                 {
                     await client.RegisterPoolAsync(pool.Entity.Spec.TenantId,
-                        pool.Entity.Spec.PoolRtId, pool.Entity.Spec.PoolName);
+                        pool.Entity.Spec.PoolRtId);
                     pool.IsRegistered = true;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        "Failed to re-register pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}' on reconnect",
-                        pool.Entity.Spec.PoolName, pool.Entity.Spec.PoolRtId, pool.Entity.Spec.TenantId);
+                        "Failed to re-register pool rtId {PoolRtId} for tenant '{TenantId}' on reconnect",
+                        pool.Entity.Spec.PoolRtId, pool.Entity.Spec.TenantId);
                 }
             }
         };
@@ -176,8 +176,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public async Task PoolDeployedAsync(DeployedPoolDto pool)
     {
         _logger.LogInformation(
-            "Pool deployed event received: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-            pool.TenantId, pool.PoolName, pool.PoolRtId);
+            "Pool deployed event received: tenant '{TenantId}', pool rtId {PoolRtId}",
+            pool.TenantId, pool.PoolRtId);
 
         // Auto-CR-creation is the central-operator's job. Edge operators
         // receive the same broadcast (the controller fans out to every
@@ -186,54 +186,54 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         if (!_options.AutoManagePools)
         {
             _logger.LogDebug(
-                "AutoManagePools=false: not auto-creating CR for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                pool.TenantId, pool.PoolName, pool.PoolRtId);
+                "AutoManagePools=false: not auto-creating CR for tenant '{TenantId}', pool rtId {PoolRtId}",
+                pool.TenantId, pool.PoolRtId);
             return;
         }
 
         try
         {
-            await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId, pool.PoolName);
+            await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to create CommunicationPool CR for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                pool.TenantId, pool.PoolName, pool.PoolRtId);
+                "Failed to create CommunicationPool CR for tenant '{TenantId}', pool rtId {PoolRtId}",
+                pool.TenantId, pool.PoolRtId);
         }
     }
 
-    public async Task PoolUndeployedAsync(string tenantId, string poolRtId, string poolName)
+    public async Task PoolUndeployedAsync(string tenantId, string poolRtId)
     {
         _logger.LogInformation(
-            "Pool undeployed event received: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-            tenantId, poolName, poolRtId);
+            "Pool undeployed event received: tenant '{TenantId}', pool rtId {PoolRtId}",
+            tenantId, poolRtId);
 
         if (!_options.AutoManagePools)
         {
             _logger.LogDebug(
-                "AutoManagePools=false: not auto-deleting CR for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                tenantId, poolName, poolRtId);
+                "AutoManagePools=false: not auto-deleting CR for tenant '{TenantId}', pool rtId {PoolRtId}",
+                tenantId, poolRtId);
             return;
         }
 
         try
         {
-            await _poolManager.DeletePoolAsync(tenantId, poolRtId, poolName);
+            await _poolManager.DeletePoolAsync(tenantId, poolRtId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to delete CommunicationPool CR for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                tenantId, poolName, poolRtId);
+                "Failed to delete CommunicationPool CR for tenant '{TenantId}', pool rtId {PoolRtId}",
+                tenantId, poolRtId);
         }
     }
 
     public async Task WorkloadDeployedAsync(WorkloadDeployedDto workload)
     {
         _logger.LogInformation(
-            "Workload deployed event received: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
-            workload.TenantId, workload.PoolName, workload.WorkloadName,
+            "Workload deployed event received: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
+            workload.TenantId, workload.PoolRtId, workload.WorkloadName,
             workload.WorkloadType, workload.ChartName, workload.ChartVersion);
 
         bool success;
@@ -248,8 +248,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         {
             // Don't let a single bad workload crash the hub connection.
             _logger.LogError(ex,
-                "Failed to deploy workload '{WorkloadName}' for tenant '{TenantId}', pool '{PoolName}'",
-                workload.WorkloadName, workload.TenantId, workload.PoolName);
+                "Failed to deploy workload '{WorkloadName}' for tenant '{TenantId}', pool rtId {PoolRtId}",
+                workload.WorkloadName, workload.TenantId, workload.PoolRtId);
             success = false;
             statusMessage = ex.Message;
         }
@@ -285,7 +285,6 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         await client.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
         {
             TenantId = workload.TenantId,
-            PoolName = workload.PoolName,
             WorkloadName = workload.WorkloadName,
             WorkloadRtId = workload.WorkloadRtId,
             Success = success,
@@ -296,8 +295,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public async Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)
     {
         _logger.LogInformation(
-            "Workload undeployed event received: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', type '{WorkloadType}'",
-            workload.TenantId, workload.PoolName, workload.WorkloadName, workload.WorkloadType);
+            "Workload undeployed event received: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}', type '{WorkloadType}'",
+            workload.TenantId, workload.PoolRtId, workload.WorkloadName, workload.WorkloadType);
         try
         {
             await _workloadReconciler.UndeployAsync(workload, CancellationToken.None);
@@ -305,8 +304,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to undeploy workload '{WorkloadName}' for tenant '{TenantId}', pool '{PoolName}'",
-                workload.WorkloadName, workload.TenantId, workload.PoolName);
+                "Failed to undeploy workload '{WorkloadName}' for tenant '{TenantId}', pool rtId {PoolRtId}",
+                workload.WorkloadName, workload.TenantId, workload.PoolRtId);
         }
     }
 

@@ -11,7 +11,7 @@ public class PoolDeployedAsyncTests : OperatorHubServiceTestsBase
 
     private static DeployedPoolDto Pool() => new()
     {
-        TenantId = TenantId, PoolRtId = PoolRtId, PoolName = PoolName,
+        TenantId = TenantId, PoolRtId = PoolRtId,
     };
 
     [Test]
@@ -21,7 +21,7 @@ public class PoolDeployedAsyncTests : OperatorHubServiceTestsBase
 
         await Service.PoolDeployedAsync(Pool());
 
-        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolRtId);
     }
 
     [Test]
@@ -34,18 +34,18 @@ public class PoolDeployedAsyncTests : OperatorHubServiceTestsBase
 
         await Service.PoolDeployedAsync(Pool());
 
-        await PoolManager.DidNotReceiveWithAnyArgs().CreatePoolAsync(default!, default!, default!);
+        await PoolManager.DidNotReceiveWithAnyArgs().CreatePoolAsync(default!, default!);
     }
 
     [Test]
     public async Task PoolDeployedAsync_AutoManagePoolsEnabledAndPoolManagerThrows_ExceptionIsSwallowed()
     {
         OperatorOptions.AutoManagePools = true;
-        PoolManager.CreatePoolAsync(TenantId, PoolRtId, PoolName)
+        PoolManager.CreatePoolAsync(TenantId, PoolRtId)
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         await Service.PoolDeployedAsync(Pool());
 
-        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await PoolManager.Received(1).CreatePoolAsync(TenantId, PoolRtId);
     }
 }

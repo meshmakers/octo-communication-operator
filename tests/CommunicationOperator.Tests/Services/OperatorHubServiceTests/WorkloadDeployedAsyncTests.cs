@@ -12,7 +12,6 @@ public class WorkloadDeployedAsyncTests : OperatorHubServiceTestsBase
     private static WorkloadDeployedDto Dto() => new()
     {
         TenantId = TenantId,
-        PoolName = "cloud",
         WorkloadName = "meshtest-adapter",
         WorkloadRtId = "66004fda527ac79a03ecedd7",
         WorkloadType = WorkloadTypeDto.Adapter,

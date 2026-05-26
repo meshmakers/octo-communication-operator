@@ -9,13 +9,14 @@ public class V1CommunicationPoolEntity : CustomKubernetesEntity<V1CommunicationP
     public class V1CommunicationPoolEntitySpec
     {
         // The CommunicationPool CR records the operator's INTENT for one
-        // pool: "manage pool {PoolRtId} ({PoolName}) for tenant {TenantId}".
-        // PoolRtId is the controller-side runtime entity id; it drives
-        // every derived Kubernetes identifier (CR metadata.name, broker
-        // secret name, identity labels) because RtIds are 24-char hex
-        // strings and always RFC 1123 valid. PoolName is the user-facing
-        // display name from the CK entity and is kept on the spec so it
-        // survives controller-side renames without forcing a CR rebuild.
+        // pool: "manage pool {PoolRtId} for tenant {TenantId}". PoolRtId
+        // is the controller-side runtime entity id and the canonical pool
+        // identity — it drives every derived Kubernetes identifier (CR
+        // metadata.name, broker secret name, identity labels) because
+        // RtIds are 24-char hex strings and always RFC 1123 valid. The
+        // human-readable pool display name lives on the controller's
+        // RtPool.Name attribute and surfaces in Studio; it is not carried
+        // on the CR.
         //
         // Everything else — controller URI, instancePrefix, broker host /
         // port / virtualHost, cert-validation toggles, broker creds
@@ -26,7 +27,6 @@ public class V1CommunicationPoolEntity : CustomKubernetesEntity<V1CommunicationP
         // drift between CR spec and the operator that actually services it.
         public string TenantId { get; set; } = string.Empty;
         public string PoolRtId { get; set; } = string.Empty;
-        public string PoolName { get; set; } = string.Empty;
     }
 
     public class V1CommunicationPoolEntityStatus

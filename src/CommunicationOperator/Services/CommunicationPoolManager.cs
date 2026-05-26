@@ -22,7 +22,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         _gateway = gateway;
     }
 
-    public async Task CreatePoolAsync(string tenantId, string poolRtId, string poolName)
+    public async Task CreatePoolAsync(string tenantId, string poolRtId)
     {
         var crName = GetCrName(tenantId, poolRtId);
         var ns = _options.PoolNamespace;
@@ -35,17 +35,17 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        await CreateBrokerSecretIfMissingAsync(tenantId, poolRtId, poolName, ns);
+        await CreateBrokerSecretIfMissingAsync(tenantId, poolRtId, ns);
 
-        var resource = BuildCommunicationPoolResource(tenantId, poolRtId, poolName, crName, ns);
+        var resource = BuildCommunicationPoolResource(tenantId, poolRtId, crName, ns);
         _logger.LogInformation(
-            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-            crName, ns, tenantId, poolName, poolRtId);
+            "Creating CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool rtId {PoolRtId}",
+            crName, ns, tenantId, poolRtId);
         await _gateway.CreateCommunicationPoolAsync(ns, resource);
         _logger.LogInformation("CommunicationPool CR '{CrName}' created successfully", crName);
     }
 
-    public async Task DeletePoolAsync(string tenantId, string poolRtId, string poolName)
+    public async Task DeletePoolAsync(string tenantId, string poolRtId)
     {
         var crName = GetCrName(tenantId, poolRtId);
         var ns = _options.PoolNamespace;
@@ -59,15 +59,15 @@ public class CommunicationPoolManager : ICommunicationPoolManager
         }
 
         _logger.LogInformation(
-            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-            crName, ns, tenantId, poolName, poolRtId);
+            "Deleting CommunicationPool CR '{CrName}' in namespace '{Namespace}' for tenant '{TenantId}', pool rtId {PoolRtId}",
+            crName, ns, tenantId, poolRtId);
         await _gateway.DeleteCommunicationPoolAsync(ns, crName);
 
         await DeleteBrokerSecretAsync(tenantId, poolRtId, ns);
         _logger.LogInformation("CommunicationPool CR '{CrName}' deleted successfully", crName);
     }
 
-    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string poolRtId, string poolName, string ns)
+    private async Task CreateBrokerSecretIfMissingAsync(string tenantId, string poolRtId, string ns)
     {
         var secretName = GetSecretName(tenantId, poolRtId);
         if (await _gateway.SecretExistsAsync(ns, secretName))
@@ -77,7 +77,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
             return;
         }
 
-        var secret = BuildBrokerSecret(secretName, ns, tenantId, poolRtId, poolName);
+        var secret = BuildBrokerSecret(secretName, ns, tenantId, poolRtId);
         _logger.LogInformation(
             "Creating broker secret '{SecretName}' in namespace '{Namespace}'", secretName, ns);
         await _gateway.CreateSecretAsync(ns, secret);
@@ -98,33 +98,30 @@ public class CommunicationPoolManager : ICommunicationPoolManager
     }
 
     private CommunicationPoolResource BuildCommunicationPoolResource(
-        string tenantId, string poolRtId, string poolName, string crName, string ns) =>
+        string tenantId, string poolRtId, string crName, string ns) =>
         new()
         {
             Metadata = new CommunicationPoolMetadata
             {
                 Name = crName,
                 Namespace = ns,
-                Labels = BuildLabels(tenantId, poolRtId),
-                Annotations = BuildAnnotations(poolName)
+                Labels = BuildLabels(tenantId, poolRtId)
             },
             Spec = new CommunicationPoolSpec
             {
                 TenantId = tenantId,
-                PoolRtId = poolRtId,
-                PoolName = poolName
+                PoolRtId = poolRtId
             }
         };
 
-    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId, string poolRtId, string poolName) =>
+    private V1Secret BuildBrokerSecret(string secretName, string ns, string tenantId, string poolRtId) =>
         new()
         {
             Metadata = new V1ObjectMeta
             {
                 Name = secretName,
                 NamespaceProperty = ns,
-                Labels = BuildLabels(tenantId, poolRtId),
-                Annotations = BuildAnnotations(poolName)
+                Labels = BuildLabels(tenantId, poolRtId)
             },
             Type = "Opaque",
             StringData = new Dictionary<string, string>
@@ -138,20 +135,13 @@ public class CommunicationPoolManager : ICommunicationPoolManager
     // not from user-facing names — CK attributes can carry whitespace,
     // uppercase, and other characters the apiserver rejects with a 422
     // (e.g. "Communication Pool"). RtIds are 24-char lowercase hex
-    // strings, always valid; the user-facing PoolName rides along as an
-    // annotation for UI/debugging.
+    // strings, always valid.
     private static Dictionary<string, string> BuildLabels(string tenantId, string poolRtId) =>
         new()
         {
             ["octo-mesh.meshmakers.io/tenant"] = K8sNaming.LabelValue(tenantId),
             ["octo-mesh.meshmakers.io/pool-rt-id"] = poolRtId,
             ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator"
-        };
-
-    private static Dictionary<string, string> BuildAnnotations(string poolName) =>
-        new()
-        {
-            ["octo-mesh.meshmakers.io/pool-name"] = poolName
         };
 
     // CR name: {tenant}-{poolRtId} as a strict RFC 1123 subdomain. Keep
@@ -198,15 +188,13 @@ internal class CommunicationPoolMetadata
 internal class CommunicationPoolSpec
 {
     // Matches V1CommunicationPoolEntitySpec — CR only carries the pool's
-    // tenant + rtId + display name. Everything else (controller URI,
-    // broker host, instancePrefix, …) is owned by the operator instance
-    // that services this CR and read from OperatorOptions at startup.
+    // tenant + rtId. Everything else (controller URI, broker host,
+    // instancePrefix, …) is owned by the operator instance that services
+    // this CR and read from OperatorOptions at startup. The user-facing
+    // pool display name lives on the controller's RtPool.Name attribute.
     [JsonPropertyName("tenantId")]
     public string TenantId { get; set; } = string.Empty;
 
     [JsonPropertyName("poolRtId")]
     public string PoolRtId { get; set; } = string.Empty;
-
-    [JsonPropertyName("poolName")]
-    public string PoolName { get; set; } = string.Empty;
 }

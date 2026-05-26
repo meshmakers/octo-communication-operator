@@ -11,7 +11,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     private static WorkloadDeployedDto BaseDto(IReadOnlyList<ValueOverrideDto>? overrides = null) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId, PoolName = PoolName,
+        PoolRtId = PoolRtId,
         WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
         RepositoryUrl = "https://meshmakers.github.io/charts",
@@ -64,8 +64,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
                 && s.Metadata.Labels["octo-mesh.meshmakers.io/tenant"] == TenantId
                 && s.Metadata.Labels["octo-mesh.meshmakers.io/pool-rt-id"] == PoolRtId
                 && s.Metadata.Labels["octo-mesh.meshmakers.io/workload-rt-id"] == WorkloadRtId
-                && s.Metadata.Annotations["octo-mesh.meshmakers.io/workload-name"] == WorkloadName
-                && s.Metadata.Annotations["octo-mesh.meshmakers.io/pool-name"] == PoolName),
+                && s.Metadata.Annotations["octo-mesh.meshmakers.io/workload-name"] == WorkloadName),
             Arg.Any<CancellationToken>());
     }
 

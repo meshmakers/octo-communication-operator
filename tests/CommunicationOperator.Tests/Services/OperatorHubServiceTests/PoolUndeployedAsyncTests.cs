@@ -13,9 +13,9 @@ public class PoolUndeployedAsyncTests : OperatorHubServiceTestsBase
     {
         OperatorOptions.AutoManagePools = true;
 
-        await Service.PoolUndeployedAsync(TenantId, PoolRtId, PoolName);
+        await Service.PoolUndeployedAsync(TenantId, PoolRtId);
 
-        await PoolManager.Received(1).DeletePoolAsync(TenantId, PoolRtId, PoolName);
+        await PoolManager.Received(1).DeletePoolAsync(TenantId, PoolRtId);
     }
 
     [Test]
@@ -24,20 +24,20 @@ public class PoolUndeployedAsyncTests : OperatorHubServiceTestsBase
         // Symmetric to PoolDeployedAsync: edge operators must ignore the broadcast.
         OperatorOptions.AutoManagePools = false;
 
-        await Service.PoolUndeployedAsync(TenantId, PoolRtId, PoolName);
+        await Service.PoolUndeployedAsync(TenantId, PoolRtId);
 
-        await PoolManager.DidNotReceiveWithAnyArgs().DeletePoolAsync(default!, default!, default!);
+        await PoolManager.DidNotReceiveWithAnyArgs().DeletePoolAsync(default!, default!);
     }
 
     [Test]
     public async Task PoolUndeployedAsync_AutoManagePoolsEnabledAndPoolManagerThrows_ExceptionIsSwallowed()
     {
         OperatorOptions.AutoManagePools = true;
-        PoolManager.DeletePoolAsync(TenantId, PoolRtId, PoolName)
+        PoolManager.DeletePoolAsync(TenantId, PoolRtId)
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        await Service.PoolUndeployedAsync(TenantId, PoolRtId, PoolName);
+        await Service.PoolUndeployedAsync(TenantId, PoolRtId);
 
-        await PoolManager.Received(1).DeletePoolAsync(TenantId, PoolRtId, PoolName);
+        await PoolManager.Received(1).DeletePoolAsync(TenantId, PoolRtId);
     }
 }

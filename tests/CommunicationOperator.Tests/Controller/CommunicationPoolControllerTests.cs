@@ -35,7 +35,6 @@ public class CommunicationPoolControllerTests
             Spec = new V1CommunicationPoolEntity.V1CommunicationPoolEntitySpec
             {
                 TenantId = TenantId,
-                PoolName = PoolName
             },
             Status = new V1CommunicationPoolEntity.V1CommunicationPoolEntityStatus()
         };

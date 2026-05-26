@@ -10,7 +10,7 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
     {
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(true);
 
-        await Manager.CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await Manager.CreatePoolAsync(TenantId, PoolRtId);
 
         await Gateway.DidNotReceive().CreateCommunicationPoolAsync(
             Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
@@ -24,7 +24,7 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await Manager.CreatePoolAsync(TenantId, PoolRtId);
 
         await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Any<V1Secret>());
         await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
@@ -36,7 +36,7 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(true);
 
-        await Manager.CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await Manager.CreatePoolAsync(TenantId, PoolRtId);
 
         await Gateway.DidNotReceive().CreateSecretAsync(
             Arg.Any<string>(), Arg.Any<V1Secret>(), Arg.Any<CancellationToken>());
@@ -49,7 +49,7 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await Manager.CreatePoolAsync(TenantId, PoolRtId);
 
         await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Is<V1Secret>(s =>
             s.Metadata.Name == ExpectedSecretName &&
@@ -59,8 +59,7 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
             s.StringData["brokerpassword"] == "secret" &&
             s.Metadata.Labels["octo-mesh.meshmakers.io/tenant"] == TenantId &&
             s.Metadata.Labels["octo-mesh.meshmakers.io/pool-rt-id"] == PoolRtId &&
-            s.Metadata.Labels["octo-mesh.meshmakers.io/managed-by"] == "communication-operator" &&
-            s.Metadata.Annotations["octo-mesh.meshmakers.io/pool-name"] == PoolName));
+            s.Metadata.Labels["octo-mesh.meshmakers.io/managed-by"] == "communication-operator"));
     }
 
     [Test]
@@ -71,7 +70,7 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, ExpectedCrName).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, ExpectedSecretName).Returns(false);
 
-        await Manager.CreatePoolAsync(TenantId, PoolRtId, PoolName);
+        await Manager.CreatePoolAsync(TenantId, PoolRtId);
 
         await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Is<V1Secret>(s =>
             s.StringData["brokerusername"] == string.Empty &&
@@ -90,33 +89,9 @@ public class CreatePoolAsyncTests : CommunicationPoolManagerTestsBase
         Gateway.CommunicationPoolExistsAsync(PoolNamespace, expectedCr).Returns(false);
         Gateway.SecretExistsAsync(PoolNamespace, expectedSecret).Returns(false);
 
-        await Manager.CreatePoolAsync("MixedCase", poolRtId, "MyPool");
+        await Manager.CreatePoolAsync("MixedCase", poolRtId);
 
         await Gateway.Received(1).CommunicationPoolExistsAsync(PoolNamespace, expectedCr);
-        await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
-    }
-
-    [Test]
-    public async Task CreatePoolAsync_PoolNameWithWhitespace_LandsInAnnotationOnly()
-    {
-        // sbeg + "Communication Pool" used to crash with apiserver 422 because
-        // the secret name was "sbeg-communication pool-octo-mesh-connection"
-        // (whitespace, mixed case) — invalid RFC 1123 subdomain. Now the
-        // CR/secret name is derived from poolRtId (always DNS-safe), and
-        // the user-facing pool name lands only in the annotation for
-        // UI/debugging.
-        const string poolRtId = "67e10c0bfe3e19891bbfd261";
-        const string crName = "sbeg-67e10c0bfe3e19891bbfd261";
-        const string secretName = "sbeg-67e10c0bfe3e19891bbfd261-octo-mesh-connection";
-        Gateway.CommunicationPoolExistsAsync(PoolNamespace, crName).Returns(false);
-        Gateway.SecretExistsAsync(PoolNamespace, secretName).Returns(false);
-
-        await Manager.CreatePoolAsync("sbeg", poolRtId, "Communication Pool");
-
-        await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Is<V1Secret>(s =>
-            s.Metadata.Name == secretName &&
-            s.Metadata.Labels["octo-mesh.meshmakers.io/pool-rt-id"] == poolRtId &&
-            s.Metadata.Annotations["octo-mesh.meshmakers.io/pool-name"] == "Communication Pool"));
         await Gateway.Received(1).CreateCommunicationPoolAsync(PoolNamespace, Arg.Any<object>());
     }
 }

@@ -8,7 +8,6 @@ public class CommunicationPoolMutator : MutationWebhook<V1CommunicationPoolEntit
 {
     public override MutationResult<V1CommunicationPoolEntity> Create(V1CommunicationPoolEntity newEntity, bool dryRun)
     {
-   //     newEntity.Spec.PoolName = "not foobar";
         return NoChanges();
     }
 }

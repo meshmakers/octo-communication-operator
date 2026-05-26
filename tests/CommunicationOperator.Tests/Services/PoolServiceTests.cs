@@ -29,7 +29,6 @@ public class PoolServiceTests
             {
                 TenantId = tenantId,
                 PoolRtId = poolRtId,
-                PoolName = poolName,
             },
             Status = new V1CommunicationPoolEntity.V1CommunicationPoolEntityStatus()
         };
@@ -58,8 +57,8 @@ public class PoolServiceTests
         await Assert.That(pools.Count).IsEqualTo(2);
         await Assert.That(pools.Any(p => p.Entity.Spec.TenantId == "meshtest")).IsTrue();
         await Assert.That(pools.Any(p => p.Entity.Spec.TenantId == "energytest")).IsTrue();
-        await _hub.Received(1).RegisterPoolAsync("meshtest", MeshtestPoolRtId, "cloud");
-        await _hub.Received(1).RegisterPoolAsync("energytest", EnergytestPoolRtId, "cloud");
+        await _hub.Received(1).RegisterPoolAsync("meshtest", MeshtestPoolRtId);
+        await _hub.Received(1).RegisterPoolAsync("energytest", EnergytestPoolRtId);
     }
 
     [Test]
@@ -79,7 +78,7 @@ public class PoolServiceTests
         var pools = _service.GetPools();
         await Assert.That(pools.Count).IsEqualTo(1);
         await Assert.That(pools.Single().Entity.Spec.TenantId).IsEqualTo("energytest");
-        await _hub.Received(1).UnregisterPoolAsync("meshtest", MeshtestPoolRtId, "cloud");
+        await _hub.Received(1).UnregisterPoolAsync("meshtest", MeshtestPoolRtId);
     }
 
     [Test]

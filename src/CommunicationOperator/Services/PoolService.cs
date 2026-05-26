@@ -22,12 +22,9 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
     private readonly IOperatorHubInvoker _hubInvoker;
     // Keyed by (tenantId, poolRtId). PoolRtId is the canonical
     // controller-side pool identity (24-char hex MongoDB ObjectId);
-    // it survives a controller-side rename of the pool, and a single
-    // operator can manage multiple CommunicationPool CRs from different
-    // tenants without the keys colliding. PoolName alone collided
-    // across tenants (e.g. every tenant has its own `cloud` pool);
-    // PoolRtId never does. PoolName lives on the entity as a
-    // human-readable display label only.
+    // a single operator can manage multiple CommunicationPool CRs from
+    // different tenants without the keys colliding, and the key survives
+    // a controller-side rename of the pool's display name.
     private readonly Dictionary<(string TenantId, string PoolRtId), Pool> _pools = new();
     private readonly object _gate = new();
 
@@ -71,8 +68,8 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
 
     public async Task RegisterPoolAsync(V1CommunicationPoolEntity entity, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Registering pool {PoolName} (tenant {TenantId})",
-            entity.Spec.PoolName, entity.Spec.TenantId);
+        _logger.LogInformation("Registering pool rtId {PoolRtId} (tenant {TenantId})",
+            entity.Spec.PoolRtId, entity.Spec.TenantId);
 
         Pool pool;
         var key = KeyFor(entity);
@@ -84,7 +81,7 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
                 {
                     Namespace = entity.Metadata?.NamespaceProperty ?? string.Empty,
                     TenantId = entity.Spec.TenantId,
-                    PoolName = entity.Spec.PoolName,
+                    PoolRtId = entity.Spec.PoolRtId,
                 }, entity);
                 _pools[key] = existing;
             }
@@ -98,24 +95,23 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
             // No-op when the hub connection is down — the reconnect
             // handler picks the pool up from GetPools() and re-registers
             // it then.
-            await _hubInvoker.RegisterPoolAsync(entity.Spec.TenantId,
-                entity.Spec.PoolRtId, entity.Spec.PoolName);
+            await _hubInvoker.RegisterPoolAsync(entity.Spec.TenantId, entity.Spec.PoolRtId);
             pool.IsRegistered = _hubInvoker.IsConnected;
         }
         catch (HubException e)
         {
-            throw PoolServiceException.ConnectionError(entity.Spec.PoolName, e);
+            throw PoolServiceException.ConnectionError(entity.Spec.PoolRtId, e);
         }
         catch (Exception e)
         {
-            throw PoolServiceException.DeployFailed(entity.Spec.PoolName, e);
+            throw PoolServiceException.DeployFailed(entity.Spec.PoolRtId, e);
         }
     }
 
     public async Task UnRegisterPoolAsync(V1CommunicationPoolEntity entity)
     {
-        _logger.LogInformation("Unregistering pool {PoolName} (tenant {TenantId})",
-            entity.Spec.PoolName, entity.Spec.TenantId);
+        _logger.LogInformation("Unregistering pool rtId {PoolRtId} (tenant {TenantId})",
+            entity.Spec.PoolRtId, entity.Spec.TenantId);
 
         Pool? pool;
         var key = KeyFor(entity);
@@ -137,18 +133,17 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
         // controller queue doesn't retry the delete reconcile forever.
         try
         {
-            await _hubInvoker.UnregisterPoolAsync(entity.Spec.TenantId,
-                entity.Spec.PoolRtId, entity.Spec.PoolName);
+            await _hubInvoker.UnregisterPoolAsync(entity.Spec.TenantId, entity.Spec.PoolRtId);
         }
         catch (HubException e)
         {
             _logger.LogWarning(e,
-                "Controller refused unregister for pool {PoolName} (likely tenant gone); local state cleared anyway",
-                entity.Spec.PoolName);
+                "Controller refused unregister for pool rtId {PoolRtId} (likely tenant gone); local state cleared anyway",
+                entity.Spec.PoolRtId);
         }
         catch (Exception e)
         {
-            throw PoolServiceException.DeployFailed(entity.Spec.PoolName, e);
+            throw PoolServiceException.DeployFailed(entity.Spec.PoolRtId, e);
         }
     }
 

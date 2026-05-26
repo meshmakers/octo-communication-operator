@@ -38,8 +38,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         var secretName = SecretName(release);
 
         _logger.LogInformation(
-            "Deploying workload: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}', release '{Release}' in namespace '{Namespace}'",
-            workload.TenantId, workload.PoolName, workload.PoolRtId,
+            "Deploying workload: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}', release '{Release}' in namespace '{Namespace}'",
+            workload.TenantId, workload.PoolRtId,
             workload.WorkloadName, workload.WorkloadRtId,
             workload.ChartName, workload.ChartVersion, release, ns);
 
@@ -120,8 +120,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         var secretName = SecretName(release);
 
         _logger.LogInformation(
-            "Undeploying workload: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}'",
-            workload.TenantId, workload.PoolName, workload.PoolRtId,
+            "Undeploying workload: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}'",
+            workload.TenantId, workload.PoolRtId,
             workload.WorkloadName, workload.WorkloadRtId, release);
 
         await _helm.UninstallAsync(release, ns, cancellationToken);
@@ -175,7 +175,6 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 },
                 Annotations = new Dictionary<string, string>
                 {
-                    ["octo-mesh.meshmakers.io/pool-name"] = workload.PoolName,
                     ["octo-mesh.meshmakers.io/workload-name"] = workload.WorkloadName,
                 },
             },
