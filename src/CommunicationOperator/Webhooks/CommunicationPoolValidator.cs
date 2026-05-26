@@ -7,21 +7,19 @@ namespace Meshmakers.Octo.Communication.Operator.Webhooks;
 /// <summary>
 /// Admission validator for <see cref="V1CommunicationPoolEntity"/>.
 ///
-/// Checks:
-/// 1. <c>Spec.PoolName</c> must not be empty / whitespace-only. The
-///    name carries the user-friendly value verbatim (k8s resource
-///    names are derived elsewhere via <c>K8sNaming.DnsName</c>), but
-///    an empty value would still break the controller-side workload
-///    routing key.
-/// 2. <c>Spec.PoolRtId</c> must be a 24-character lowercase hex
-///    MongoDB ObjectId. The controller's
-///    <c>OperatorHub.RegisterPoolAsync</c> parses this with
-///    <c>OctoObjectId.TryParse</c>; an empty or malformed value used
-///    to surface as a hub-side <c>FormatException</c> ("'' is not a
-///    valid 24 digit hex string") and the operator got stuck retrying
-///    the same broken CR forever. Rejecting at admission means the
-///    misconfigured Ansible / kubectl apply fails loudly at write
-///    time, with the bad value named in the apiserver response.
+/// The only required field is <c>Spec.PoolRtId</c>: it must be a
+/// 24-character lowercase hex MongoDB ObjectId. The controller's
+/// <c>OperatorHub.RegisterPoolAsync</c> parses this with
+/// <c>OctoObjectId.TryParse</c>; an empty or malformed value used to
+/// surface as a hub-side <c>FormatException</c> ("'' is not a valid 24
+/// digit hex string") and the operator got stuck retrying the same
+/// broken CR forever. Rejecting at admission means the misconfigured
+/// Ansible / kubectl apply fails loudly at write time, with the bad
+/// value named in the apiserver response.
+///
+/// <c>Spec.PoolName</c> is optional — the canonical pool identity is
+/// the rtId, and the human-readable display name lives on the
+/// controller's <c>RtPool.Name</c> entity, not on the CR.
 ///
 /// We deliberately do not validate <c>Spec.TenantId</c> here because
 /// the tenant id is just a routing key on the wire — the controller
@@ -41,11 +39,6 @@ public class CommunicationPoolValidator : ValidationWebhook<V1CommunicationPoolE
 
     private ValidationResult Validate(V1CommunicationPoolEntity entity)
     {
-        if (string.IsNullOrWhiteSpace(entity.Spec.PoolName))
-        {
-            return Fail("Pool name must not be empty or whitespace.", StatusCodes.Status400BadRequest);
-        }
-
         if (string.IsNullOrEmpty(entity.Spec.PoolRtId))
         {
             return Fail(
