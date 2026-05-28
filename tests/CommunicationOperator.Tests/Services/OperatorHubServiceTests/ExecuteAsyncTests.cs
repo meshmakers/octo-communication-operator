@@ -70,7 +70,7 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
-        setup.Client.RegisterOperatorAsync().Returns(new[]
+        setup.Client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(new[]
         {
             new DeployedPoolDto { TenantId = "tenant-a", PoolRtId = "65d5c447b420da3fb12381a1" },
             new DeployedPoolDto { TenantId = "tenant-b", PoolRtId = "65d5c447b420da3fb12381a2" }
@@ -80,9 +80,81 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         await hosted.StartAsync(CancellationToken.None);
         await setup.ConnectedAndReconnectEnabled.Task;
 
-        await setup.Client.Received(1).RegisterOperatorAsync();
+        await setup.Client.Received(1).RegisterOperatorAsync(Arg.Any<bool?>());
         await PoolManager.Received(1).CreatePoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
         await PoolManager.Received(1).CreatePoolAsync("tenant-b", "65d5c447b420da3fb12381a2");
+
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_OnConnect_DeclaresAutoManagePoolsToController()
+    {
+        // The controller now uses this declaration to validate that the operator
+        // does not claim pools whose Environment doesn't match its mode. We must
+        // forward _options.AutoManagePools verbatim on every (re)connect.
+        OperatorOptions.AutoManagePools = false;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+
+        var setup = SetupClient();
+        setup.Client.RegisterOperatorAsync(Arg.Any<bool?>())
+            .Returns(Array.Empty<DeployedPoolDto>());
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        await setup.Client.Received(1).RegisterOperatorAsync(false);
+
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_OnConnect_CentralMode_DeclaresTrueToController()
+    {
+        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+
+        var setup = SetupClient();
+        setup.Client.RegisterOperatorAsync(Arg.Any<bool?>())
+            .Returns(Array.Empty<DeployedPoolDto>());
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        await setup.Client.Received(1).RegisterOperatorAsync(true);
+
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_OnConnect_EdgeMode_DoesNotCreateCrsForDeployedCloudPools()
+    {
+        // Regression: a reboot of an edge device used to materialize a
+        // CommunicationPool CR (and broker secret) for every Cloud pool the
+        // controller's RegisterOperatorAsync returned, even though
+        // AutoManagePools=false. Once the KubeOps reconciler picked up that
+        // CR the edge operator also registered itself as the pool owner,
+        // and workload-deploy events started routing to the edge cluster
+        // alongside the central one. The reconnect path must apply the same
+        // gate that PoolDeployedAsync already does.
+        OperatorOptions.AutoManagePools = false;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+
+        var setup = SetupClient();
+        setup.Client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(new[]
+        {
+            new DeployedPoolDto { TenantId = "tenant-a", PoolRtId = "65d5c447b420da3fb12381a1" },
+            new DeployedPoolDto { TenantId = "tenant-b", PoolRtId = "65d5c447b420da3fb12381a2" }
+        });
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        await setup.Client.Received(1).RegisterOperatorAsync(Arg.Any<bool?>());
+        await PoolManager.DidNotReceiveWithAnyArgs().CreatePoolAsync(default!, default!);
 
         await hosted.StopAsync(CancellationToken.None);
     }
@@ -111,8 +183,10 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         client.StartAsync(Arg.Any<Func<bool, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async ci => await ci.Arg<Func<bool, Task>>()(false));
 
-        // RegisterOperatorAsync default is null; configure to empty so the foreach doesn't NRE.
-        client.RegisterOperatorAsync().Returns(Array.Empty<DeployedPoolDto>());
+        // RegisterOperatorAsync default is empty so the foreach doesn't NRE.
+        // Arg.Any<bool?>() matches both the explicit-mode (true/false) and the
+        // legacy (null) overload — production code passes _options.AutoManagePools.
+        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedPoolDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

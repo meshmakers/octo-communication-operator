@@ -192,7 +192,7 @@ Tests:
 `OPERATOR__AUTOMANAGEPOOLS` is now a narrower flag — it only gates the **side effect of auto-creating / -deleting `CommunicationPool` CRs** in response to controller broadcasts:
 
 - `AutoManagePools=true` (central): `PoolDeployedAsync` → `CommunicationPoolManager.CreateCommunicationPoolAsync` (creates the CR + broker secret, idempotent). `PoolUndeployedAsync` → `DeleteCommunicationPoolAsync`. `RegisterOperatorAsync()` on (re)connect also fans out `CreatePoolAsync` for every already-deployed pool.
-- `AutoManagePools=false` (edge): both `PoolDeployedAsync` and `PoolUndeployedAsync` log + return without touching `ICommunicationPoolManager`. CRs on the edge cluster are managed manually or by an external system.
+- `AutoManagePools=false` (edge): `PoolDeployedAsync` / `PoolUndeployedAsync` log + return without touching `ICommunicationPoolManager`, **and** the `RegisterOperatorAsync()` reconnect fan-out is gated by the same flag. The latter gate is load-bearing: without it, every edge-operator pod restart would materialize a CR + broker secret for every Cloud pool the controller knows about, and the operator would then `RegisterPoolAsync` them — putting workload-deploy events on a route that also lands on the edge cluster. CRs on the edge cluster are managed manually or by an external system.
 
 Either way, the workload-deploy path (`WorkloadDeployedAsync` → `WorkloadReconciler.DeployAsync`) and the pool register/unregister round-trip from `CommunicationPoolController.ReconcileAsync` go through the same SignalR client.
 

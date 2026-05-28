@@ -104,7 +104,7 @@ public class WorkloadDeployedAsyncTests : OperatorHubServiceTestsBase
 
         client.StartAsync(Arg.Any<Func<bool, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async ci => await ci.Arg<Func<bool, Task>>()(false));
-        client.RegisterOperatorAsync().Returns(Array.Empty<DeployedPoolDto>());
+        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedPoolDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

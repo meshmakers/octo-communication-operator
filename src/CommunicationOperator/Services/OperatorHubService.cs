@@ -109,13 +109,32 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         var onReconnect = async (bool isReconnect) =>
         {
             _logger.LogInformation("Registering operator with controller (reconnect: {IsReconnect})", isReconnect);
-            var deployedPools = (await client.RegisterOperatorAsync()).ToArray();
+            // Declare our mode to the controller so it can validate that we
+            // only register pools whose Environment matches it (central op
+            // → Cloud, edge op → Edge). Without this declaration the
+            // controller treats us as legacy and skips enforcement.
+            var deployedPools = (await client.RegisterOperatorAsync(_options.AutoManagePools)).ToArray();
             _logger.LogInformation("Registered with controller, {PoolCount} deployed Cloud pools",
                 deployedPools.Length);
 
-            foreach (var pool in deployedPools)
+            // Same gate as PoolDeployedAsync: auto-CR-creation is the central
+            // operator's job. Without this check an edge operator would
+            // materialize CRs (and broker secrets) for every Cloud pool the
+            // controller knows about on every (re)connect, then register them
+            // as if it owned them — workload events would then route to the
+            // edge cluster too.
+            if (_options.AutoManagePools)
             {
-                await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId);
+                foreach (var pool in deployedPools)
+                {
+                    await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId);
+                }
+            }
+            else if (deployedPools.Length > 0)
+            {
+                _logger.LogDebug(
+                    "AutoManagePools=false: skipping CR creation for {PoolCount} deployed Cloud pools returned by RegisterOperatorAsync",
+                    deployedPools.Length);
             }
 
             // Replay pool registrations for every CommunicationPool CR the
