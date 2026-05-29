@@ -52,10 +52,24 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         var args = new List<string>
         {
             "upgrade", "--install", release, chart,
-            "--version", version,
-            "--namespace", @namespace,
-            "--atomic",
         };
+
+        // Pass --version only when the workload entity carries a concrete chart version.
+        // The System.Communication.MainLatest blueprint deliberately seeds an empty
+        // ChartVersion on dev/test clusters so the first Deploy resolves to the newest
+        // chart in the configured repo (the rolling dev channel); helm rejects an empty
+        // value for --version, so we have to omit the flag entirely in that case. Once
+        // the CD rollout pipeline writes a concrete version onto the workload, every
+        // subsequent deploy goes back through the pinned-version path below.
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            args.Add("--version");
+            args.Add(version);
+        }
+
+        args.Add("--namespace");
+        args.Add(@namespace);
+        args.Add("--atomic");
 
         foreach (var file in valuesFiles)
         {

@@ -84,6 +84,45 @@ internal class HelmRunnerTests
     }
 
     [Test]
+    public async Task UpgradeInstallAsync_EmptyVersion_OmitsVersionFlag()
+    {
+        // System.Communication.MainLatest seeds an empty ChartVersion on dev/test
+        // tenants so the first Deploy resolves to the newest chart in the configured
+        // repo. helm rejects --version with an empty value, so the flag is dropped
+        // entirely; helm's default behaviour then picks the highest semver tag.
+        await _runner.UpgradeInstallAsync("rel", "acme/app", string.Empty, "octo",
+            valuesFiles: Array.Empty<string>(),
+            setValues: new Dictionary<string, string>(),
+            CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a =>
+                a.SequenceEqual(new[]
+                {
+                    "upgrade", "--install", "rel", "acme/app",
+                    "--namespace", "octo",
+                    "--atomic",
+                })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task UpgradeInstallAsync_WhitespaceVersion_OmitsVersionFlag()
+    {
+        // Defensive: a CK attribute carrying "  " (e.g. a yaml >- block that collapsed
+        // to whitespace) should be treated the same as empty rather than passed to helm
+        // verbatim, which would fail with "invalid version constraint".
+        await _runner.UpgradeInstallAsync("rel", "acme/app", "   ", "octo",
+            valuesFiles: Array.Empty<string>(),
+            setValues: new Dictionary<string, string>(),
+            CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a => !a.Contains("--version")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
     public async Task UpgradeInstallAsync_EscapesCommasAndEquals()
     {
         // helm uses comma and = as --set separators; characters in the value
