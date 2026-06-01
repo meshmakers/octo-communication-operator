@@ -61,9 +61,15 @@ the `WorkloadReconciler` over the `helm` CLI.
   the debug log line.
 - `Helm/IHelmRunner` + `HelmRunner` — high-level operations:
   `EnsureRepoAsync` (idempotent `helm repo add --force-update` + `helm repo update`),
-  `UpgradeInstallAsync` (with `-f`, `--set`, `--atomic`, `--create-namespace`),
+  `UpgradeInstallAsync` (with `-f`, `--set`, `--atomic`),
   `UninstallAsync` (uses `--ignore-not-found`). Non-zero exit codes become
   `HelmException` with full stderr.
+  - **Empty / whitespace `version`**: `UpgradeInstallAsync` omits the `--version`
+    argument entirely when the value is blank, so helm picks the newest tag in
+    the configured repo. This is the contract for
+    `System.Communication.MainLatest` on dev/test clusters — the blueprint
+    seeds an empty `ChartVersion` and the CD pipeline writes a concrete
+    `0.1.<yyMMDDxxx>` later. Pass a non-blank value to pin a specific chart.
 - `Reconcilers/WorkloadContextValuesBuilder` — turns the operator's own
   `OperatorOptions` (cluster-internal Mongo/RabbitMQ/CrateDB hosts,
   reporting service URI, instance prefix, ingress defaults) plus
