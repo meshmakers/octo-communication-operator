@@ -88,10 +88,17 @@ public static class WorkloadContextValuesBuilder
             root["clusterDependencies"] = deps;
         }
 
-        var ingress = BuildIngress(options.Ingress);
+        var ingress = BuildIngress(options.Ingress, workload);
         if (ingress.Count > 0)
         {
             root["ingress"] = ingress;
+        }
+        // publicUri is a top-level chart key, not nested under `ingress.*`
+        // (see octo-mesh-adapter/templates/ingress.yaml host rule). Only
+        // emitted when the workload has opted in and supplied a Hostname.
+        if (workload is { IngressEnabled: true } && !string.IsNullOrWhiteSpace(workload.Hostname))
+        {
+            root["publicUri"] = $"https://{workload.Hostname}";
         }
 
         if (root.Count == 0)
@@ -118,9 +125,25 @@ public static class WorkloadContextValuesBuilder
         return map;
     }
 
-    private static Dictionary<string, object> BuildIngress(IngressDefaultsOptions ingress)
+    private static Dictionary<string, object> BuildIngress(IngressDefaultsOptions ingress, WorkloadDeployedDto? workload)
     {
         var map = new Dictionary<string, object>();
+
+        // Per-workload opt-in: only emit `ingress.enabled=true` when the workload
+        // explicitly asked for it AND carries a hostname. The controller-side
+        // validation already rejects IngressEnabled+empty Hostname at Deploy time;
+        // the defensive Hostname check here keeps the operator path safe in case
+        // an older controller version sends an inconsistent DTO. When false we
+        // omit the key entirely — the chart's own default (ingress.enabled=false
+        // in values.yaml) then wins, leaving the workload cluster-internal.
+        if (workload is { IngressEnabled: true } && !string.IsNullOrWhiteSpace(workload.Hostname))
+        {
+            map["enabled"] = true;
+        }
+
+        // Cluster-wide defaults stack on top and apply to every workload regardless
+        // of per-workload opt-in. Charts that don't render an Ingress (enabled
+        // stays false) simply ignore these keys.
         if (!string.IsNullOrWhiteSpace(ingress.ClassName)) map["className"] = ingress.ClassName!;
         if (ingress.Tls.HasValue) map["tls"] = ingress.Tls.Value;
         if (!string.IsNullOrWhiteSpace(ingress.ClusterIssuer))

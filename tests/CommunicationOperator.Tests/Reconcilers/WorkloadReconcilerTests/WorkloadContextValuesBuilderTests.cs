@@ -186,4 +186,116 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).Contains("\"communicationControllerServiceUri\": \"http://octo-communication.octo.svc.cluster.local\"");
         await Assert.That(yaml!).Contains("\"reportingServiceUri\": \"http://octo-reporting.octo.svc.cluster.local\"");
     }
+
+    [Test]
+    public async Task Build_WorkloadIngressEnabledWithHostname_EmitsEnabledAndPublicUri()
+    {
+        // Happy path: workload opts in + supplies a hostname. Operator emits
+        // ingress.enabled=true (so the chart actually renders the Ingress
+        // template) plus publicUri at the top level (the chart's host rule
+        // strips the https:// prefix itself — see
+        // octo-mesh-adapter/templates/ingress.yaml). Cluster-wide ingress
+        // defaults still stack on top.
+        var yaml = WorkloadContextValuesBuilder.Build(
+            new OperatorOptions
+            {
+                Ingress = new IngressDefaultsOptions
+                {
+                    ClassName = "nginx",
+                    ClusterIssuer = "mm-cloud-issuer",
+                    Tls = true,
+                },
+            },
+            new WorkloadDeployedDto
+            {
+                TenantId = "meshtest",
+                WorkloadRtId = "5f1c4e1a4d3b2a1b8f9c1234",
+                WorkloadName = "mesh-adapter",
+                IngressEnabled = true,
+                Hostname = "adapter.staging.octo-mesh.com",
+            });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"enabled\": true");
+        await Assert.That(yaml!).Contains("\"publicUri\": \"https://adapter.staging.octo-mesh.com\"");
+        await Assert.That(yaml!).Contains("\"className\": \"nginx\"");
+        await Assert.That(yaml!).Contains("\"cert-manager.io/cluster-issuer\": \"mm-cloud-issuer\"");
+    }
+
+    [Test]
+    public async Task Build_WorkloadIngressDisabled_OmitsEnabledAndPublicUri()
+    {
+        // Default state: workload did not opt in. Cluster-wide ingress defaults
+        // (className, cluster-issuer) may still be emitted but ingress.enabled
+        // stays absent so the chart's own values.yaml default (enabled=false)
+        // wins and no Ingress is rendered.
+        var yaml = WorkloadContextValuesBuilder.Build(
+            new OperatorOptions
+            {
+                Ingress = new IngressDefaultsOptions { ClassName = "nginx" },
+            },
+            new WorkloadDeployedDto
+            {
+                TenantId = "meshtest",
+                WorkloadRtId = "5f1c4e1a4d3b2a1b8f9c1234",
+                WorkloadName = "mesh-adapter",
+                IngressEnabled = false,
+                Hostname = "adapter.staging.octo-mesh.com",
+            });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("\"enabled\":");
+        await Assert.That(yaml!).DoesNotContain("publicUri");
+        await Assert.That(yaml!).Contains("\"className\": \"nginx\"");
+    }
+
+    [Test]
+    public async Task Build_WorkloadIngressEnabledNoHostname_DefensivelyOmitsEnabledAndPublicUri()
+    {
+        // Defensive branch: controller-side validation should reject this
+        // combination at Deploy time, but if an inconsistent DTO ever reaches
+        // the operator we still refuse to render an Ingress with an empty host
+        // (k8s admission would reject it mid-helm-upgrade and leave the release
+        // in a failed state). publicUri is also omitted so the chart doesn't
+        // see an https:// fragment with nothing after it.
+        var yaml = WorkloadContextValuesBuilder.Build(
+            new OperatorOptions { Ingress = new IngressDefaultsOptions { ClassName = "nginx" } },
+            new WorkloadDeployedDto
+            {
+                TenantId = "meshtest",
+                WorkloadRtId = "5f1c4e1a4d3b2a1b8f9c1234",
+                WorkloadName = "mesh-adapter",
+                IngressEnabled = true,
+                Hostname = null,
+            });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("\"enabled\":");
+        await Assert.That(yaml!).DoesNotContain("publicUri");
+    }
+
+    [Test]
+    public async Task Build_WorkloadIngressEnabledWithHostnameAndNoOperatorDefaults_StillEmitsEnabledAndPublicUri()
+    {
+        // Cluster has no ingress defaults configured (className, cluster-issuer
+        // and TLS all unset) — per-workload opt-in still works. The chart then
+        // falls back on its own values.yaml defaults for className/TLS and the
+        // ingress just renders without a cert-manager annotation.
+        var yaml = WorkloadContextValuesBuilder.Build(
+            new OperatorOptions(),
+            new WorkloadDeployedDto
+            {
+                TenantId = "meshtest",
+                WorkloadRtId = "5f1c4e1a4d3b2a1b8f9c1234",
+                WorkloadName = "mesh-adapter",
+                IngressEnabled = true,
+                Hostname = "adapter.staging.octo-mesh.com",
+            });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"enabled\": true");
+        await Assert.That(yaml!).Contains("\"publicUri\": \"https://adapter.staging.octo-mesh.com\"");
+        await Assert.That(yaml!).DoesNotContain("className");
+        await Assert.That(yaml!).DoesNotContain("cluster-issuer");
+    }
 }
