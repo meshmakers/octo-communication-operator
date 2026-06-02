@@ -157,6 +157,41 @@ internal class HelmRunnerTests
     }
 
     [Test]
+    public async Task UpgradeInstallDryRunAsync_AddsDryRunServerAndOmitsAtomic()
+    {
+        await _runner.UpgradeInstallDryRunAsync("acme-app", "acme/voest-app", "1.2.3", "octo",
+            valuesFiles: new[] { "/tmp/values-a.yaml" },
+            setValues: new Dictionary<string, string>(),
+            CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a =>
+                a.SequenceEqual(new[]
+                {
+                    "upgrade", "--install", "acme-app", "acme/voest-app",
+                    "--version", "1.2.3",
+                    "--namespace", "octo",
+                    "--dry-run=server",
+                    "-f", "/tmp/values-a.yaml",
+                })),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task UpgradeInstallDryRunAsync_NonZeroExit_ThrowsHelmExceptionTaggedAsDryRun()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(1, "", "Error: admission webhook denied"));
+
+        var ex = await Assert.That(async () => await _runner.UpgradeInstallDryRunAsync("r", "c", "1", "n",
+                Array.Empty<string>(), new Dictionary<string, string>(), CancellationToken.None))
+            .Throws<HelmException>();
+
+        await Assert.That(ex!.Operation).Contains("--dry-run=server");
+        await Assert.That(ex!.StdErr).Contains("admission webhook denied");
+    }
+
+    [Test]
     public async Task UninstallAsync_BuildsExpectedArgsAndPassesIgnoreNotFound()
     {
         await _runner.UninstallAsync("acme-app", "octo", CancellationToken.None);

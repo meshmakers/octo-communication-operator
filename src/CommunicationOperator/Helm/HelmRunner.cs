@@ -44,6 +44,36 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
         CancellationToken cancellationToken)
     {
+        var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: false);
+
+        var result = await invoker.InvokeAsync(args, cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new HelmException($"upgrade --install {release}", result.ExitCode, result.StdOut, result.StdErr);
+        }
+
+        logger.LogInformation("Helm release '{Release}' (chart {Chart} {Version}) installed/upgraded in namespace '{Namespace}'",
+            release, chart, version, @namespace);
+    }
+
+    public async Task UpgradeInstallDryRunAsync(string release, string chart, string version, string @namespace,
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
+        CancellationToken cancellationToken)
+    {
+        var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: true);
+
+        var result = await invoker.InvokeAsync(args, cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new HelmException($"upgrade --install --dry-run=server {release}", result.ExitCode, result.StdOut, result.StdErr);
+        }
+
+        logger.LogDebug("Helm release '{Release}' pre-flight (dry-run=server) succeeded", release);
+    }
+
+    private static List<string> BuildUpgradeArgs(string release, string chart, string version, string @namespace,
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, bool dryRunServer)
+    {
         // Note: no `--create-namespace` — the pool namespace is owned by the
         // operator's namespace-scoped service account, which cannot create
         // cluster-scoped resources. The pool's namespace is guaranteed to
@@ -69,7 +99,17 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
 
         args.Add("--namespace");
         args.Add(@namespace);
-        args.Add("--atomic");
+
+        if (dryRunServer)
+        {
+            // --atomic is meaningless for a dry-run (nothing to roll back) and
+            // forces helm to wait for resources that will never exist.
+            args.Add("--dry-run=server");
+        }
+        else
+        {
+            args.Add("--atomic");
+        }
 
         foreach (var file in valuesFiles)
         {
@@ -82,14 +122,7 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
             args.Add($"{path}={EscapeSetValue(value)}");
         }
 
-        var result = await invoker.InvokeAsync(args, cancellationToken);
-        if (result.ExitCode != 0)
-        {
-            throw new HelmException($"upgrade --install {release}", result.ExitCode, result.StdOut, result.StdErr);
-        }
-
-        logger.LogInformation("Helm release '{Release}' (chart {Chart} {Version}) installed/upgraded in namespace '{Namespace}'",
-            release, chart, version, @namespace);
+        return args;
     }
 
     public async Task UninstallAsync(string release, string @namespace, CancellationToken cancellationToken)

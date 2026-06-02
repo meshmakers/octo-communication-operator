@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Operator.Diagnostics;
 using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
@@ -18,6 +19,7 @@ internal abstract class WorkloadReconcilerTestsBase
 
     protected readonly IHelmRunner Helm;
     protected readonly ICommunicationPoolKubernetesGateway Gateway;
+    protected readonly IWorkloadDiagnosticsCollector Diagnostics;
     protected readonly OperatorOptions Options;
     protected readonly WorkloadReconciler Reconciler;
 
@@ -25,10 +27,17 @@ internal abstract class WorkloadReconcilerTestsBase
     {
         Helm = Substitute.For<IHelmRunner>();
         Gateway = Substitute.For<ICommunicationPoolKubernetesGateway>();
+        Diagnostics = Substitute.For<IWorkloadDiagnosticsCollector>();
+        // Default: collector returns nothing, so a HelmException from the
+        // real install propagates verbatim without enrichment. Individual
+        // tests override this to assert the enrichment path.
+        Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(string.Empty);
         Options = new OperatorOptions { PoolNamespace = PoolNamespace };
         Reconciler = new WorkloadReconciler(
             Helm,
             Gateway,
+            Diagnostics,
             Microsoft.Extensions.Options.Options.Create(Options),
             NullLogger<WorkloadReconciler>.Instance);
     }

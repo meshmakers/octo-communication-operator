@@ -62,6 +62,8 @@ the `WorkloadReconciler` over the `helm` CLI.
 - `Helm/IHelmRunner` + `HelmRunner` — high-level operations:
   `EnsureRepoAsync` (idempotent `helm repo add --force-update` + `helm repo update`),
   `UpgradeInstallAsync` (with `-f`, `--set`, `--atomic`),
+  `UpgradeInstallDryRunAsync` (same args minus `--atomic`, plus
+  `--dry-run=server` — see [Pre-flight + Diagnostics](#pre-flight--diagnostics) below),
   `UninstallAsync` (uses `--ignore-not-found`). Non-zero exit codes become
   `HelmException` with full stderr.
   - **Empty / whitespace `version`**: `UpgradeInstallAsync` omits the `--version`
@@ -135,6 +137,59 @@ the `WorkloadReconciler` over the `helm` CLI.
   / `octo-eda-adapter` chart `templates/_helpers.tpl`
   (`octo-mesh.secretEnv`).
 
+### Pre-flight + Diagnostics
+
+`helm upgrade --install --atomic` collapses every failure into one
+opaque stderr line — typically `Error: release X failed, and has been
+uninstalled due to atomic being set: context deadline exceeded`. The
+actual root cause (`ImagePullBackOff`, admission-webhook denial,
+`CrashLoopBackOff`, missing secret, …) is observable on the cluster
+while helm waits, but `--atomic` rolls everything back before the
+caller sees the failure. Two layers wrap the real install to surface
+the actual reason:
+
+1. **Pre-flight via `--dry-run=server`** (`UpgradeInstallDryRunAsync`,
+   called before the real install in `WorkloadReconciler.DeployAsync`).
+   Helm renders the manifests and submits them to the apiserver with
+   `dryRun=All` — admission webhooks, OpenAPI schema validation and
+   RBAC all run, but no resources are created. Catches schema errors,
+   Gatekeeper/Kyverno rejections, RBAC issues and invalid
+   annotations in &lt;2s instead of letting the real install burn the
+   full atomic timeout. Throws `HelmException` with operation tag
+   `upgrade --install --dry-run=server {release}` on failure; the real
+   install is then skipped entirely.
+
+2. **Post-failure diagnostics** (`Diagnostics/IWorkloadDiagnosticsCollector`).
+   When the real install throws `HelmException`, the reconciler calls
+   `CollectAsync(namespace, release)`:
+   - Lists pods labeled `app.kubernetes.io/instance={release}` and
+     scrapes `ContainerStatuses[*]` / `InitContainerStatuses[*]` for
+     non-benign `Waiting.Reason` (everything except `PodInitializing`
+     / `ContainerCreating`) and non-zero `LastState.Terminated.ExitCode`.
+   - Lists namespace events with `type=Warning` and keeps the ones
+     whose `InvolvedObject.Name` starts with the release name (covers
+     Deployment / ReplicaSet / Pod / Service / Ingress that helm names
+     from the release).
+
+   Both calls are wrapped individually — a failure in one (e.g. pods
+   already gone because atomic rollback finished, or RBAC denial)
+   doesn't suppress the other. Events outlive pods (default TTL 1h),
+   so the post-failure path reliably catches `ImagePull` /
+   `FailedScheduling` / `FailedMount` even when atomic has wiped the
+   pods. The diagnostic call itself is bounded by a 10s
+   `CancellationTokenSource` so a stuck apiserver can't hang the
+   failure path. When the collector returns a non-empty string the
+   reconciler throws a new `HelmException` with stderr
+   `{original-stderr}\n\nPod diagnostics:\n{collected}`. Empty result →
+   original exception rethrown unchanged.
+
+   The internal formatters `FormatPodStates` /
+   `FormatWarningEvents` are exposed via `InternalsVisibleTo` so the
+   tests don't have to mock the verbose `IKubernetes` /
+   `ICoreV1Operations` surface — the thin glue methods
+   `ListPodsAsync` / `ListWarningEventsAsync` are pass-throughs and
+   exercised manually / via E2E.
+
 **Hookup:** `OperatorHubService.WorkloadDeployedAsync` /
 `WorkloadUndeployedAsync` invoke the reconciler. Reconciler exceptions
 are logged but **not propagated** — same rule as for tenant lifecycle
@@ -174,12 +229,24 @@ generated resource as the
 
 Tests:
 - `Helm/HelmRunnerTests` — argument construction for repo-add (with /
-  without auth), upgrade-install (files + `--set` escaping), uninstall;
+  without auth), upgrade-install (files + `--set` escaping),
+  upgrade-install dry-run (`--dry-run=server` present, `--atomic`
+  absent, operation tag flags pre-flight failures), uninstall;
   non-zero exit-code → `HelmException`.
+- `Diagnostics/WorkloadDiagnosticsCollectorTests` — pure-formatter
+  tests over `FormatPodStates` / `FormatWarningEvents`: ImagePullBackOff
+  surfaced, benign waiting states (`ContainerCreating` /
+  `PodInitializing`) suppressed, init-container failures tagged as
+  `initContainer`, terminated exit codes reported, unrelated events
+  excluded, duplicates deduplicated.
 - `Reconcilers/WorkloadReconcilerTests/DeployAsyncTests` — secret
   materialization (create / replace / cleanup-on-empty), repo
   registration with optional auth, upgrade call with correct release /
-  chart-ref / values-file count.
+  chart-ref / values-file count; dry-run runs **before** real install
+  (`Received.InOrder`); dry-run failure skips real install entirely;
+  real-install failure invokes diagnostics; collector output is merged
+  into the rethrown `HelmException.StdErr`; empty diagnostics → original
+  exception rethrown unchanged.
 - `Reconcilers/WorkloadReconcilerTests/UndeployAsyncTests` — `helm uninstall`
   invocation, secret-cleanup branches.
 - `Reconcilers/WorkloadReconcilerTests/WorkloadOverrideYamlBuilderTests`

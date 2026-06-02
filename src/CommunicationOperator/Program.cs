@@ -8,6 +8,7 @@ using KubeOps.KubernetesClient;
 using KubeOps.Operator;
 using KubeOps.Operator.Web.Builder;
 using KubeOps.Operator.Web.Certificates;
+using Meshmakers.Octo.Communication.Operator.Diagnostics;
 using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
@@ -122,6 +123,7 @@ try
     builder.Services.AddSingleton<ICommunicationPoolManager, CommunicationPoolManager>();
     builder.Services.AddSingleton<IHelmProcessInvoker, HelmProcessInvoker>();
     builder.Services.AddSingleton<IHelmRunner, HelmRunner>();
+    builder.Services.AddSingleton<IWorkloadDiagnosticsCollector, WorkloadDiagnosticsCollector>();
     builder.Services.AddSingleton<IWorkloadReconciler, WorkloadReconciler>();
     builder.Services.AddSingleton<IOperatorHubClientFactory, OperatorHubClientFactory>();
     // OperatorHubService is the SignalR client lifecycle owner AND the

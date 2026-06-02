@@ -2,6 +2,7 @@ using System.Text;
 using k8s.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Operator.Common;
+using Meshmakers.Octo.Communication.Operator.Diagnostics;
 using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Services;
@@ -19,14 +20,17 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 {
     private readonly IHelmRunner _helm;
     private readonly ICommunicationPoolKubernetesGateway _gateway;
+    private readonly IWorkloadDiagnosticsCollector _diagnostics;
     private readonly OperatorOptions _options;
     private readonly ILogger<WorkloadReconciler> _logger;
 
     public WorkloadReconciler(IHelmRunner helm, ICommunicationPoolKubernetesGateway gateway,
+        IWorkloadDiagnosticsCollector diagnostics,
         IOptions<OperatorOptions> options, ILogger<WorkloadReconciler> logger)
     {
         _helm = helm;
         _gateway = gateway;
+        _diagnostics = diagnostics;
         _options = options.Value;
         _logger = logger;
     }
@@ -93,9 +97,59 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 valuesFiles.Add(overrideFile);
             }
 
-            await _helm.UpgradeInstallAsync(release, $"{alias}/{workload.ChartName}",
-                workload.ChartVersion, ns, valuesFiles,
-                new Dictionary<string, string>(), cancellationToken);
+            var chartRef = $"{alias}/{workload.ChartName}";
+            var setValues = new Dictionary<string, string>();
+
+            // Pre-flight: helm upgrade --install --dry-run=server submits the
+            // rendered manifests to the apiserver with dryRun=All. This
+            // catches schema errors, admission-webhook rejections, RBAC
+            // problems and missing required values in under 2s — instead of
+            // letting the real install wait 5min for the atomic timeout
+            // before reporting them as a generic "context deadline exceeded".
+            // ImagePull / CrashLoop / probe failures are NOT caught here
+            // (no pods are created) — those are surfaced by the post-failure
+            // diagnostic collector below.
+            await _helm.UpgradeInstallDryRunAsync(release, chartRef,
+                workload.ChartVersion, ns, valuesFiles, setValues, cancellationToken);
+
+            try
+            {
+                await _helm.UpgradeInstallAsync(release, chartRef,
+                    workload.ChartVersion, ns, valuesFiles, setValues, cancellationToken);
+            }
+            catch (HelmException ex)
+            {
+                // --atomic leaves only an opaque helm-side error on its
+                // stderr (typically "context deadline exceeded"); the
+                // actual pod-level root cause is observable on the
+                // cluster but vanishes when atomic rolls the release
+                // back. Events outlive the pods that produced them
+                // (default TTL 1h), so a post-failure snapshot still
+                // catches ImagePull / scheduling / mount errors. Use a
+                // bounded token so a stuck apiserver doesn't make the
+                // failure path hang forever.
+                using var diagCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                string diagnostics;
+                try
+                {
+                    diagnostics = await _diagnostics.CollectAsync(ns, release, diagCts.Token);
+                }
+                catch (Exception diagEx)
+                {
+                    _logger.LogWarning(diagEx, "Failed to collect diagnostics for release '{Release}'", release);
+                    throw;
+                }
+
+                if (string.IsNullOrEmpty(diagnostics))
+                {
+                    throw;
+                }
+
+                _logger.LogError("Workload '{Release}' deploy failed. Root-cause diagnostics:\n{Diagnostics}",
+                    release, diagnostics);
+                throw new HelmException(ex.Operation, ex.ExitCode, ex.StdOut,
+                    $"{ex.StdErr}\n\nPod diagnostics:\n{diagnostics}");
+            }
         }
         finally
         {

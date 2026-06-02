@@ -32,6 +32,24 @@ public interface IHelmRunner
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Runs <c>helm upgrade --install --dry-run=server</c> for the given
+    /// release. Same arguments as <see cref="UpgradeInstallAsync"/> minus
+    /// <c>--atomic</c> (nothing to roll back) plus <c>--dry-run=server</c>,
+    /// which submits the manifests to the API server with <c>dryRun=All</c>
+    /// — so admission webhooks, OpenAPI schema validation and RBAC checks
+    /// all run, but no resources are created. Catches misconfigurations
+    /// (missing required values, RBAC, Gatekeeper policies, invalid
+    /// annotations) in &lt;2s instead of waiting 5min for the atomic
+    /// timeout. Does NOT catch ImagePull / CrashLoop / probe failures
+    /// because no pods are created — those are covered by the
+    /// post-failure diagnostic collector path in
+    /// <see cref="Diagnostics.IWorkloadDiagnosticsCollector"/>.
+    /// </summary>
+    Task UpgradeInstallDryRunAsync(string release, string chart, string version, string @namespace,
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Runs <c>helm uninstall</c>. A release that does not exist is treated
     /// as success.
     /// </summary>

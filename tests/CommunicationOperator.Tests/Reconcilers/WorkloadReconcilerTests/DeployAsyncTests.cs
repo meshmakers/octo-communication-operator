@@ -3,6 +3,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers.WorkloadReconcilerTests;
 
@@ -121,6 +122,99 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployAsync_RunsDryRunBeforeRealInstall()
+    {
+        await Reconciler.DeployAsync(BaseDto(), CancellationToken.None);
+
+        // Pre-flight (dry-run) must come first so misconfigurations surface
+        // in seconds instead of waiting for the atomic timeout.
+        Received.InOrder(() =>
+        {
+            Helm.UpgradeInstallDryRunAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>());
+            Helm.UpgradeInstallAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Test]
+    public async Task DeployAsync_DryRunFails_SkipsRealInstall()
+    {
+        Helm.UpgradeInstallDryRunAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HelmException("upgrade --install --dry-run=server rel",
+                1, string.Empty, "Error: admission webhook denied request"));
+
+        await Assert.That(async () => await Reconciler.DeployAsync(BaseDto(), CancellationToken.None))
+            .Throws<HelmException>();
+
+        await Helm.DidNotReceiveWithAnyArgs().UpgradeInstallAsync(
+            default!, default!, default!, default!, default!, default!, default);
+    }
+
+    [Test]
+    public async Task DeployAsync_RealInstallFails_CollectsDiagnostics()
+    {
+        Helm.UpgradeInstallAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HelmException("upgrade --install rel",
+                1, string.Empty, "Error: release failed, context deadline exceeded"));
+
+        await Assert.That(async () => await Reconciler.DeployAsync(BaseDto(), CancellationToken.None))
+            .Throws<HelmException>();
+
+        var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
+        await Diagnostics.Received(1).CollectAsync(
+            PoolNamespace, expectedRelease, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployAsync_RealInstallFails_EnrichesExceptionWithDiagnostics()
+    {
+        Helm.UpgradeInstallAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HelmException("upgrade --install rel",
+                1, string.Empty, "Error: context deadline exceeded"));
+        Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns("Pod x container 'app' waiting: ImagePullBackOff — pull access denied");
+
+        var ex = await Assert.That(async () => await Reconciler.DeployAsync(BaseDto(), CancellationToken.None))
+            .Throws<HelmException>();
+
+        await Assert.That(ex!.StdErr).Contains("context deadline exceeded");
+        await Assert.That(ex!.StdErr).Contains("Pod diagnostics:");
+        await Assert.That(ex!.StdErr).Contains("ImagePullBackOff");
+    }
+
+    [Test]
+    public async Task DeployAsync_RealInstallFails_NoDiagnostics_RethrowsOriginalException()
+    {
+        Helm.UpgradeInstallAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HelmException("upgrade --install rel",
+                1, string.Empty, "Error: context deadline exceeded"));
+        // Default collector returns empty string — no enrichment.
+
+        var ex = await Assert.That(async () => await Reconciler.DeployAsync(BaseDto(), CancellationToken.None))
+            .Throws<HelmException>();
+
+        // Same StdErr as original — no "Pod diagnostics:" suffix.
+        await Assert.That(ex!.StdErr).IsEqualTo("Error: context deadline exceeded");
     }
 
     [Test]
