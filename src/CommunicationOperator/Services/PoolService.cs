@@ -106,6 +106,19 @@ public class PoolService : IPoolService, IOperatorHubCallbacks_PreUpdateTenantHa
         {
             throw PoolServiceException.DeployFailed(entity.Spec.PoolRtId, e);
         }
+
+        // Per-CR reverse-sync: even when the operator was already connected
+        // (the bulk path in OperatorHubService.onReconnect ran), CRs that
+        // KubeOps discovered AFTER that callback aren't in the bulk
+        // snapshot and so wouldn't trigger restore of any drifted
+        // DeploymentState. Fire a one-pool report here so every reconcile
+        // self-heals. Cloud-mode-only enforced in the invoker; no-op when
+        // the hub is down (the bulk path will catch up on the next
+        // reconnect once GetPools() reflects this entry).
+        if (pool.IsRegistered)
+        {
+            await _hubInvoker.ReportDeployedPoolAsync(entity.Spec.TenantId, entity.Spec.PoolRtId);
+        }
     }
 
     public async Task UnRegisterPoolAsync(V1CommunicationPoolEntity entity)

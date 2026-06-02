@@ -83,6 +83,53 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         await client.UnregisterPoolAsync(tenantId, poolRtId);
     }
 
+    /// <inheritdoc />
+    public async Task ReportDeployedPoolAsync(string tenantId, string poolRtId)
+    {
+        // Edge operators must NOT call ReportDeployedStateAsync — the
+        // controller-side handler rejects them with a HubException. Skip at
+        // the source so every CR reconcile on an edge operator doesn't emit
+        // an avoidable error audit event on the controller.
+        if (!_options.AutoManagePools)
+        {
+            return;
+        }
+        var client = _client;
+        if (client == null || !client.IsAlive)
+        {
+            // Same contract as RegisterPoolAsync: when the hub is down we
+            // skip. The next bulk reverse-sync (fired from the reconnect
+            // callback once the connection is restored) covers the gap as
+            // long as the pool is in PoolService.GetPools() at that point.
+            _logger.LogDebug(
+                "Operator-hub not connected; skipping per-pool reverse-sync for tenant '{TenantId}', pool rtId {PoolRtId}",
+                tenantId, poolRtId);
+            return;
+        }
+        try
+        {
+            await client.ReportDeployedStateAsync(new[]
+            {
+                new OperatorDeployedPoolReportDto
+                {
+                    TenantId = tenantId,
+                    PoolRtId = poolRtId,
+                    PoolName = string.Empty,
+                    WorkloadRtIds = Array.Empty<string>(),
+                },
+            });
+        }
+        catch (Exception ex)
+        {
+            // Best-effort, same rationale as the bulk reverse-sync: a missing
+            // / older controller-side contract must not break the per-CR
+            // reconcile loop. Log so the drift is at least diagnosable.
+            _logger.LogWarning(ex,
+                "Failed to send per-pool reverse-sync for tenant '{TenantId}', pool rtId {PoolRtId}",
+                tenantId, poolRtId);
+        }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (string.IsNullOrWhiteSpace(_options.CommunicationControllerUri))

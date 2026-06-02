@@ -2,6 +2,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Entities;
 using Meshmakers.Octo.Communication.Operator.Models;
+using Meshmakers.Octo.Communication.Operator.Services;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;
@@ -133,6 +134,85 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         // is the only signal we have for "callback exited cleanly".
         await setup.Client.Received(1).ReportDeployedStateAsync(
             Arg.Any<IReadOnlyList<OperatorDeployedPoolReportDto>>());
+
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task ReportDeployedPoolAsync_CloudConnected_SendsSingleEntryReport()
+    {
+        // The per-pool path called from PoolService.RegisterPoolAsync after
+        // a late-arriving CR is reconciled. Wraps the call in a 1-element
+        // OperatorDeployedPoolReportDto array so it goes through the same
+        // controller-side handler as the bulk reverse-sync.
+        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+
+        var setup = SetupClient();
+        setup.Client.IsAlive.Returns(true);
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        setup.Client.ClearReceivedCalls();
+        await ((IOperatorHubInvoker)Service).ReportDeployedPoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
+
+        await setup.Client.Received(1).ReportDeployedStateAsync(
+            Arg.Is<IReadOnlyList<OperatorDeployedPoolReportDto>>(reports =>
+                reports.Count == 1
+                && reports[0].TenantId == "tenant-a"
+                && reports[0].PoolRtId == "65d5c447b420da3fb12381a1"));
+
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task ReportDeployedPoolAsync_EdgeMode_IsNoOp()
+    {
+        // The hub contract rejects edge operators with HubException, so
+        // skipping at the source avoids per-CR error audit events on the
+        // controller. Same gate as the bulk reverse-sync.
+        OperatorOptions.AutoManagePools = false;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+
+        var setup = SetupClient();
+        setup.Client.IsAlive.Returns(true);
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        setup.Client.ClearReceivedCalls();
+        await ((IOperatorHubInvoker)Service).ReportDeployedPoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
+
+        await setup.Client.DidNotReceiveWithAnyArgs().ReportDeployedStateAsync(default!);
+
+        await hosted.StopAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task ReportDeployedPoolAsync_HubDisconnected_IsNoOp()
+    {
+        // Hub connection lost between RegisterPoolAsync succeeding (which
+        // probably happened against the prior connection) and this call.
+        // No-op rather than throw; PoolService's RegisterPoolAsync only
+        // calls this when pool.IsRegistered == true anyway, but be
+        // defensive in case IsAlive flips mid-sequence.
+        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+
+        var setup = SetupClient();
+        setup.Client.IsAlive.Returns(false);
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        setup.Client.ClearReceivedCalls();
+        await ((IOperatorHubInvoker)Service).ReportDeployedPoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
+
+        await setup.Client.DidNotReceiveWithAnyArgs().ReportDeployedStateAsync(default!);
 
         await hosted.StopAsync(CancellationToken.None);
     }

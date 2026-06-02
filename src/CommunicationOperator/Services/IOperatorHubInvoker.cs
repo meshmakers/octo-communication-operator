@@ -32,4 +32,22 @@ public interface IOperatorHubInvoker
     /// reconnect runs without that pool in the local list.
     /// </summary>
     Task UnregisterPoolAsync(string tenantId, string poolRtId);
+
+    /// <summary>
+    /// Per-pool variant of the reverse-sync that <see cref="OperatorHubService"/>
+    /// runs in bulk on reconnect: ships a single
+    /// <c>OperatorDeployedPoolReportDto</c> so the controller can restore
+    /// <c>DeploymentState=Deployed</c> for this one pool. Used by
+    /// <c>PoolService.RegisterPoolAsync</c> after every successful CR
+    /// reconcile — the bulk path captures only pools KubeOps has already
+    /// added to <c>PoolService._pools</c> by the time the SignalR connect
+    /// callback fires, so any CR that the KubeOps watcher discovers after
+    /// that moment would otherwise miss the reverse-sync window.
+    ///
+    /// Cloud-only: silently no-ops when <c>AutoManagePools=false</c> (edge)
+    /// or when the connection is down. Best-effort: a failed call is
+    /// logged but does not propagate, mirroring the bulk reverse-sync's
+    /// self-healing contract.
+    /// </summary>
+    Task ReportDeployedPoolAsync(string tenantId, string poolRtId);
 }

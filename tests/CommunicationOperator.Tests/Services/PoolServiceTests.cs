@@ -91,4 +91,37 @@ public class PoolServiceTests
 
         await Assert.That(_service.GetPools().Count).IsEqualTo(1);
     }
+
+    [Test]
+    public async Task RegisterPoolAsync_HubConnected_FiresPerPoolReverseSync()
+    {
+        // Smoking-gun fix: late-arriving CR (KubeOps discovered it AFTER the
+        // bulk reverse-sync in OperatorHubService.onReconnect already ran)
+        // must trigger its own reverse-sync so the controller can lift any
+        // DeploymentState drift for THIS pool. Without this call the late
+        // CRs were silently stuck at whatever DeploymentState the previous
+        // operator restart cycle had left them in.
+        var entity = Entity("energytest", EnergytestPoolRtId, "cloud");
+
+        await _service.RegisterPoolAsync(entity, CancellationToken.None);
+
+        await _hub.Received(1).RegisterPoolAsync("energytest", EnergytestPoolRtId);
+        await _hub.Received(1).ReportDeployedPoolAsync("energytest", EnergytestPoolRtId);
+    }
+
+    [Test]
+    public async Task RegisterPoolAsync_HubDisconnected_SkipsPerPoolReverseSync()
+    {
+        // When the hub is down the RegisterPoolAsync call to the invoker is a
+        // no-op anyway, and PoolService stores the CR locally so the next
+        // reconnect's bulk reverse-sync (in OperatorHubService.onReconnect)
+        // picks it up. Calling ReportDeployedPoolAsync now would be wasted
+        // work and produce a confusing "skipping" log entry per CR.
+        _hub.IsConnected.Returns(false);
+        var entity = Entity("acme", AcmePoolRtId, "default");
+
+        await _service.RegisterPoolAsync(entity, CancellationToken.None);
+
+        await _hub.DidNotReceiveWithAnyArgs().ReportDeployedPoolAsync(default!, default!);
+    }
 }

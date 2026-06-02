@@ -216,6 +216,24 @@ operator was offline (e.g. controller restart between deploys lost the
 in-memory `OperatorConnectionManager` tracking) and rebuilds the
 per-connection pool registration so undeploy fan-out keeps working.
 
+**Two coupled paths run the reverse-sync:**
+
+1. **Bulk on reconnect** (`OperatorHubService.onReconnect`): captures
+   the snapshot of `poolService.GetPools()` when the SignalR connect
+   callback fires and sends them all in one call. Works for the
+   *controller-restart* case where the operator's KubeOps cache was
+   never torn down — every CR is in `_pools` by the time the callback
+   runs.
+2. **Per-pool on register** (`PoolService.RegisterPoolAsync` →
+   `IOperatorHubInvoker.ReportDeployedPoolAsync`): every CR reconcile
+   that registers a pool also fires a single-pool reverse-sync. Closes
+   the *operator-restart* race where KubeOps populates `_pools`
+   AFTER the bulk callback already ran: CRs discovered later than the
+   snapshot would otherwise miss their restore window and stay stuck
+   at whatever drifted state the controller had on them. Per-pool is
+   idempotent on the controller side (restore-only-when-changed) so the
+   double coverage doesn't spam audit events.
+
 Gating:
 
 - `AutoManagePools=false` (edge): the operator skips the call entirely.
