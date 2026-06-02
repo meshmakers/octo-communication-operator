@@ -142,7 +142,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             // arrive via PoolDeployedAsync afterwards), on a reconnect this
             // is what flips every pool back to Online.
             var poolService = _serviceProvider.GetRequiredService<IPoolService>();
-            foreach (var pool in poolService.GetPools())
+            var ownedPools = poolService.GetPools().ToArray();
+            foreach (var pool in ownedPools)
             {
                 try
                 {
@@ -155,6 +156,52 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                     _logger.LogWarning(ex,
                         "Failed to re-register pool rtId {PoolRtId} for tenant '{TenantId}' on reconnect",
                         pool.Entity.Spec.PoolRtId, pool.Entity.Spec.TenantId);
+                }
+            }
+
+            // Reverse-sync: tell the controller which pools we currently have
+            // an active CR for so it can lift any DeploymentState that drifted
+            // back to Pending (e.g. operator pod was restarted while the
+            // controller stayed up, the CR survived in k8s but the controller's
+            // in-memory tracking was lost). Cloud-only by hub contract — edge
+            // operators would be rejected with a HubException. Workload-level
+            // reverse-sync is NOT yet covered: the operator has no persistent
+            // helm-release-to-workload-rtId mapping, so we report each pool
+            // with an empty WorkloadRtIds list and rely on the controller's
+            // own tracking + the existing PoolDeployedAsync fan-out for
+            // workloads. Documented as a follow-up in CLAUDE.md.
+            if (_options.AutoManagePools && ownedPools.Length > 0)
+            {
+                var reports = ownedPools
+                    .Select(p => new OperatorDeployedPoolReportDto
+                    {
+                        TenantId = p.Entity.Spec.TenantId,
+                        PoolRtId = p.Entity.Spec.PoolRtId,
+                        // CR doesn't carry the human-readable name (it lives on
+                        // the controller's RtPool.Name); the controller-side
+                        // restore loads the name itself for log messages, so an
+                        // empty value here is fine.
+                        PoolName = string.Empty,
+                        WorkloadRtIds = Array.Empty<string>(),
+                    })
+                    .ToArray();
+
+                try
+                {
+                    await client.ReportDeployedStateAsync(reports);
+                    _logger.LogInformation(
+                        "Reverse-sync sent to controller: {Count} pool(s)",
+                        reports.Length);
+                }
+                catch (Exception ex)
+                {
+                    // Self-healing is best-effort. Failing the report does not
+                    // break ongoing operations — the next deploy / undeploy
+                    // event will write the state correctly anyway. Log so the
+                    // partial drift is at least diagnosable.
+                    _logger.LogWarning(ex,
+                        "Failed to send reverse-sync to controller ({Count} pool(s) skipped)",
+                        reports.Length);
                 }
             }
         };

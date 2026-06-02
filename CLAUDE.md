@@ -204,6 +204,47 @@ Either way, the workload-deploy path (`WorkloadDeployedAsync` → `WorkloadRecon
 
 The connection is auto-reconnecting via `OperatorHubClient`. Failures from the pool manager and workload reconciler are logged but **not propagated** so that one bad event cannot break the hub connection.
 
+### Reverse-Sync on Reconnect
+
+After the operator has re-registered every owned `CommunicationPool` CR
+with the controller (the `RegisterPoolAsync` loop in `onReconnect`), a
+**Cloud operator** (`AutoManagePools=true`) follows up with one call to
+`IOperatorHub.ReportDeployedStateAsync(reports)` carrying the set of
+pools it currently has CRs for. The controller restores
+`DeploymentState=Deployed` on any pool whose state drifted while the
+operator was offline (e.g. controller restart between deploys lost the
+in-memory `OperatorConnectionManager` tracking) and rebuilds the
+per-connection pool registration so undeploy fan-out keeps working.
+
+Gating:
+
+- `AutoManagePools=false` (edge): the operator skips the call entirely.
+  The controller-side handler rejects edge operators with a typed
+  `HubException` anyway — skipping at the source avoids an avoidable
+  error audit event on every reconnect.
+- Owned-pool list empty (fresh install): skip the call. Sending an
+  empty report is a valid no-op on the controller but adds round-trip
+  cost and log noise.
+- Call failure (e.g. controller on an older build that doesn't know
+  the contract): logged at warning, **not propagated**. Self-healing is
+  best-effort — the next deploy/undeploy event will write the correct
+  state regardless.
+
+Workloads are **not yet covered** by the reverse-sync: the operator has
+no persistent helm-release-to-workload-rtId mapping that survives a pod
+restart, so each pool report ships with an empty `WorkloadRtIds[]`. The
+controller-side restore handles empty lists cleanly. Future work: track
+workload rtIds via a label on the helm release secret (helm 3.13+
+`--labels`) or on the operator-owned `{release}-octo-secrets` Secret so
+the operator can read them back at startup. See
+`docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md` for the contract details.
+
+Tests:
+- `Services/OperatorHubServiceTests/ReverseSyncTests` — Cloud with owned
+  pools sends report, edge does NOT call, empty owned-pool list skips
+  the call, `ReportDeployedStateAsync` failure is logged but doesn't
+  crash the connect callback.
+
 ### Webhooks
 
 - `CommunicationPoolValidator`: requires `Spec.PoolRtId` to be a
