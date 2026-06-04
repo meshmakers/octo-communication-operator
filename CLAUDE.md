@@ -195,6 +195,72 @@ the actual reason:
 are logged but **not propagated** — same rule as for tenant lifecycle
 callbacks, one bad workload must not crash the hub connection.
 
+### Live Deploy Watcher
+
+The pre-flight / post-failure pair above still leaves a 5-minute gap
+between "something is wrong" and "user sees it": helm waits its full
+`--timeout` (default 5 min) before the post-failure collector runs.
+`Reconcilers/WorkloadDeployWatcher` closes that gap.
+
+Started by `WorkloadReconciler.DeployAsync` right before the real
+`helm upgrade --install --atomic`, the watcher loop:
+
+1. Sleeps `DefaultPollInterval` (3 s) — overridable per call so tests
+   can drive the loop at millisecond speeds.
+2. Calls `IWorkloadDiagnosticsCollector.CollectAsync` (same collector
+   the post-failure path uses) with a 5 s `CollectTimeout`.
+3. If the snapshot is non-empty AND different from the last one sent,
+   pushes it through
+   `IOperatorHubInvoker.ReportWorkloadDeploymentProgressAsync` →
+   controller-side `OperatorHub.ReportWorkloadDeploymentProgressAsync`
+   → `Set{Adapter,Application}DeploymentStateAsync(Pending, message)`.
+   `DeploymentState` deliberately stays at `Pending` — helm may still
+   recover (e.g. registry blip), so the terminal state machine remains
+   owned by `ReportWorkloadDeploymentStatusAsync`.
+4. Collector / hub exceptions are caught and logged at debug; the loop
+   continues so a transient apiserver glitch can't silently disable
+   feedback for the rest of the deploy.
+5. Cancels and returns when its `CancellationToken` fires. The
+   reconciler cancels + awaits the watcher in its `finally` before
+   `OperatorHubService.WorkloadDeployedAsync` writes the terminal
+   status — SignalR preserves message order on a single connection so
+   the terminal write always arrives after the last progress write.
+
+Backward compat: older controller builds reject the new hub method
+with `HubException`. `OperatorHubService.ReportWorkloadDeploymentProgressAsync`
+catches that, logs a single warning (`Interlocked.CompareExchange` on
+`_progressUnsupportedLogged`) and degrades silently — every 3-second
+tick would otherwise spam the log.
+
+### Cancellable Deploy
+
+`WorkloadReconciler._inFlightDeploys` (`ConcurrentDictionary<release,
+CancellationTokenSource>`) tracks every running `DeployAsync`. The CTS
+is linked to the incoming token, so upstream shutdown still cancels —
+but it's also reachable from `UndeployAsync` via this dict.
+
+`UndeployAsync` checks the dict first:
+- If a deploy is in flight for the same release: cancel its CTS, wait
+  `CancelGracePeriod` (2 s) for helm's atomic rollback to settle, then
+  run `helm uninstall --ignore-not-found` as usual. The grace window
+  matters because `helm uninstall` racing with the in-flight atomic
+  rollback would either deadlock on the release lock or leave the
+  release in a `failed` state that takes a second uninstall to clear.
+- If no deploy is in flight: existing path unchanged.
+
+Cancellation only works end-to-end because `HelmProcessInvoker.InvokeAsync`
+explicitly `process.Kill(entireProcessTree: true)` on
+`OperationCanceledException`. `WaitForExitAsync(ct)` alone throws but
+leaves the helm process running, holding the release lock — kubectl
+and registry-handshake helpers are forked as children, hence the
+whole-tree kill.
+
+Concurrent deploys for the same release throw
+`InvalidOperationException` from the `_inFlightDeploys.TryAdd` guard.
+The controller's pool-service path is serial per workload so this
+should not happen in practice; the explicit guard turns "what if" into
+a controlled failure with an actionable message.
+
 **Docker image** (`src/CommunicationOperator/Dockerfile`) downloads the
 official `helm` binary tarball from `get.helm.sh` (CNAME for the helm
 GitHub Releases) — the previous baltocdn.com apt-repo path was blocked

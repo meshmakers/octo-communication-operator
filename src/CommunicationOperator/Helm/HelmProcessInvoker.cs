@@ -40,9 +40,40 @@ public sealed class HelmProcessInvoker(ILogger<HelmProcessInvoker> logger) : IHe
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // WaitForExitAsync(ct) throws on cancellation but does not kill
+            // the underlying helm process — it would keep running, holding
+            // the release lock and producing zombie deploys when the caller
+            // moves on (e.g. an undeploy arriving during a stuck install).
+            // Kill the whole tree because helm itself shells out to kubectl
+            // and registry-handshake helpers as child processes.
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (Exception killEx)
+            {
+                logger.LogWarning(killEx,
+                    "Failed to kill helm process after cancellation (pid {Pid})",
+                    SafePid(process));
+            }
+            throw;
+        }
 
         return new HelmProcessResult(process.ExitCode, stdOut.ToString(), stdErr.ToString());
+    }
+
+    private static int SafePid(Process process)
+    {
+        try { return process.Id; } catch { return -1; }
     }
 
     private static string MaskPasswords(IReadOnlyList<string> arguments)

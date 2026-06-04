@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using k8s.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -18,19 +19,41 @@ namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 /// </summary>
 public sealed class WorkloadReconciler : IWorkloadReconciler
 {
+    /// <summary>Grace window for atomic rollback after a deploy cancel,
+    /// before <see cref="UndeployAsync"/> proceeds with <c>helm uninstall</c>.
+    /// Helm needs a moment to mark the release as failed and drop the
+    /// release lock; jumping straight to uninstall while the kill is still
+    /// being acknowledged would race with the in-flight rollback.</summary>
+    internal static readonly TimeSpan CancelGracePeriod = TimeSpan.FromSeconds(2);
+
     private readonly IHelmRunner _helm;
     private readonly ICommunicationPoolKubernetesGateway _gateway;
     private readonly IWorkloadDiagnosticsCollector _diagnostics;
+    private readonly IServiceProvider _serviceProvider;
     private readonly OperatorOptions _options;
     private readonly ILogger<WorkloadReconciler> _logger;
 
+    // Tracks the cancellation source of every in-flight DeployAsync so that
+    // a concurrent UndeployAsync for the same release can abort the running
+    // helm process instead of serializing behind it (which would otherwise
+    // block on helm's --atomic timeout, typically 5 min).
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _inFlightDeploys = new();
+
     public WorkloadReconciler(IHelmRunner helm, ICommunicationPoolKubernetesGateway gateway,
         IWorkloadDiagnosticsCollector diagnostics,
+        IServiceProvider serviceProvider,
         IOptions<OperatorOptions> options, ILogger<WorkloadReconciler> logger)
     {
         _helm = helm;
         _gateway = gateway;
         _diagnostics = diagnostics;
+        // IOperatorHubInvoker is resolved lazily to break the DI cycle:
+        // OperatorHubService (the IOperatorHubInvoker implementation) depends
+        // on IWorkloadReconciler (this class). Constructor-injecting the
+        // invoker here would create a singleton-to-singleton cycle. Both
+        // services are singletons, so the lazy lookup is cheap and runs
+        // only inside DeployAsync where the watcher actually needs it.
+        _serviceProvider = serviceProvider;
         _options = options.Value;
         _logger = logger;
     }
@@ -47,123 +70,183 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             workload.WorkloadName, workload.WorkloadRtId,
             workload.ChartName, workload.ChartVersion, release, ns);
 
-        // 0. If the workload opts in, append secret-flagged overrides for
-        //    the cluster-internal credentials the operator knows about.
-        //    The resulting overrides flow through the normal secret-flagged
-        //    path: materialized into {release}-octo-secrets, referenced from
-        //    the chart via valueFrom secretKeyRef.
-        workload = workload with { Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets, _options) };
+        // Per-deploy cancellation source — linked to the incoming token so
+        // upstream shutdown still cancels, but also reachable from
+        // UndeployAsync via _inFlightDeploys to abort a stuck install
+        // without waiting for helm's atomic timeout.
+        using var deployCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var deployToken = deployCts.Token;
 
-        // 1. Materialize / refresh the operator-owned secret. We replace it
-        //    every deploy so a value rotation propagates without manual
-        //    intervention. When no secret-flagged overrides exist, ensure any
-        //    leftover secret from a previous deploy is removed.
-        await ReconcileSecretAsync(ns, secretName, workload, cancellationToken);
+        // Refuse to start a second deploy for the same release while one is
+        // already running. The current PoolService path is serial per
+        // workload, so this should not happen in practice; the explicit
+        // guard turns "what if" into a controlled failure that points at the
+        // bug (instead of two helm processes fighting for the same release
+        // lock).
+        if (!_inFlightDeploys.TryAdd(release, deployCts))
+        {
+            throw new InvalidOperationException(
+                $"A deploy for release '{release}' is already in progress; refusing to start a second one.");
+        }
 
-        // 2. Make sure the chart repository is registered + index refreshed.
-        var alias = RepoAlias(workload.RepositoryUrl);
-        await _helm.EnsureRepoAsync(alias, workload.RepositoryUrl,
-            workload.RepositoryUsername, workload.RepositoryPassword, cancellationToken);
+        Task? watcherTask = null;
 
-        // 3. Assemble values files. Helm later args win — so order is:
-        //    context (operator-managed cluster defaults) → workload
-        //    ValuesYaml → structured overrides. Workload-side input always
-        //    has the final say.
-        var tempDir = Directory.CreateTempSubdirectory("octo-helm-").FullName;
         try
         {
-            var valuesFiles = new List<string>();
+            // 0. If the workload opts in, append secret-flagged overrides for
+            //    the cluster-internal credentials the operator knows about.
+            //    The resulting overrides flow through the normal secret-flagged
+            //    path: materialized into {release}-octo-secrets, referenced from
+            //    the chart via valueFrom secretKeyRef.
+            workload = workload with { Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets, _options) };
 
-            var contextYaml = WorkloadContextValuesBuilder.Build(_options, workload);
-            if (!string.IsNullOrEmpty(contextYaml))
-            {
-                var contextFile = Path.Combine(tempDir, "values-context.yaml");
-                await File.WriteAllTextAsync(contextFile, contextYaml, cancellationToken);
-                valuesFiles.Add(contextFile);
-            }
+            // 1. Materialize / refresh the operator-owned secret. We replace it
+            //    every deploy so a value rotation propagates without manual
+            //    intervention. When no secret-flagged overrides exist, ensure any
+            //    leftover secret from a previous deploy is removed.
+            await ReconcileSecretAsync(ns, secretName, workload, deployToken);
 
-            if (!string.IsNullOrWhiteSpace(workload.ValuesYaml))
-            {
-                var baseFile = Path.Combine(tempDir, "values-base.yaml");
-                await File.WriteAllTextAsync(baseFile, workload.ValuesYaml, cancellationToken);
-                valuesFiles.Add(baseFile);
-            }
+            // 2. Make sure the chart repository is registered + index refreshed.
+            var alias = RepoAlias(workload.RepositoryUrl);
+            await _helm.EnsureRepoAsync(alias, workload.RepositoryUrl,
+                workload.RepositoryUsername, workload.RepositoryPassword, deployToken);
 
-            var overrideYaml = WorkloadOverrideYamlBuilder.Build(workload.Values, secretName);
-            if (!string.IsNullOrEmpty(overrideYaml))
-            {
-                var overrideFile = Path.Combine(tempDir, "values-overrides.yaml");
-                await File.WriteAllTextAsync(overrideFile, overrideYaml, cancellationToken);
-                valuesFiles.Add(overrideFile);
-            }
-
-            var chartRef = $"{alias}/{workload.ChartName}";
-            var setValues = new Dictionary<string, string>();
-
-            // Pre-flight: helm upgrade --install --dry-run=server submits the
-            // rendered manifests to the apiserver with dryRun=All. This
-            // catches schema errors, admission-webhook rejections, RBAC
-            // problems and missing required values in under 2s — instead of
-            // letting the real install wait 5min for the atomic timeout
-            // before reporting them as a generic "context deadline exceeded".
-            // ImagePull / CrashLoop / probe failures are NOT caught here
-            // (no pods are created) — those are surfaced by the post-failure
-            // diagnostic collector below.
-            await _helm.UpgradeInstallDryRunAsync(release, chartRef,
-                workload.ChartVersion, ns, valuesFiles, setValues, cancellationToken);
-
+            // 3. Assemble values files. Helm later args win — so order is:
+            //    context (operator-managed cluster defaults) → workload
+            //    ValuesYaml → structured overrides. Workload-side input always
+            //    has the final say.
+            var tempDir = Directory.CreateTempSubdirectory("octo-helm-").FullName;
             try
             {
-                await _helm.UpgradeInstallAsync(release, chartRef,
-                    workload.ChartVersion, ns, valuesFiles, setValues, cancellationToken);
-            }
-            catch (HelmException ex)
-            {
-                // --atomic leaves only an opaque helm-side error on its
-                // stderr (typically "context deadline exceeded"); the
-                // actual pod-level root cause is observable on the
-                // cluster but vanishes when atomic rolls the release
-                // back. Events outlive the pods that produced them
-                // (default TTL 1h), so a post-failure snapshot still
-                // catches ImagePull / scheduling / mount errors. Use a
-                // bounded token so a stuck apiserver doesn't make the
-                // failure path hang forever.
-                using var diagCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                string diagnostics;
+                var valuesFiles = new List<string>();
+
+                var contextYaml = WorkloadContextValuesBuilder.Build(_options, workload);
+                if (!string.IsNullOrEmpty(contextYaml))
+                {
+                    var contextFile = Path.Combine(tempDir, "values-context.yaml");
+                    await File.WriteAllTextAsync(contextFile, contextYaml, deployToken);
+                    valuesFiles.Add(contextFile);
+                }
+
+                if (!string.IsNullOrWhiteSpace(workload.ValuesYaml))
+                {
+                    var baseFile = Path.Combine(tempDir, "values-base.yaml");
+                    await File.WriteAllTextAsync(baseFile, workload.ValuesYaml, deployToken);
+                    valuesFiles.Add(baseFile);
+                }
+
+                var overrideYaml = WorkloadOverrideYamlBuilder.Build(workload.Values, secretName);
+                if (!string.IsNullOrEmpty(overrideYaml))
+                {
+                    var overrideFile = Path.Combine(tempDir, "values-overrides.yaml");
+                    await File.WriteAllTextAsync(overrideFile, overrideYaml, deployToken);
+                    valuesFiles.Add(overrideFile);
+                }
+
+                var chartRef = $"{alias}/{workload.ChartName}";
+                var setValues = new Dictionary<string, string>();
+
+                // Pre-flight: helm upgrade --install --dry-run=server submits the
+                // rendered manifests to the apiserver with dryRun=All. This
+                // catches schema errors, admission-webhook rejections, RBAC
+                // problems and missing required values in under 2s — instead of
+                // letting the real install wait 5min for the atomic timeout
+                // before reporting them as a generic "context deadline exceeded".
+                // ImagePull / CrashLoop / probe failures are NOT caught here
+                // (no pods are created) — those are surfaced by the post-failure
+                // diagnostic collector below AND by the live watcher started
+                // before the real install.
+                await _helm.UpgradeInstallDryRunAsync(release, chartRef,
+                    workload.ChartVersion, ns, valuesFiles, setValues, deployToken);
+
+                // Start the live watcher BEFORE the real install begins. The
+                // watcher polls the cluster every few seconds and pushes any
+                // non-empty diagnostic snapshot to the controller so the UI
+                // can show ImagePullBackOff (or similar) within seconds
+                // instead of waiting for helm's atomic timeout to elapse.
+                // The watcher shares the deploy's cancellation token so it
+                // is automatically torn down when the deploy ends (success,
+                // failure or external cancel).
+                var hub = _serviceProvider.GetRequiredService<IOperatorHubInvoker>();
+                watcherTask = WorkloadDeployWatcher.RunAsync(
+                    _diagnostics, hub, ns, release, workload, _logger, deployToken);
+
                 try
                 {
-                    diagnostics = await _diagnostics.CollectAsync(ns, release, diagCts.Token);
+                    await _helm.UpgradeInstallAsync(release, chartRef,
+                        workload.ChartVersion, ns, valuesFiles, setValues, deployToken);
                 }
-                catch (Exception diagEx)
+                catch (HelmException ex)
                 {
-                    _logger.LogWarning(diagEx, "Failed to collect diagnostics for release '{Release}'", release);
-                    throw;
-                }
+                    // --atomic leaves only an opaque helm-side error on its
+                    // stderr (typically "context deadline exceeded"); the
+                    // actual pod-level root cause is observable on the
+                    // cluster but vanishes when atomic rolls the release
+                    // back. Events outlive the pods that produced them
+                    // (default TTL 1h), so a post-failure snapshot still
+                    // catches ImagePull / scheduling / mount errors. Use a
+                    // bounded token so a stuck apiserver doesn't make the
+                    // failure path hang forever.
+                    using var diagCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    string diagnostics;
+                    try
+                    {
+                        diagnostics = await _diagnostics.CollectAsync(ns, release, diagCts.Token);
+                    }
+                    catch (Exception diagEx)
+                    {
+                        _logger.LogWarning(diagEx, "Failed to collect diagnostics for release '{Release}'", release);
+                        throw;
+                    }
 
-                if (string.IsNullOrEmpty(diagnostics))
+                    if (string.IsNullOrEmpty(diagnostics))
+                    {
+                        throw;
+                    }
+
+                    _logger.LogError("Workload '{Release}' deploy failed. Root-cause diagnostics:\n{Diagnostics}",
+                        release, diagnostics);
+                    throw new HelmException(ex.Operation, ex.ExitCode, ex.StdOut,
+                        $"{ex.StdErr}\n\nPod diagnostics:\n{diagnostics}");
+                }
+            }
+            finally
+            {
+                // Best-effort cleanup; if it fails it's not fatal — the values
+                // contain decrypted secrets, but the directory is in the
+                // operator's per-container tmp.
+                try
                 {
-                    throw;
+                    Directory.Delete(tempDir, recursive: true);
                 }
-
-                _logger.LogError("Workload '{Release}' deploy failed. Root-cause diagnostics:\n{Diagnostics}",
-                    release, diagnostics);
-                throw new HelmException(ex.Operation, ex.ExitCode, ex.StdOut,
-                    $"{ex.StdErr}\n\nPod diagnostics:\n{diagnostics}");
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to remove temp values directory '{Path}'", tempDir);
+                }
             }
         }
         finally
         {
-            // Best-effort cleanup; if it fails it's not fatal — the values
-            // contain decrypted secrets, but the directory is in the
-            // operator's per-container tmp.
-            try
+            // Cancel + drain the watcher first. The deploy is finished one
+            // way or another at this point, so we don't want any more
+            // progress reports racing with the terminal status report that
+            // OperatorHubService.WorkloadDeployedAsync writes right after.
+            deployCts.Cancel();
+            if (watcherTask is not null)
             {
-                Directory.Delete(tempDir, recursive: true);
+                try
+                {
+                    await watcherTask;
+                }
+                catch
+                {
+                    // Watcher catches its own exceptions; reaching here means
+                    // a swallow path was missed — log but don't propagate, the
+                    // deploy outcome is already being reported.
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to remove temp values directory '{Path}'", tempDir);
-            }
+
+            _inFlightDeploys.TryRemove(release, out _);
         }
     }
 
@@ -177,6 +260,36 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             "Undeploying workload: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}'",
             workload.TenantId, workload.PoolRtId,
             workload.WorkloadName, workload.WorkloadRtId, release);
+
+        // If a deploy is currently in flight for this release, cancel it so
+        // helm uninstall doesn't serialize behind helm's atomic timeout (up
+        // to 5 min). A short grace window lets the cancelled deploy roll
+        // back atomically before we touch the release again — without it
+        // we'd race the in-flight Kill against the uninstall.
+        if (_inFlightDeploys.TryGetValue(release, out var inFlightCts))
+        {
+            _logger.LogInformation(
+                "Cancelling in-flight deploy for release '{Release}' before undeploy", release);
+            try
+            {
+                inFlightCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The deploy finished and disposed its CTS between TryGetValue
+                // and Cancel — that's exactly the outcome we wanted, proceed.
+            }
+
+            try
+            {
+                await Task.Delay(CancelGracePeriod, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Caller dropped the request — drop our work too.
+                throw;
+            }
+        }
 
         await _helm.UninstallAsync(release, ns, cancellationToken);
 

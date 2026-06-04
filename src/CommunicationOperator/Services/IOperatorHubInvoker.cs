@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+
 namespace Meshmakers.Octo.Communication.Operator.Services;
 
 /// <summary>
@@ -50,4 +52,19 @@ public interface IOperatorHubInvoker
     /// self-healing contract.
     /// </summary>
     Task ReportDeployedPoolAsync(string tenantId, string poolRtId);
+
+    /// <summary>
+    /// Pushes a live progress signal at the controller while a
+    /// <c>helm upgrade --install</c> is still in flight. The controller
+    /// writes <paramref name="progress"/>.<c>Message</c> onto the workload's
+    /// <c>StatusMessage</c> attribute and leaves
+    /// <c>DeploymentState</c> at <c>Pending</c>; the terminal outcome
+    /// continues to flow through
+    /// <c>IOperatorHub.ReportWorkloadDeploymentStatusAsync</c>.
+    /// Silently no-ops when the connection is down. Older controllers that
+    /// do not implement the method are logged once at warning level; further
+    /// calls in that situation degrade silently so the watcher's periodic
+    /// pulse does not flood the log.
+    /// </summary>
+    Task ReportWorkloadDeploymentProgressAsync(WorkloadDeploymentProgressDto progress);
 }

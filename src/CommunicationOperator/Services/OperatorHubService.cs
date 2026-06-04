@@ -3,6 +3,7 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Sdk.ServiceClient.CommunicationControllerServices;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Communication.Operator.Services;
@@ -31,6 +32,13 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     // Stays null when no CommunicationControllerUri is configured (the
     // service returns early without building a client).
     private IOperatorHubClient? _client;
+
+    // Latches to 1 the first time a controller rejects
+    // ReportWorkloadDeploymentProgressAsync with HubException (older
+    // controller build that does not implement the method). Subsequent calls
+    // are still attempted — they will keep throwing — but the warning log
+    // fires only once so the watcher's 3-second pulse does not flood the log.
+    private int _progressUnsupportedLogged;
 
     public OperatorHubService(
         ILogger<OperatorHubService> logger,
@@ -127,6 +135,42 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             _logger.LogWarning(ex,
                 "Failed to send per-pool reverse-sync for tenant '{TenantId}', pool rtId {PoolRtId}",
                 tenantId, poolRtId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ReportWorkloadDeploymentProgressAsync(WorkloadDeploymentProgressDto progress)
+    {
+        var client = _client;
+        if (client == null || !client.IsAlive)
+        {
+            return;
+        }
+
+        try
+        {
+            await client.ReportWorkloadDeploymentProgressAsync(progress);
+        }
+        catch (HubException ex)
+        {
+            // Older controller builds reject the call with "Method does not
+            // exist on the server". Log once and keep degrading silently —
+            // the watcher fires every few seconds and we don't want every
+            // tick to dump a stack trace.
+            if (Interlocked.CompareExchange(ref _progressUnsupportedLogged, 1, 0) == 0)
+            {
+                _logger.LogWarning(ex,
+                    "Controller does not accept ReportWorkloadDeploymentProgressAsync — falling back to terminal status reports. Upgrade the controller to enable live deploy feedback.");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Connection drop mid-call, serializer mismatch on an in-flight
+            // upgrade, etc. — log at debug because the next tick will retry
+            // and the terminal status report still goes through.
+            _logger.LogDebug(ex,
+                "ReportWorkloadDeploymentProgressAsync failed for tenant '{TenantId}', workload '{WorkloadName}'",
+                progress.TenantId, progress.WorkloadName);
         }
     }
 
