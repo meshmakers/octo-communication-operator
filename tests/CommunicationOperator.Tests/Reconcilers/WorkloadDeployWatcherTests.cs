@@ -89,11 +89,27 @@ internal class WorkloadDeployWatcherTests
         collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(_ => snapshots.Count > 0 ? snapshots.Dequeue() : "third");
         var hub = Substitute.For<IOperatorHubInvoker>();
+        var publishedThree = new TaskCompletionSource();
+        var publishCount = 0;
+        hub.When(h => h.ReportWorkloadDeploymentProgressAsync(Arg.Any<WorkloadDeploymentProgressDto>()))
+            .Do(_ =>
+            {
+                if (Interlocked.Increment(ref publishCount) >= 3)
+                {
+                    publishedThree.TrySetResult();
+                }
+            });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
-
-        await WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
             NullLogger.Instance, cts.Token, pollInterval: TickInterval);
+
+        // Wait until the watcher has published all three distinct snapshots,
+        // THEN cancel. Avoids the flaky "cancel after fixed ms" pattern that
+        // raced the polling loop on slower CI agents.
+        await publishedThree.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+        await run;
 
         await hub.Received(1).ReportWorkloadDeploymentProgressAsync(
             Arg.Is<WorkloadDeploymentProgressDto>(p => p.Message == "first"));
@@ -112,11 +128,22 @@ internal class WorkloadDeployWatcherTests
                 _ => throw new InvalidOperationException("apiserver glitch"),
                 _ => "Pod foo waiting: ImagePullBackOff");
         var hub = Substitute.For<IOperatorHubInvoker>();
+        var published = new TaskCompletionSource();
+        hub.When(h => h.ReportWorkloadDeploymentProgressAsync(Arg.Any<WorkloadDeploymentProgressDto>()))
+            .Do(_ => published.TrySetResult());
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-
-        await WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
             NullLogger.Instance, cts.Token, pollInterval: TickInterval);
+
+        // Block until the second iteration has surfaced the snapshot through
+        // the hub. The first iteration's exception is swallowed and the loop
+        // must continue — cancelling after a fixed ms window was too tight
+        // on slower CI agents where the two iterations can't both complete
+        // inside 200ms.
+        await published.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+        await run;
 
         await hub.Received().ReportWorkloadDeploymentProgressAsync(
             Arg.Is<WorkloadDeploymentProgressDto>(p => p.Message == "Pod foo waiting: ImagePullBackOff"));
