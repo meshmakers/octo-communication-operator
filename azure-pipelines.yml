@@ -1,0 +1,139 @@
+# Root-level CI pipeline for octo-communication-operator, using shared
+# templates from octo-pipeline-templates@tpl-v0.4.2.
+#
+# Phase 7 finale (2026-06-14): the operator was the last .NET service
+# still on legacy devops-build/azure-pipelines.yml. Coexists with the
+# legacy file during pilot; once a green build proves parity, def 103
+# yamlFilename flips here and devops-build/ can be deleted in a
+# follow-up commit.
+#
+# operator-specific quirks preserved from the legacy YAML:
+#   - Multi-arch docker build (linux/arm64,linux/amd64) — operator runs
+#     on edge devices (Pi 5 ARM nodes) and on amd64 control planes
+#     side-by-side. This was the issue fixed in build #34836 (Phase 6
+#     recovery cascade): docker.io push was missing arm64 manifests.
+#   - SSHKey alone (no submodules:recursive needed — operator pulls no
+#     private submodules).
+#   - No CK library, no CK catalog publish — operator owns the
+#     CommunicationPool CRD via KubeOps but the CRD schemas ship from
+#     octo-helm-core (octo-mesh-crds chart), not from this repo.
+#     Therefore: no /p:OctoPublishCatalog and no
+#     /p:OctoPrivateGitHubApiKey on the build step.
+#   - No push-nuget — operator publishes no Meshmakers.Octo.* NuGets.
+#   - Unit tests only (TUnit) — no integration tests, no Docker
+#     diagnostics step.
+#
+# Why tpl-v0.4.2: matches octo-communication-controller-services and
+# octo-communication-sdk — the three repos on the Communication line
+# stay on the same template tag.
+
+name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
+
+resources:
+  repositories:
+    - repository: pipelineTemplates
+      type: github
+      name: meshmakers/octo-pipeline-templates
+      endpoint: meshmakers-access-token
+      ref: refs/tags/tpl-v0.4.2
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - dev/*
+      - test/*
+      - main
+  tags:
+    exclude:
+      - '*'
+
+variables:
+  - group: GitSSHGroup
+  - group: ApiKeys-mm-cloud
+  - group: OctoDefault
+  - name: solutionFile
+    value: 'Octo.CommunicationOperator.sln'
+  - name: artifactsFrameworkVersion
+    value: 'net10.0'
+  - name: buildConfiguration
+    value: 'Release'
+  - name: buildPlatform
+    value: 'Any CPU'
+  - name: isRelease
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+  - name: isMain
+    value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}
+  - name: isTest
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
+
+stages:
+  - stage: Build
+    jobs:
+      - job: linux
+        displayName: 'Build, test, push Docker image'
+        pool:
+          name: meshmakers-ci-agents
+        steps:
+          - template: templates/steps/update-build-number.yml@pipelineTemplates
+          - checkout: self
+            clean: true
+          - task: InstallSSHKey@0
+            displayName: 'Install SSH key'
+            inputs:
+              knownHostsEntry: '$(SSHKnownHosts)'
+              sshPublicKey: '$(SSHPublicKey)'
+              sshPassphrase: '$(SSHPassphrase)'
+              sshKeySecureFile: '$(SSHPrivateKeyFile)'
+          - template: templates/steps/set-version.yml@pipelineTemplates
+          - template: templates/steps/download-ca.yml@pipelineTemplates
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet packages'
+            inputs:
+              command: 'restore'
+              projects: '$(solutionFile)'
+              restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+              noCache: true
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: 'build'
+              projects: '$(solutionFile)'
+              arguments: '--no-restore --configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+              publishWebProjects: false
+              zipAfterPublish: false
+              modifyOutputPath: false
+          # Under .NET 10 SDK the legacy VSTest path is rejected and MTP requires
+          # the solution/project as a flag (`--solution`), not a positional. The
+          # ADO `command: 'test'` form passes the projects glob as positional and
+          # therefore fails with "Specifying a project for 'dotnet test' should be
+          # done via '--project'". `command: 'custom'` + `--solution` is the only
+          # working shape — same as the legacy yaml. See CLAUDE.md, "Microsoft.Testing.Platform notes".
+          - task: DotNetCoreCLI@2
+            displayName: 'Test'
+            inputs:
+              command: 'custom'
+              custom: 'test'
+              arguments: '--solution $(solutionFile) --no-build --configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) -- --report-trx --report-trx-filename test-results.trx'
+          - task: PublishTestResults@2
+            displayName: 'Publish Test Results'
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: 'VSTest'
+              testResultsFiles: '**/TestResults/test-results.trx'
+              testRunTitle: 'CI'
+              mergeTestResults: true
+              failTaskOnFailedTests: true
+          # Multi-arch docker build: arm64 for edge devices (Pi 5),
+          # amd64 for control-plane clusters. The repo's Dockerfile pins
+          # helm via HELM_VERSION build-arg and forwards TARGETARCH for
+          # the helm tarball download (see CLAUDE.md, "Docker image" section).
+          - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
+            parameters:
+              publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
+              privateRegistryName: $(DockerRegistryPrivateUri)
+              repository: meshmakers/octo-communication-operator
+              dockerfile: src/CommunicationOperator/Dockerfile
+              platforms: 'linux/arm64,linux/amd64'
+              enableMainLatestTag: true
+          - template: templates/steps/handle-artifacts.yml@pipelineTemplates
