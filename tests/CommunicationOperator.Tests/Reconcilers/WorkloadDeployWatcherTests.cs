@@ -4,7 +4,6 @@ using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers;
 
@@ -153,16 +152,27 @@ internal class WorkloadDeployWatcherTests
     public async Task RunAsync_HubThrows_LoopContinues()
     {
         var (collector, hub) = BuildMocks("Pod foo waiting: ImagePullBackOff");
+        var publishAttempted = new TaskCompletionSource();
         hub.When(h => h.ReportWorkloadDeploymentProgressAsync(Arg.Any<WorkloadDeploymentProgressDto>()))
-            .Throw(new InvalidOperationException("hub blew up"));
+            .Do(_ =>
+            {
+                publishAttempted.TrySetResult();
+                throw new InvalidOperationException("hub blew up");
+            });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-
-        // Reaching the end without an unhandled exception is the assertion.
-        await WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
             NullLogger.Instance, cts.Token, pollInterval: TickInterval);
 
-        // Did at least attempt to publish.
+        // Synchronize on the first publish attempt rather than a fixed wall-clock
+        // budget — 150 ms was too tight on slower CI agents (same flake the
+        // sibling tests already fixed). Reaching the end without an unhandled
+        // exception is the real assertion; the Received() check below just
+        // confirms the loop got at least one publish call out.
+        await publishAttempted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+        await run;
+
         await hub.Received().ReportWorkloadDeploymentProgressAsync(
             Arg.Any<WorkloadDeploymentProgressDto>());
     }
