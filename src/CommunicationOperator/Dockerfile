@@ -13,7 +13,7 @@ RUN chmod 644 /usr/local/share/ca-certificates/nugetca.crt && update-ca-certific
 WORKDIR /operator
 
 COPY ./ ./
-RUN dotnet publish -c Release -o out -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} -p:OctoVersion=${OCTO_VERSION} -p:OctoCoreLibVersion=${OCTO_CORE_LIB_VERSION} -p:OctoCommVersion=${OCTO_COMM_VERSION}
+RUN dotnet publish -c Release -o out -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} ${OCTO_VERSION:+-p:OctoVersion=${OCTO_VERSION}} ${OCTO_CORE_LIB_VERSION:+-p:OctoCoreLibVersion=${OCTO_CORE_LIB_VERSION}} ${OCTO_COMM_VERSION:+-p:OctoCommVersion=${OCTO_COMM_VERSION}}
 
 # The runner for the application
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS final
