@@ -42,6 +42,16 @@ public class OperatorOptions
     public string CommunicationControllerUri { get; set; } = string.Empty;
 
     /// <summary>
+    /// Interval in seconds between retry attempts for pool registrations
+    /// that the controller rejected while the hub connection stayed alive
+    /// (e.g. a transient CkCache error during a parallel service startup).
+    /// Values &lt;= 0 disable the retry loop, leaving only the
+    /// reconnect-driven re-registration. Fractional values are allowed
+    /// (used by tests to drive the loop fast).
+    /// </summary>
+    public double PoolRegistrationRetrySeconds { get; set; } = 30;
+
+    /// <summary>
     /// Whether adapter pods should ignore certificate validation.
     /// </summary>
     public bool AdapterIgnoreCertificateValidation { get; set; }

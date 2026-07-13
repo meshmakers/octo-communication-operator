@@ -337,6 +337,41 @@ Either way, the workload-deploy path (`WorkloadDeployedAsync` → `WorkloadRecon
 
 The connection is auto-reconnecting via `OperatorHubClient`. Failures from the pool manager and workload reconciler are logged but **not propagated** so that one bad event cannot break the hub connection.
 
+### Pool-Registration Retry Loop (AB#4371)
+
+A pool registration the **controller rejects while the SignalR connection
+stays alive** used to be logged and forgotten: the reconnect callback is the
+only re-registration trigger, and it only fires when the connection drops.
+Observed on prod-1: all pods restarted together, the operator reconnected
+while the controller's CkCache was still importing tenant models,
+`RegisterPoolAsync` threw `CommunicationRepositoryException` once — and the
+pool stayed orphaned until the next pod restart. The controller then dropped
+every workload deploy/undeploy for that pool ("No operator currently owns
+pool ...", queued controller-side since AB#4371).
+
+`OperatorHubService.RetryPoolRegistrationLoopAsync` closes the gap:
+
+- Started once in `ExecuteAsync`, runs for the service lifetime, cadence
+  `OperatorOptions.PoolRegistrationRetrySeconds` (default 30, fractional
+  values allowed for tests, `<= 0` disables with a warning).
+- Each tick (only while `client.IsAlive`): registers every owned pool with
+  `IsRegistered == false`, flips the flag on success, and fires the per-pool
+  reverse-sync (`ReportDeployedPoolAsync`) so a drifted `DeploymentState` is
+  restored. Failures are logged and retried on the next tick.
+- The reconnect callback now calls `PoolService.ResetRegistrationState()`
+  **before** replaying registrations — a pool registered on a previous
+  connection that fails re-registration would otherwise keep a stale
+  `IsRegistered=true` and be invisible to the retry loop.
+
+Registration is idempotent on the controller (`RegisterPoolForConnection`
+is a set-add; the state write is guarded), so a retry racing a reconnect
+replay is harmless.
+
+Tests: `Services/OperatorHubServiceTests/RegistrationRetryTests` —
+rejected-on-connect recovers via retry, recovery fires the per-pool
+reverse-sync, connect callback resets registration state, `<= 0` disables
+the loop.
+
 ### Reverse-Sync on Reconnect
 
 After the operator has re-registered every owned `CommunicationPool` CR
@@ -420,6 +455,7 @@ Key options:
 | `AutoManagePools` | Enables auto-creating / -deleting `CommunicationPool` CRs in response to `PoolDeployedAsync` / `PoolUndeployedAsync` broadcasts from the controller. Central operator only. Edge operators leave this `false` — the SignalR connection itself runs in both modes (gated by `CommunicationControllerUri`), only the CR-management side effect is toggled. |
 | `WatchNamespace` | Restricts the CR watcher to a single namespace. When null/empty (default), the operator watches all namespaces cluster-wide. Required when running multiple operator instances on the same cluster (e.g. one per target controller on an edge device) so they don't race on the same CRs. Wired via `KubeOps.Abstractions.Builder.OperatorSettingsBuilder.WithNamespace()`. |
 | `CommunicationControllerUri` | SignalR endpoint of the Controller. Required in **both** central and edge modes for `OperatorHubService` to start. When empty, the hub service logs a warning and exits, and `IOperatorHubInvoker.RegisterPoolAsync` becomes a no-op (CR-reconcile finishes locally but the controller never sees the pool). |
+| `PoolRegistrationRetrySeconds` | Cadence of the pool-registration retry loop (see "Pool-Registration Retry Loop" above). Default 30; fractional values allowed; `<= 0` disables the loop. |
 | `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |
 | `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter/application pods |

@@ -200,6 +200,14 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         var onReconnect = async (bool isReconnect) =>
         {
             _logger.LogInformation("Registering operator with controller (reconnect: {IsReconnect})", isReconnect);
+
+            // Flip every owned pool to unregistered before replaying the
+            // registrations below. A pool that registered fine on a PREVIOUS
+            // connection but fails now would otherwise keep a stale
+            // IsRegistered=true and be invisible to the periodic retry loop.
+            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
+            poolService.ResetRegistrationState();
+
             // Declare our mode to the controller so it can validate that we
             // only register pools whose Environment matches it (central op
             // → Cloud, edge op → Edge). Without this declaration the
@@ -232,7 +240,6 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             // operator currently owns. On a fresh connect this is empty (CRs
             // arrive via PoolDeployedAsync afterwards), on a reconnect this
             // is what flips every pool back to Online.
-            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
             var ownedPools = poolService.GetPools().ToArray();
             foreach (var pool in ownedPools)
             {
@@ -244,8 +251,13 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 }
                 catch (Exception ex)
                 {
+                    // Leave IsRegistered=false (reset above) so the periodic
+                    // retry loop picks the pool up — the controller may have
+                    // rejected the call transiently (e.g. CkCache still
+                    // warming up during a parallel service startup, AB#4371).
                     _logger.LogWarning(ex,
-                        "Failed to re-register pool rtId {PoolRtId} for tenant '{TenantId}' on reconnect",
+                        "Failed to re-register pool rtId {PoolRtId} for tenant '{TenantId}' on reconnect; " +
+                        "the periodic registration retry will pick it up",
                         pool.Entity.Spec.PoolRtId, pool.Entity.Spec.TenantId);
                 }
             }
@@ -297,6 +309,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             }
         };
 
+        var registrationRetryTask = RetryPoolRegistrationLoopAsync(client, stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -320,6 +334,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             }
         }
 
+        await registrationRetryTask;
+
         try
         {
             await client.StopAsync();
@@ -327,6 +343,78 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error stopping operator hub client");
+        }
+    }
+
+    /// <summary>
+    /// Periodic self-heal for pool registrations that failed while the hub
+    /// connection stayed alive. The reconnect callback re-registers every
+    /// owned pool, but a registration the CONTROLLER rejects (e.g. a
+    /// transient CkCache error while its tenant models are still importing
+    /// during a parallel service startup) used to be logged and forgotten:
+    /// the connection never drops, so no reconnect fires, and the pool
+    /// stays orphaned — the controller then drops every workload
+    /// deploy/undeploy for it ("No operator currently owns pool ...").
+    /// Observed on prod-1, AB#4371. This loop retries every owned pool
+    /// that is not flagged <c>IsRegistered</c> while the connection is
+    /// alive; a recovered pool also gets the per-pool reverse-sync so a
+    /// drifted <c>DeploymentState</c> is restored.
+    /// </summary>
+    private async Task RetryPoolRegistrationLoopAsync(IOperatorHubClient client, CancellationToken stoppingToken)
+    {
+        if (_options.PoolRegistrationRetrySeconds <= 0)
+        {
+            _logger.LogWarning(
+                "PoolRegistrationRetrySeconds is {RetrySeconds}; pool-registration retry is disabled — " +
+                "a registration rejected by the controller will not be re-attempted until the next reconnect",
+                _options.PoolRegistrationRetrySeconds);
+            return;
+        }
+
+        var interval = TimeSpan.FromSeconds(_options.PoolRegistrationRetrySeconds);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(interval, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (!client.IsAlive)
+            {
+                // Connection is down: registration would no-op anyway and the
+                // reconnect callback re-registers everything once it's back.
+                continue;
+            }
+
+            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
+            foreach (var pool in poolService.GetPools().Where(p => !p.IsRegistered))
+            {
+                var tenantId = pool.Entity.Spec.TenantId;
+                var poolRtId = pool.Entity.Spec.PoolRtId;
+                try
+                {
+                    await client.RegisterPoolAsync(tenantId, poolRtId);
+                    pool.IsRegistered = true;
+                    _logger.LogInformation(
+                        "Recovered registration for pool rtId {PoolRtId} (tenant '{TenantId}') after an earlier failure",
+                        poolRtId, tenantId);
+                    // Same follow-up as PoolService.RegisterPoolAsync: restore a
+                    // DeploymentState that drifted while the pool was orphaned.
+                    // Gated internally to Cloud mode; best-effort by contract.
+                    await ReportDeployedPoolAsync(tenantId, poolRtId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Registration retry failed for pool rtId {PoolRtId} (tenant '{TenantId}'); " +
+                        "next attempt in {RetrySeconds}s",
+                        poolRtId, tenantId, _options.PoolRegistrationRetrySeconds);
+                }
+            }
         }
     }
 
