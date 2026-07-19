@@ -68,13 +68,37 @@ internal class WorkloadDeployWatcherTests
     [Test]
     public async Task RunAsync_RepeatedIdenticalDiagnostic_PublishedOnlyOnce()
     {
-        var (collector, hub) = BuildMocks("Pod foo waiting: ImagePullBackOff");
-        // Cancellation after several ticks would otherwise produce N reports;
-        // dedup must keep the count at exactly one.
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        var collector = Substitute.For<IWorkloadDiagnosticsCollector>();
+        var collectedEnough = new TaskCompletionSource();
+        var collectCount = 0;
+        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                // Feed the SAME snapshot several times so the dedup path is
+                // actually exercised (it must publish once, then suppress the
+                // repeats), then release the test.
+                if (Interlocked.Increment(ref collectCount) >= 3)
+                {
+                    collectedEnough.TrySetResult();
+                }
 
-        await WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
+                return "Pod foo waiting: ImagePullBackOff";
+            });
+        var hub = Substitute.For<IOperatorHubInvoker>();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = WorkloadDeployWatcher.RunAsync(collector, hub, Namespace, Release, Dto(),
             NullLogger.Instance, cts.Token, pollInterval: TickInterval);
+
+        // Wait until the loop has collected the identical diagnostic several
+        // times (dedup had multiple chances to wrongly re-publish), THEN cancel
+        // and assert. Replaces the flaky "cancel after a fixed 250 ms" pattern
+        // the sibling tests already moved off — on a slower CI agent the loop
+        // could produce zero (not one) publishes inside the fixed window, which
+        // is exactly how this test failed the first run of build 39521.
+        await collectedEnough.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+        await run;
 
         await hub.Received(1).ReportWorkloadDeploymentProgressAsync(
             Arg.Any<WorkloadDeploymentProgressDto>());
