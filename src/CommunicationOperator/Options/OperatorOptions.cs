@@ -210,4 +210,28 @@ public class IngressDefaultsOptions
     /// Null leaves the chart default in place.
     /// </summary>
     public bool? Tls { get; set; }
+
+    /// <summary>
+    /// Additional ingress annotations projected into every workload's
+    /// <c>ingress.annotations</c> (e.g. nginx proxy-body-size / timeouts).
+    /// Modeled as a list of name/value pairs because annotation keys contain
+    /// dots and slashes, which cannot appear in environment-variable names —
+    /// the chart binds entries as <c>OPERATOR__INGRESS__ANNOTATIONS__n__NAME</c> /
+    /// <c>__VALUE</c>. An entry named like the cluster-issuer annotation wins
+    /// over <see cref="ClusterIssuer"/>.
+    /// </summary>
+    public List<IngressAnnotationOption> Annotations { get; set; } = [];
+}
+
+/// <summary>
+/// A single ingress annotation name/value pair (see
+/// <see cref="IngressDefaultsOptions.Annotations"/>).
+/// </summary>
+public class IngressAnnotationOption
+{
+    /// <summary>Annotation key, e.g. <c>nginx.ingress.kubernetes.io/proxy-body-size</c>.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Annotation value, e.g. <c>25m</c>.</summary>
+    public string? Value { get; set; }
 }

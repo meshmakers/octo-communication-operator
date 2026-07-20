@@ -146,12 +146,23 @@ public static class WorkloadContextValuesBuilder
         // stays false) simply ignore these keys.
         if (!string.IsNullOrWhiteSpace(ingress.ClassName)) map["className"] = ingress.ClassName!;
         if (ingress.Tls.HasValue) map["tls"] = ingress.Tls.Value;
+
+        var annotations = new Dictionary<string, object>();
         if (!string.IsNullOrWhiteSpace(ingress.ClusterIssuer))
         {
-            map["annotations"] = new Dictionary<string, object>
+            annotations["cert-manager.io/cluster-issuer"] = ingress.ClusterIssuer!;
+        }
+        foreach (var annotation in ingress.Annotations)
+        {
+            if (string.IsNullOrWhiteSpace(annotation.Name) || string.IsNullOrWhiteSpace(annotation.Value))
             {
-                ["cert-manager.io/cluster-issuer"] = ingress.ClusterIssuer!,
-            };
+                continue;
+            }
+            annotations[annotation.Name!] = annotation.Value!;
+        }
+        if (annotations.Count > 0)
+        {
+            map["annotations"] = annotations;
         }
         return map;
     }

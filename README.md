@@ -32,6 +32,7 @@ The operator can be configured via environment variables:
 | `OPERATOR__INGRESS__CLASSNAME` | Ingress class projected into workload `ingress.className`. | _(none)_ |
 | `OPERATOR__INGRESS__CLUSTERISSUER` | cert-manager ClusterIssuer projected into workload `ingress.annotations["cert-manager.io/cluster-issuer"]`. | _(none)_ |
 | `OPERATOR__INGRESS__TLS` | TLS flag projected into workload `ingress.tls`. Leave unset to keep the chart default. | _(unset)_ |
+| `OPERATOR__INGRESS__ANNOTATIONS__<n>__NAME` / `__VALUE` | Additional ingress annotations projected into workload `ingress.annotations` (indexed name/value pairs because annotation keys contain dots/slashes, e.g. `nginx.ingress.kubernetes.io/proxy-body-size`). An entry named like the cluster-issuer annotation overrides `OPERATOR__INGRESS__CLUSTERISSUER`. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__MONGODBUSERPASSWORD` | MongoDB user password injected as secret-flagged override `secrets.databaseUser` when the workload's `ReceivesClusterSecrets` flag is true. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__MONGODBADMINPASSWORD` | MongoDB admin password injected as `secrets.databaseAdmin` when the flag is true. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__STREAMDATAPASSWORD` | CrateDB password injected as `secrets.streamDataPassword` when the flag is true. | _(none)_ |

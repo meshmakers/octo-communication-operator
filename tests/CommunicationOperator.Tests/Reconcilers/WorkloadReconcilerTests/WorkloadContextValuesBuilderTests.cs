@@ -99,6 +99,57 @@ internal class WorkloadContextValuesBuilderTests
     }
 
     [Test]
+    public async Task Build_IngressExtraAnnotations_MergedWithClusterIssuer()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            Ingress = new IngressDefaultsOptions
+            {
+                ClusterIssuer = "mm-cloud-issuer",
+                Annotations =
+                [
+                    new IngressAnnotationOption
+                    {
+                        Name = "nginx.ingress.kubernetes.io/proxy-body-size",
+                        Value = "25m",
+                    },
+                    new IngressAnnotationOption { Name = "  ", Value = "ignored" },
+                    new IngressAnnotationOption { Name = "no-value", Value = null },
+                ],
+            },
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"cert-manager.io/cluster-issuer\": \"mm-cloud-issuer\"");
+        await Assert.That(yaml!).Contains("\"nginx.ingress.kubernetes.io/proxy-body-size\": \"25m\"");
+        await Assert.That(yaml!).DoesNotContain("ignored");
+        await Assert.That(yaml!).DoesNotContain("no-value");
+    }
+
+    [Test]
+    public async Task Build_IngressAnnotationsWithoutClusterIssuer_EmitsAnnotations()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            Ingress = new IngressDefaultsOptions
+            {
+                Annotations =
+                [
+                    new IngressAnnotationOption
+                    {
+                        Name = "nginx.ingress.kubernetes.io/proxy-body-size",
+                        Value = "25m",
+                    },
+                ],
+            },
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"nginx.ingress.kubernetes.io/proxy-body-size\": \"25m\"");
+        await Assert.That(yaml!).DoesNotContain("cert-manager.io/cluster-issuer");
+    }
+
+    [Test]
     public async Task Build_NullTls_DoesNotEmitTlsKey()
     {
         var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
