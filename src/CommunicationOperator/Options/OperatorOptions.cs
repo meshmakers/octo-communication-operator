@@ -82,6 +82,27 @@ public class OperatorOptions
     public string? BrokerPassword { get; set; }
 
     /// <summary>
+    /// PEM-encoded root CA certificate (chain) the operator's own pod was
+    /// given via the chart's <c>secrets.rootCa</c> value (see the
+    /// operator chart's <c>{fullname}-ca</c> Secret, forwarded here as an
+    /// environment variable backed by a <c>secretKeyRef</c>). Set only on
+    /// clusters whose ingress/controller endpoint uses a private CA (e.g.
+    /// the local kind getting-started quickstart). When set, the operator
+    /// injects this same PEM as <c>secrets.rootCa</c> into every deployed
+    /// workload's Helm values — unconditionally, like
+    /// <see cref="BrokerPassword"/> — because a workload that talks TLS to
+    /// the Communication Controller needs the same trust anchor the
+    /// operator itself was given, regardless of whether it also opts into
+    /// <c>ReceivesClusterSecrets</c>. Unlike <see cref="BrokerPassword"/>,
+    /// the value is injected as a plain string, not a secret-flagged
+    /// override: the workload chart's own <c>secrets.rootCa</c> handling
+    /// (its <c>{fullname}-ca</c> Secret template) <c>b64enc</c>s the value
+    /// directly and requires a literal string, not a
+    /// <c>valueFrom.secretKeyRef</c> map.
+    /// </summary>
+    public string? RootCaCertificate { get; set; }
+
+    /// <summary>
     /// Instance prefix for the OctoMesh installation.
     /// </summary>
     public string? InstancePrefix { get; set; }
