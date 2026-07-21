@@ -356,16 +356,26 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
     /// <summary>
     /// Returns the workload's existing overrides plus any cluster-credential
-    /// overrides the operator can supply, when the workload opted in. Each
-    /// injected entry is marked <c>IsSecret = true</c> so it flows through
-    /// the per-release Kubernetes Secret rather than appearing as a plain
-    /// value in the rendered manifest. Entries the operator does not have
-    /// a value for are skipped silently.
+    /// overrides the operator can supply, in three tiers. The broker
+    /// password (<c>secrets.rabbitmq</c>) is injected unconditionally —
+    /// every adapter needs the controller command bus. The root CA
+    /// (<c>secrets.rootCa</c>) is likewise injected unconditionally whenever
+    /// configured — every workload needs the same TLS trust anchor to reach
+    /// the Communication Controller — but unlike every other entry here it
+    /// is not secret-flagged, since the workload chart's own
+    /// <c>secrets.rootCa</c> template requires a literal string to
+    /// <c>b64enc</c> directly (see below). The data-store credentials
+    /// (Mongo / CrateDB) are gated on the workload's
+    /// <c>ReceivesClusterSecrets</c> opt-in and marked
+    /// <c>IsSecret = true</c> so they flow through the per-release
+    /// Kubernetes Secret rather than appearing as a plain value in the
+    /// rendered manifest. Entries the operator does not have a value for
+    /// are skipped silently.
     /// </summary>
     internal static IReadOnlyList<ValueOverrideDto> AppendClusterSecrets(
         IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets, OperatorOptions options)
     {
-        var injected = new List<ValueOverrideDto>(4);
+        var injected = new List<ValueOverrideDto>(5);
 
         // The RabbitMQ broker password is part of the basic controller↔adapter
         // contract — every adapter needs the command bus, regardless of whether
@@ -379,6 +389,21 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         if (!string.IsNullOrEmpty(options.BrokerPassword))
         {
             injected.Add(new ValueOverrideDto { Path = "secrets.rabbitmq", Value = options.BrokerPassword, IsSecret = true });
+        }
+
+        // The root CA the operator itself was given trusts the same
+        // private-CA cluster the workload's TLS connection to the
+        // Communication Controller needs to validate. Same unconditional
+        // gate as BrokerPassword — a workload with ReceivesClusterSecrets
+        // false (e.g. the simulation adapter) still talks TLS to the
+        // controller and would otherwise fail the handshake and never
+        // register. Not secret-flagged: the workload chart's own
+        // `secrets.rootCa` template (its `{fullname}-ca` Secret) `b64enc`s
+        // `.Values.secrets.rootCa` directly and requires a plain string —
+        // a `valueFrom.secretKeyRef` map there would break chart rendering.
+        if (!string.IsNullOrEmpty(options.RootCaCertificate))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.rootCa", Value = options.RootCaCertificate, IsSecret = false });
         }
 
         // Data-store credentials (Mongo / CrateDB) only matter for adapters

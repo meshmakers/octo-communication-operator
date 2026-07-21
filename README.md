@@ -22,6 +22,7 @@ The operator can be configured via environment variables:
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
 | `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |
 | `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
+| `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see AB#4417 below. | _(none)_ |
 | `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__MONGODBHOST` | MongoDB connection string projected into workload `clusterDependencies.mongodbHost`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__MONGODBREPLICASET` | MongoDB replica-set name projected into workload `clusterDependencies.mongodbReplicaSet`. | _(none)_ |
@@ -39,7 +40,9 @@ The operator can be configured via environment variables:
 
 The cluster-dependency, reporting-URI and ingress fields are all optional. Each value that is set is injected into every deployed workload's Helm values as the **lowest** precedence layer — the workload's own `ValuesYaml` and structured overrides win over it. Edge operators typically leave the cloud-side dependency hosts empty so per-workload values supply edge-local equivalents.
 
-The `ClusterSecrets.*` settings (plus the existing `BrokerPassword`) are different: they are injected only when the workload itself opts in via the `ReceivesClusterSecrets` flag on its CK Adapter entity. They appear in the rendered manifest as `valueFrom.secretKeyRef` envelopes pointing at the per-release operator-managed Secret (`{release}-octo-secrets`), not as plain values. The adapter chart's `secrets.*` paths must accept both plaintext strings (legacy) and `valueFrom` maps — see the `octo-mesh.secretEnv` helper in `octo-mesh-adapter` / `octo-eda-adapter` chart templates.
+The `ClusterSecrets.*` settings are different: they are injected only when the workload itself opts in via the `ReceivesClusterSecrets` flag on its CK Adapter entity. They appear in the rendered manifest as `valueFrom.secretKeyRef` envelopes pointing at the per-release operator-managed Secret (`{release}-octo-secrets`), not as plain values. The adapter chart's `secrets.*` paths must accept both plaintext strings (legacy) and `valueFrom` maps — see the `octo-mesh.secretEnv` helper in `octo-mesh-adapter` / `octo-eda-adapter` chart templates.
+
+`BrokerPassword` and `RootCaCertificate` are injected unconditionally instead — independent of `ReceivesClusterSecrets` — because every workload needs the controller command bus and, on private-CA clusters, the same TLS trust anchor the operator itself was given (AB#4417). `BrokerPassword` still renders as a `valueFrom.secretKeyRef` envelope like the gated secrets above; `RootCaCertificate` is the one exception that renders as a plain string at `secrets.rootCa` — the workload chart's own root-CA handling `b64enc`s the value directly and requires a literal, not a `valueFrom` map.
 
 For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
 

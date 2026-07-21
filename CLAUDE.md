@@ -108,7 +108,7 @@ the `WorkloadReconciler` over the `helm` CLI.
   to Helm's 53-char limit.
 
   Before the override builder runs, the reconciler also calls
-  `AppendClusterSecrets`. Two tiers:
+  `AppendClusterSecrets`. Three tiers:
 
   1. **`secrets.rabbitmq`** (from `BrokerPassword`) — injected
      **unconditionally** whenever `BrokerPassword` is set. RabbitMQ is
@@ -118,7 +118,29 @@ the `WorkloadReconciler` over the `helm` CLI.
      (Modbus / Loxone) fail the chart's mandatory `secrets.rabbitmq`
      check even though they have no business with Mongo or CrateDB.
 
-  2. **Data-store secrets** (`secrets.databaseUser`,
+  2. **`secrets.rootCa`** (from `RootCaCertificate`, AB#4417) — injected
+     **unconditionally** whenever `RootCaCertificate` is set, same gate
+     as `BrokerPassword`. On clusters whose ingress/controller endpoint
+     uses a private CA (e.g. the local kind getting-started quickstart),
+     the operator pod itself trusts the CA via the chart's
+     `secrets.rootCa` value, but a workload with
+     `ReceivesClusterSecrets=false` (e.g. the simulation adapter) still
+     opens a TLS connection to the Communication Controller and needs
+     the same trust anchor or the handshake fails and the workload never
+     registers. Unlike every other entry here, this one is **not**
+     secret-flagged (`IsSecret = false`) — the workload chart's own
+     `secrets.rootCa` handling (`templates/secret.yaml` +
+     `templates/deployment.yaml`, mirroring the operator chart's own
+     trust-splice init container) `b64enc`s `.Values.secrets.rootCa`
+     directly and requires a plain string; a `valueFrom.secretKeyRef` map
+     there would break chart rendering. `RootCaCertificate` itself
+     reaches the operator process the same way `BrokerPassword` does — a
+     `secretKeyRef`-backed environment variable (`OPERATOR__ROOTCACERTIFICATE`)
+     sourced from the operator chart's own `{fullname}-ca` Secret (the
+     same Secret that already backs the operator's own trust-splice init
+     container).
+
+  3. **Data-store secrets** (`secrets.databaseUser`,
      `secrets.databaseAdmin`, `secrets.streamDataPassword` from
      `ClusterSecrets.*`) — only injected when the workload's
      `WorkloadDeployedDto.ReceivesClusterSecrets` flag is true (set by
@@ -129,13 +151,15 @@ the `WorkloadReconciler` over the `helm` CLI.
      blocks entirely (see `octo-plug-modbus`, `octo-adapter-loxone`).
 
   Injected entries are prepended so any entity-supplied override on the
-  same path still wins. The values then flow through the normal
-  secret-flagged pipeline: materialised into `{release}-octo-secrets`,
-  referenced from the chart via `valueFrom.secretKeyRef`. Each adapter
-  chart's `secrets.*` block must accept both plaintext strings (legacy)
-  and `valueFrom` maps for this contract to work; see `octo-mesh-adapter`
-  / `octo-eda-adapter` chart `templates/_helpers.tpl`
-  (`octo-mesh.secretEnv`).
+  same path still wins. Secret-flagged values then flow through the
+  normal secret-flagged pipeline: materialised into
+  `{release}-octo-secrets`, referenced from the chart via
+  `valueFrom.secretKeyRef`. Each adapter chart's `secrets.*` block must
+  accept both plaintext strings (legacy) and `valueFrom` maps for this
+  contract to work; see `octo-mesh-adapter` / `octo-eda-adapter` chart
+  `templates/_helpers.tpl` (`octo-mesh.secretEnv`). `secrets.rootCa` is
+  the one exception: it is never secret-flagged, so it always renders as
+  a plain literal in `values-overrides.yaml`.
 
 ### Pre-flight + Diagnostics
 
@@ -466,6 +490,7 @@ Key options:
 | `ClusterDependencies.MongodbHost` / `MongodbReplicaSet` / `RabbitMqHost` / `RabbitMqUser` / `StreamDataHost` / `StreamDataUser` | Cluster-internal service endpoints projected into each workload's `clusterDependencies.*` values. All optional — edge operators leave them empty and let per-workload `ValuesYaml` supply local equivalents. |
 | `Ingress.ClassName` / `ClusterIssuer` / `Tls` / `Annotations` | Cluster-wide ingress defaults projected into each workload's `ingress.*` values. `ClusterIssuer` is rendered into the `cert-manager.io/cluster-issuer` annotation. `Annotations` is a list of name/value pairs (env-bindable as `OPERATOR__INGRESS__ANNOTATIONS__<n>__NAME/__VALUE` because annotation keys contain dots/slashes) merged into `ingress.annotations`; an entry with the cluster-issuer key wins over `ClusterIssuer`. Per-workload public-ingress opt-in (`ingress.enabled=true` + top-level `publicUri`) comes from the workload's typed `IngressEnabled` / `Hostname` attributes via `WorkloadDeployedDto`; the cluster-wide defaults here are not overridable per workload. |
 | `ClusterSecrets.MongodbUserPassword` / `MongodbAdminPassword` / `StreamDataPassword` | Data-store credentials the operator injects as secret-flagged value overrides when the workload's `ReceivesClusterSecrets` opt-in is true. The RabbitMQ password is NOT here — it stays on `BrokerPassword` and is injected unconditionally because every adapter needs the broker. Each field is optional — unset values are skipped. Operator chart wires these from a per-release Kubernetes Secret. |
+| `RootCaCertificate` | PEM-encoded root CA (chain) the operator's own pod was given via the chart's `secrets.rootCa` value, forwarded here as a `secretKeyRef`-backed env var (`OPERATOR__ROOTCACERTIFICATE`). When set, injected into every workload's Helm values as `secrets.rootCa` — unconditionally, like `BrokerPassword`, and **not** secret-flagged (plain string; the workload chart's own `secrets.rootCa` template requires a literal to `b64enc`). AB#4417. |
 
 ## Build & Test
 
