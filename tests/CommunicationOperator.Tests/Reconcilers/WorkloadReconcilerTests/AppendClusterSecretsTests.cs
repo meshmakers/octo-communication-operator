@@ -144,15 +144,22 @@ internal class AppendClusterSecretsTests
     [Test]
     public async Task RootCaSet_ReceivesClusterSecretsTrue_InjectsRootCaAlongsideGatedSecrets()
     {
-        var opts = new OperatorOptions { RootCaCertificate = "ca-pem-content" };
+        var opts = FullClusterOptions();
+        opts.RootCaCertificate = "ca-pem-content";
 
         var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
 
         var paths = result.Select(e => e.Path).ToArray();
         await Assert.That(paths).Contains("secrets.rootCa");
+        await Assert.That(paths).Contains("secrets.databaseUser");
+
         var rootCaEntry = result.Single(e => e.Path == "secrets.rootCa");
         await Assert.That(rootCaEntry.IsSecret).IsFalse();
         await Assert.That(rootCaEntry.Value).IsEqualTo("ca-pem-content");
+
+        var mongoEntry = result.Single(e => e.Path == "secrets.databaseUser");
+        await Assert.That(mongoEntry.IsSecret).IsTrue();
+        await Assert.That(mongoEntry.Value).IsEqualTo("mongo-user-pwd");
     }
 
     [Test]
