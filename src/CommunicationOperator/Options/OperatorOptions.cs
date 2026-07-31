@@ -132,6 +132,15 @@ public class OperatorOptions
     public string? ReportingServiceUri { get; set; }
 
     /// <summary>
+    /// Public URI of the identity service that issues the access tokens accepted
+    /// by secured workload endpoints. When set, the operator injects this into
+    /// each workload's Helm values as <c>authUri</c>. Adapters need it to
+    /// validate bearer tokens on secured trigger routes, such as
+    /// <c>FromHttpRequest@2</c>; without it such a route rejects every caller.
+    /// </summary>
+    public string? AuthUri { get; set; }
+
+    /// <summary>
     /// Private container registry the cluster uses to pull workload images
     /// (e.g. <c>docker.mm.cloud</c>). When set, the operator projects this
     /// into each workload's Helm values as <c>image.privateRegistry</c>, so

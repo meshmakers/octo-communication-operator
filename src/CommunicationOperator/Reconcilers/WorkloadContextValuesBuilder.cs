@@ -71,6 +71,11 @@ public static class WorkloadContextValuesBuilder
             root["reportingServiceUri"] = options.ReportingServiceUri!;
         }
 
+        if (!string.IsNullOrWhiteSpace(options.AuthUri))
+        {
+            root["authUri"] = options.AuthUri!;
+        }
+
         if (!string.IsNullOrWhiteSpace(options.ImageRegistry))
         {
             // Adapter / application charts read `.Values.image.privateRegistry`

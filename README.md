@@ -24,6 +24,7 @@ The operator can be configured via environment variables:
 | `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
 | `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see AB#4417 below. | _(none)_ |
 | `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
+| `OPERATOR__AUTHURI` | Public URI of the identity service issuing access tokens. Projected into each workload's Helm values as `authUri`. Required for adapters hosting secured trigger routes such as `FromHttpRequest@2` — without it the adapter falls back to its localhost default and rejects every caller. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__MONGODBHOST` | MongoDB connection string projected into workload `clusterDependencies.mongodbHost`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__MONGODBREPLICASET` | MongoDB replica-set name projected into workload `clusterDependencies.mongodbReplicaSet`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__RABBITMQHOST` | RabbitMQ host projected into workload `clusterDependencies.rabbitMqHost`. | _(none)_ |
