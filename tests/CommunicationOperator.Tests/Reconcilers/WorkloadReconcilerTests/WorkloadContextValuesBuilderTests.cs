@@ -239,6 +239,34 @@ internal class WorkloadContextValuesBuilderTests
     }
 
     [Test]
+    public async Task Build_AuthUri_EmitsTopLevelKey()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            AuthUri = "https://connect.test-2.mm.cloud",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"authUri\": \"https://connect.test-2.mm.cloud\"");
+    }
+
+    // An emitted empty value is worse than an absent key: the adapter chart would render
+    // OCTO_ADAPTER__AUTHORITYURL as an empty string, which overrides the default compiled
+    // into the adapter instead of leaving it in place.
+    [Test]
+    public async Task Build_AuthUriNotConfigured_OmitsTheKey()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            ReportingServiceUri = "http://octo-reporting.octo.svc.cluster.local",
+            AuthUri = "   ",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("authUri");
+    }
+
+    [Test]
     public async Task Build_WorkloadIngressEnabledWithHostname_EmitsEnabledAndPublicUri()
     {
         // Happy path: workload opts in + supplies a hostname. Operator emits
