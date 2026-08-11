@@ -132,6 +132,17 @@ public class OperatorOptions
     public string? ReportingServiceUri { get; set; }
 
     /// <summary>
+    /// Public URI of the identity service issuing the access tokens that
+    /// secured trigger nodes accept. When set, the operator injects this into
+    /// each workload's Helm values as <c>authUri</c>. This must be the public
+    /// issuer address rather than a cluster-internal service name: the adapter
+    /// uses it as the expected issuer of the token, not merely as an address to
+    /// fetch signing keys from. Leave empty in clusters whose workloads expose
+    /// no secured routes.
+    /// </summary>
+    public string? AuthUri { get; set; }
+
+    /// <summary>
     /// Private container registry the cluster uses to pull workload images
     /// (e.g. <c>docker.mm.cloud</c>). When set, the operator projects this
     /// into each workload's Helm values as <c>image.privateRegistry</c>, so
