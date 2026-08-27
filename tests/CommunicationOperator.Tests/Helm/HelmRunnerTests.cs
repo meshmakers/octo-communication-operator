@@ -216,4 +216,58 @@ internal class HelmRunnerTests
         await Assert.That(async () => await _runner.UninstallAsync("r", "n", CancellationToken.None))
             .Throws<HelmException>();
     }
+
+    [Test]
+    public async Task GetLatestReleaseRevisionAsync_BuildsHistoryArgs_AndParsesNewestEntry()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(0,
+                """[{"revision":10,"status":"superseded"},{"revision":11,"status":"pending-upgrade"}]""",
+                string.Empty));
+
+        var latest = await _runner.GetLatestReleaseRevisionAsync("acme-app", "octo", CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a =>
+                a.SequenceEqual(new[]
+                {
+                    "history", "acme-app", "--namespace", "octo", "-o", "json", "--max", "1",
+                })),
+            Arg.Any<CancellationToken>());
+        await Assert.That(latest).IsNotNull();
+        await Assert.That(latest!.Revision).IsEqualTo(11);
+        await Assert.That(latest.IsPending).IsTrue();
+    }
+
+    [Test]
+    public async Task GetLatestReleaseRevisionAsync_ReleaseNotFound_ReturnsNull()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(1, string.Empty, "Error: release: not found"));
+
+        var latest = await _runner.GetLatestReleaseRevisionAsync("nope", "octo", CancellationToken.None);
+
+        await Assert.That(latest).IsNull();
+    }
+
+    [Test]
+    public async Task GetLatestReleaseRevisionAsync_UnparsableOutput_ReturnsNull()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(0, "WARNING: not json", string.Empty));
+
+        var latest = await _runner.GetLatestReleaseRevisionAsync("acme-app", "octo", CancellationToken.None);
+
+        await Assert.That(latest).IsNull();
+    }
+
+    [Test]
+    public async Task HelmReleaseRevision_IsPending_MatchesOnlyPendingStates()
+    {
+        await Assert.That(new HelmReleaseRevision(1, "pending-install").IsPending).IsTrue();
+        await Assert.That(new HelmReleaseRevision(2, "pending-upgrade").IsPending).IsTrue();
+        await Assert.That(new HelmReleaseRevision(3, "pending-rollback").IsPending).IsTrue();
+        await Assert.That(new HelmReleaseRevision(4, "deployed").IsPending).IsFalse();
+        await Assert.That(new HelmReleaseRevision(5, "failed").IsPending).IsFalse();
+    }
 }

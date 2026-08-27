@@ -58,4 +58,19 @@ public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGa
 
     public Task DeleteSecretAsync(string @namespace, string name, CancellationToken cancellationToken = default) =>
         _kubernetesClient.CoreV1.DeleteNamespacedSecretAsync(name, @namespace, cancellationToken: cancellationToken);
+
+    public async Task<DateTime?> GetSecretCreationTimestampAsync(string @namespace, string name,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var secret = await _kubernetesClient.CoreV1.ReadNamespacedSecretAsync(name, @namespace,
+                cancellationToken: cancellationToken);
+            return secret.Metadata?.CreationTimestamp;
+        }
+        catch (HttpOperationException ex) when (ex.Response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
 }

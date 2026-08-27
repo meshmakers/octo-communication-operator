@@ -22,4 +22,12 @@ public interface ICommunicationPoolKubernetesGateway
     Task CreateSecretAsync(string @namespace, V1Secret secret, CancellationToken cancellationToken = default);
 
     Task DeleteSecretAsync(string @namespace, string name, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the creation timestamp of the secret, or <c>null</c> when it does not exist.
+    /// Used by the helm stale-lock recovery (AB#4894) to judge whether a <c>pending-*</c>
+    /// release secret belongs to a live helm run or to one killed mid-upgrade.
+    /// </summary>
+    Task<DateTime?> GetSecretCreationTimestampAsync(string @namespace, string name,
+        CancellationToken cancellationToken = default);
 }

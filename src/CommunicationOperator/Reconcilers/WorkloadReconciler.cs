@@ -26,6 +26,12 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// being acknowledged would race with the in-flight rollback.</summary>
     internal static readonly TimeSpan CancelGracePeriod = TimeSpan.FromSeconds(2);
 
+    /// <summary>How old a <c>pending-*</c> release revision must be before its lock is treated
+    /// as an orphan and cleared (AB#4894). Must comfortably exceed helm's atomic timeout
+    /// (default 5 min) so a legitimately running upgrade — e.g. on the outgoing pod during a
+    /// rolling operator upgrade — is never robbed of its lock.</summary>
+    internal static TimeSpan StaleHelmLockThreshold { get; set; } = TimeSpan.FromMinutes(10);
+
     private readonly IHelmRunner _helm;
     private readonly ICommunicationPoolKubernetesGateway _gateway;
     private readonly IWorkloadDiagnosticsCollector _diagnostics;
@@ -146,6 +152,15 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 var chartRef = $"{alias}/{workload.ChartName}";
                 var setValues = new Dictionary<string, string>();
 
+                // AB#4894: a helm process killed mid-upgrade (e.g. the operator
+                // pod was replaced by a rollout while a deploy was in flight)
+                // leaves the newest release revision in a pending-* status. That
+                // lock blocks every later install/upgrade/rollback with "another
+                // operation is in progress" and never clears itself — the only
+                // remedy used to be a manual Undeploy→Deploy cycle. Clear a
+                // provably stale lock before the pre-flight runs.
+                await TryClearStaleHelmLockAsync(release, ns, deployToken);
+
                 // Pre-flight: helm upgrade --install --dry-run=server submits the
                 // rendered manifests to the apiserver with dryRun=All. This
                 // catches schema errors, admission-webhook rejections, RBAC
@@ -247,6 +262,56 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             }
 
             _inFlightDeploys.TryRemove(release, out _);
+        }
+    }
+
+    /// <summary>
+    /// Clears an orphaned helm <c>pending-*</c> lock before a deploy (AB#4894). Best effort —
+    /// any failure is logged and the deploy proceeds (and then fails on the lock exactly as it
+    /// would have without this recovery). The lock is only cleared when the pending release
+    /// secret is older than <see cref="StaleHelmLockThreshold"/>: this operator runs its deploy
+    /// queue serially, so the only legitimate concurrent helm run is on the outgoing pod during
+    /// a rolling upgrade — and that one either finishes or dies well within the threshold.
+    /// </summary>
+    private async Task TryClearStaleHelmLockAsync(string release, string ns, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var latest = await _helm.GetLatestReleaseRevisionAsync(release, ns, cancellationToken);
+            if (latest is not { IsPending: true })
+            {
+                return;
+            }
+
+            var lockSecret = $"sh.helm.release.v1.{release}.v{latest.Revision}";
+            var createdAt = await _gateway.GetSecretCreationTimestampAsync(ns, lockSecret, cancellationToken);
+            if (createdAt == null)
+            {
+                return;
+            }
+
+            var age = DateTime.UtcNow - createdAt.Value.ToUniversalTime();
+            if (age < StaleHelmLockThreshold)
+            {
+                _logger.LogInformation(
+                    "Release '{Release}' revision {Revision} is {Status} but only {AgeMinutes:F1} min old — assuming a live helm run, not touching the lock",
+                    release, latest.Revision, latest.Status, age.TotalMinutes);
+                return;
+            }
+
+            _logger.LogWarning(
+                "Release '{Release}' revision {Revision} is stuck in {Status} for {AgeMinutes:F0} min (orphaned helm lock, AB#4894) — deleting release secret '{Secret}' to unblock the deploy",
+                release, latest.Revision, latest.Status, age.TotalMinutes, lockSecret);
+            await _gateway.DeleteSecretAsync(ns, lockSecret, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e,
+                "Stale-lock check for release '{Release}' failed — proceeding with the deploy", release);
         }
     }
 

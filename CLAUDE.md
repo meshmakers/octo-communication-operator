@@ -161,6 +161,30 @@ the `WorkloadReconciler` over the `helm` CLI.
   the one exception: it is never secret-flagged, so it always renders as
   a plain literal in `values-overrides.yaml`.
 
+### Stale Helm-Lock Recovery (AB#4894)
+
+A helm process killed mid-upgrade — e.g. the operator pod replaced by a rollout while a deploy
+was in flight — leaves the release's newest revision in a `pending-*` status. That lock blocks
+every later install/upgrade/rollback with "another operation is in progress" and never clears
+itself; the only remedy used to be a manual Undeploy→Deploy cycle (observed live on
+prod-1/energyiq, 2026-08-26). Before the pre-flight, `WorkloadReconciler.DeployAsync` calls
+`TryClearStaleHelmLockAsync`:
+
+1. `IHelmRunner.GetLatestReleaseRevisionAsync` (`helm history {release} -o json --max 1`;
+   `null` when the release does not exist).
+2. Only when the newest revision `IsPending`: read the creation timestamp of the release
+   secret `sh.helm.release.v1.{release}.v{rev}` via
+   `ICommunicationPoolKubernetesGateway.GetSecretCreationTimestampAsync`.
+3. Only when the secret is older than `WorkloadReconciler.StaleHelmLockThreshold` (default
+   10 min — comfortably above helm's 5-min atomic timeout, so a live run on the outgoing pod
+   of a rolling operator upgrade is never robbed of its lock): delete the secret and log a
+   warning. Everything is best effort — any failure logs and lets the deploy proceed (and fail
+   on the lock exactly as before).
+
+Tests: `Reconcilers/WorkloadReconcilerTests/StaleHelmLockTests` (stale lock cleared before the
+dry-run, fresh pending lock untouched, healthy release never inspected, history failure never
+blocks the deploy) and the history/parse cases in `Helm/HelmRunnerTests`.
+
 ### Pre-flight + Diagnostics
 
 `helm upgrade --install --atomic` collapses every failure into one

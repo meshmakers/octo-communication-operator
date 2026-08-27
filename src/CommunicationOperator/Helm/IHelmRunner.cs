@@ -54,4 +54,24 @@ public interface IHelmRunner
     /// as success.
     /// </summary>
     Task UninstallAsync(string release, string @namespace, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the newest revision of the release via <c>helm history {release} -o json --max 1</c>,
+    /// or <c>null</c> when the release does not exist (or the history cannot be read). Used by the
+    /// stale-lock recovery (AB#4894): a helm process killed mid-upgrade (operator pod replacement)
+    /// leaves the newest revision in a <c>pending-*</c> status that blocks every later
+    /// install/upgrade/rollback with "another operation is in progress".
+    /// </summary>
+    Task<HelmReleaseRevision?> GetLatestReleaseRevisionAsync(string release, string @namespace,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// One entry of <c>helm history</c>: the revision number and its status
+/// (e.g. <c>deployed</c>, <c>superseded</c>, <c>pending-install</c>, <c>pending-upgrade</c>).
+/// </summary>
+public sealed record HelmReleaseRevision(int Revision, string Status)
+{
+    /// <summary>Whether the revision is stuck in one of helm's <c>pending-*</c> states.</summary>
+    public bool IsPending => Status.StartsWith("pending-", StringComparison.OrdinalIgnoreCase);
 }

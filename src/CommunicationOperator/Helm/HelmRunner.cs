@@ -144,6 +144,59 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
             release, @namespace);
     }
 
+    public async Task<HelmReleaseRevision?> GetLatestReleaseRevisionAsync(string release, string @namespace,
+        CancellationToken cancellationToken)
+    {
+        var args = new List<string>
+        {
+            "history", release,
+            "--namespace", @namespace,
+            "-o", "json",
+            "--max", "1",
+        };
+
+        var result = await invoker.InvokeAsync(args, cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            // "release: not found" is the common case (fresh install) — not an error for callers.
+            logger.LogDebug("helm history for release '{Release}' returned exit code {ExitCode}: {StdErr}",
+                release, result.ExitCode, result.StdErr);
+            return null;
+        }
+
+        return ParseLatestRevision(result.StdOut, release);
+    }
+
+    /// <summary>
+    /// Parses the <c>helm history -o json</c> output (a JSON array of revision entries) and
+    /// returns the newest one. Internal so the parsing contract is unit-testable without a
+    /// helm binary.
+    /// </summary>
+    internal HelmReleaseRevision? ParseLatestRevision(string historyJson, string release)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(historyJson);
+            HelmReleaseRevision? latest = null;
+            foreach (var entry in doc.RootElement.EnumerateArray())
+            {
+                var revision = entry.GetProperty("revision").GetInt32();
+                var status = entry.GetProperty("status").GetString() ?? string.Empty;
+                if (latest == null || revision > latest.Revision)
+                {
+                    latest = new HelmReleaseRevision(revision, status);
+                }
+            }
+
+            return latest;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Could not parse helm history output for release '{Release}'", release);
+            return null;
+        }
+    }
+
     /// <summary>
     /// Escapes commas and equals signs in <c>--set</c> values. Helm uses these
     /// as separators, so any value containing them needs each character
