@@ -48,7 +48,7 @@ Both move to the Helm chart's `values.yaml` and are no longer first-class CK att
 | Attribute | Type | Required | Description |
 |---|---|---|---|
 | `ChartName` | string | yes | Chart reference path within the registry, e.g. `voest-app`. |
-| `ChartVersion` | string | yes | Chart version, e.g. `1.2.3`. |
+| `ChartVersion` | string | yes | Chart version, e.g. `1.2.3`. Empty means "newest in the repository", resolved by helm at deploy time. Since AB#4955 that resolution happens only on a deploy somebody triggered — a controller-side reconcile of a stranded `Pending` workload keeps the version already installed, so an unrelated platform event cannot change a running application's version. |
 | `ValuesYaml` | string (large) | no | Full `values.yaml` content. UI offers a code editor + a file-upload. |
 | `Values` | association → `ValueOverride[]` | no | Structured key-path / value list, merged on top of `ValuesYaml`. |
 | `HelmRepository` | association → `HelmRepositoryConfiguration` | yes | Which registry / channel to pull the chart from. |
