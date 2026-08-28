@@ -127,6 +127,14 @@ public static class WorkloadContextValuesBuilder
         if (!string.IsNullOrWhiteSpace(deps.RabbitMqUser)) map["rabbitMqUser"] = deps.RabbitMqUser!;
         if (!string.IsNullOrWhiteSpace(deps.StreamDataHost)) map["streamDataHost"] = deps.StreamDataHost!;
         if (!string.IsNullOrWhiteSpace(deps.StreamDataUser)) map["streamDataUser"] = deps.StreamDataUser!;
+        // Instance isolation (Epic AB#4944): both stay unset on a single-instance cluster,
+        // so the workload keeps the compiled-in system database and the unprefixed CrateDB
+        // schema names — byte-identical values for every existing installation.
+        if (!string.IsNullOrWhiteSpace(deps.SystemDatabaseName)) map["systemDatabaseName"] = deps.SystemDatabaseName!;
+        if (!string.IsNullOrWhiteSpace(deps.StreamDataSchemaInstancePrefix))
+        {
+            map["streamDataSchemaInstancePrefix"] = deps.StreamDataSchemaInstancePrefix!;
+        }
         return map;
     }
 

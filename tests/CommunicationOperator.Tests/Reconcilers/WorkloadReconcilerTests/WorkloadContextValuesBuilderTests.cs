@@ -46,6 +46,8 @@ internal class WorkloadContextValuesBuilderTests
                 RabbitMqUser = "octo-mq-user",
                 StreamDataHost = "crate-octo-crate.cratedb.svc.cluster.local",
                 StreamDataUser = "octo-system",
+                SystemDatabaseName = "OctoSystemDev",
+                StreamDataSchemaInstancePrefix = "dev",
             },
         });
 
@@ -56,6 +58,32 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).Contains("\"rabbitMqUser\": \"octo-mq-user\"");
         await Assert.That(yaml!).Contains("\"streamDataHost\":");
         await Assert.That(yaml!).Contains("\"streamDataUser\": \"octo-system\"");
+        await Assert.That(yaml!).Contains("\"systemDatabaseName\": \"OctoSystemDev\"");
+        await Assert.That(yaml!).Contains("\"streamDataSchemaInstancePrefix\": \"dev\"");
+    }
+
+    /// <summary>
+    /// Epic AB#4944: a single-instance cluster leaves both unset, and the workload must then
+    /// keep its compiled-in system database and the unprefixed CrateDB schema names. Emitting
+    /// them empty would render the chart's env vars as empty strings and override exactly the
+    /// defaults they are supposed to preserve.
+    /// </summary>
+    [Test]
+    public async Task Build_UnsetInstanceIsolation_EmitsNeitherKey()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            ClusterDependencies = new ClusterDependenciesOptions
+            {
+                MongodbHost = "host-only",
+                SystemDatabaseName = "",
+                StreamDataSchemaInstancePrefix = "   ",
+            },
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("systemDatabaseName");
+        await Assert.That(yaml!).DoesNotContain("streamDataSchemaInstancePrefix");
     }
 
     [Test]

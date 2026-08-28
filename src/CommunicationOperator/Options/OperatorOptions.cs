@@ -206,6 +206,23 @@ public class ClusterDependenciesOptions
 
     /// <summary>CrateDB username.</summary>
     public string? StreamDataUser { get; set; }
+
+    /// <summary>
+    /// MongoDB system database holding the tenant registry (Epic AB#4944 instance isolation).
+    /// Must match the core services' <c>serviceDefaults.systemDatabaseName</c>: a workload
+    /// resolves its tenant through this database, so an instance running on a non-default
+    /// system database gets "Tenant '…' does not exist" on every CK-model load without it.
+    /// Empty keeps the workload's compiled-in default (<c>OctoSystem</c>).
+    /// </summary>
+    public string? SystemDatabaseName { get; set; }
+
+    /// <summary>
+    /// CrateDB schema instance prefix (AB#4946). Must match the core services'
+    /// <c>clusterDependencies.streamDataSchemaInstancePrefix</c> — without it a second
+    /// instance's workloads read and write the unprefixed schemas of the first one.
+    /// Empty keeps the legacy, unprefixed schema names.
+    /// </summary>
+    public string? StreamDataSchemaInstancePrefix { get; set; }
 }
 
 /// <summary>
