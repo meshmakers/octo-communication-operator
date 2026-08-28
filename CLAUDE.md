@@ -420,6 +420,37 @@ rejected-on-connect recovers via retry, recovery fires the per-pool
 reverse-sync, connect callback resets registration state, `<= 0` disables
 the loop.
 
+### Workload Scale Verb (AB#4917 — On-Demand Lifecycle AB#4914)
+
+The controller's on-demand lifecycle (scale-to-zero for idle adapters) drives replica
+changes through a dedicated hub callback instead of helm:
+
+- `IOperatorHubCallbacks.ScaleWorkloadAsync(ScaleWorkloadDto)` →
+  `OperatorHubService.ScaleWorkloadAsync` → `WorkloadReconciler.ScaleAsync` →
+  `ICommunicationPoolKubernetesGateway.ScaleDeploymentsByInstanceAsync`. The gateway lists
+  Deployments by the `app.kubernetes.io/instance={release}` label (never derives resource
+  names — Application charts may render `{release}-{chart}`) and merge-patches
+  `{"spec":{"replicas":N}}` on each. A plain Deployment patch, not the scale subresource,
+  so it runs under the operator's existing `apps/deployments: ['*']` RBAC. No helm run,
+  no release-history churn; a scale completes in ~2 s.
+- The outcome is reported via `IOperatorHub.ReportWorkloadScaleStatusAsync`
+  (`WorkloadScaleStatusDto`; `Success=false` when the release has no Deployments or a
+  patch failed). The controller uses the ack to advance its lifecycle state machine
+  (`Draining → Hibernated` on a scale-0 ack). Older controller builds reject the method —
+  `OperatorHubService` logs one warning (`_scaleStatusUnsupportedLogged` latch, same
+  pattern as the deploy-progress channel) and degrades silently.
+- **Redeploy must not resurrect a hibernated workload:** when
+  `WorkloadDeployedDto.Hibernated` is true, `WorkloadReconciler.DeployAsync` adds
+  `--set replicaCount=0` (applies to both the dry-run pre-flight and the real install);
+  `--set` beats every `-f` values layer. A deploy that is supposed to wake the workload
+  goes through the controller's wake gate first, which clears the hibernated state before
+  the deploy event is sent.
+- Reconciler/scale failures follow the existing rule: logged, reported in the ack, never
+  propagated into the hub connection.
+
+Tests: `Reconcilers/WorkloadReconcilerTests/ScaleAsyncTests`, the hibernation-pin cases in
+`DeployAsyncTests`, and `Services/OperatorHubServiceTests/ScaleWorkloadTests`.
+
 ### Reverse-Sync on Reconnect
 
 After the operator has re-registered every owned `CommunicationPool` CR

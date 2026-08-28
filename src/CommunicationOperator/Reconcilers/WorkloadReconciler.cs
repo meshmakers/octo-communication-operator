@@ -152,6 +152,20 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 var chartRef = $"{alias}/{workload.ChartName}";
                 var setValues = new Dictionary<string, string>();
 
+                // AB#4917: a redeploy of a hibernated workload must not resurrect
+                // it. --set beats every -f values layer, so this pins the release
+                // at 0 replicas regardless of what the chart or the entity's
+                // values declare. A deploy that is supposed to wake the workload
+                // goes through the controller's wake gate first, which clears
+                // the hibernated state before the deploy event is sent.
+                if (workload.Hibernated)
+                {
+                    setValues["replicaCount"] = "0";
+                    _logger.LogInformation(
+                        "Workload '{WorkloadName}' (release '{Release}') is hibernated; deploying with replicaCount=0",
+                        workload.WorkloadName, release);
+                }
+
                 // AB#4894: a helm process killed mid-upgrade (e.g. the operator
                 // pod was replaced by a rollout while a deploy was in flight)
                 // leaves the newest release revision in a pending-* status. That
@@ -362,6 +376,27 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         {
             await _gateway.DeleteSecretAsync(ns, secretName, cancellationToken);
         }
+    }
+
+    public async Task<int> ScaleAsync(ScaleWorkloadDto workload, CancellationToken cancellationToken)
+    {
+        var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
+        var ns = _options.PoolNamespace;
+
+        _logger.LogInformation(
+            "Scaling workload: tenant '{TenantId}', workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}' to {Replicas} replica(s)",
+            workload.TenantId, workload.WorkloadName, workload.WorkloadRtId, release, workload.Replicas);
+
+        var patched = await _gateway.ScaleDeploymentsByInstanceAsync(ns, release, workload.Replicas,
+            cancellationToken);
+        if (patched == 0)
+        {
+            _logger.LogWarning(
+                "No Deployments found for release '{Release}' (label app.kubernetes.io/instance) in namespace '{Namespace}'; nothing scaled",
+                release, ns);
+        }
+
+        return patched;
     }
 
     private async Task ReconcileSecretAsync(string ns, string secretName, WorkloadDeployedDto workload,

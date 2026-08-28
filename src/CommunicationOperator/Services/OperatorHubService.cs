@@ -40,6 +40,10 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     // fires only once so the watcher's 3-second pulse does not flood the log.
     private int _progressUnsupportedLogged;
 
+    // Same once-only latch for ReportWorkloadScaleStatusAsync (AB#4917) —
+    // rejected by controller builds that pre-date the on-demand lifecycle.
+    private int _scaleStatusUnsupportedLogged;
+
     public OperatorHubService(
         ILogger<OperatorHubService> logger,
         IOptions<OperatorOptions> options,
@@ -535,6 +539,79 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             Success = success,
             StatusMessage = statusMessage,
         });
+    }
+
+    public async Task ScaleWorkloadAsync(ScaleWorkloadDto workload)
+    {
+        _logger.LogInformation(
+            "Workload scale event received: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}', replicas {Replicas}",
+            workload.TenantId, workload.PoolRtId, workload.WorkloadName, workload.Replicas);
+
+        bool success;
+        string? statusMessage;
+        try
+        {
+            var patched = await _workloadReconciler.ScaleAsync(workload, CancellationToken.None);
+            success = patched > 0;
+            statusMessage = success
+                ? $"Scaled {patched} deployment(s) to {workload.Replicas} replica(s)."
+                : "No Deployments found for the workload's helm release; nothing scaled.";
+        }
+        catch (Exception ex)
+        {
+            // Same rule as deploy/undeploy: one bad workload must not crash
+            // the hub connection.
+            _logger.LogError(ex,
+                "Failed to scale workload '{WorkloadName}' for tenant '{TenantId}' to {Replicas} replica(s)",
+                workload.WorkloadName, workload.TenantId, workload.Replicas);
+            success = false;
+            statusMessage = ex.Message;
+        }
+
+        try
+        {
+            await ReportScaleStatusAsync(workload, success, statusMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to report scale status for workload '{WorkloadName}' (tenant '{TenantId}')",
+                workload.WorkloadName, workload.TenantId);
+        }
+    }
+
+    private async Task ReportScaleStatusAsync(ScaleWorkloadDto workload, bool success, string? statusMessage)
+    {
+        var client = _client;
+        if (client == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await client.ReportWorkloadScaleStatusAsync(new WorkloadScaleStatusDto
+            {
+                TenantId = workload.TenantId,
+                WorkloadRtId = workload.WorkloadRtId,
+                WorkloadName = workload.WorkloadName,
+                Replicas = workload.Replicas,
+                Success = success,
+                StatusMessage = statusMessage,
+            });
+        }
+        catch (HubException ex)
+        {
+            // Older controller builds reject the method — log once, degrade
+            // silently (same pattern as the deploy-progress channel). In
+            // practice controller and operator ship together, so this only
+            // covers a skewed rolling upgrade window.
+            if (Interlocked.CompareExchange(ref _scaleStatusUnsupportedLogged, 1, 0) == 0)
+            {
+                _logger.LogWarning(ex,
+                    "Controller does not accept ReportWorkloadScaleStatusAsync — scale acks are dropped. Upgrade the controller to enable the on-demand lifecycle state machine.");
+            }
+        }
     }
 
     public async Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)

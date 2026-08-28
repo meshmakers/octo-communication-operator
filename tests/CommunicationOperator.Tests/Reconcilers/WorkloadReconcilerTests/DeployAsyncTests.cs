@@ -332,6 +332,49 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
+    public async Task DeployAsync_Hibernated_PinsReplicaCountToZeroViaSetValues()
+    {
+        // AB#4917: a redeploy of a hibernated workload must not resurrect it.
+        // --set beats every -f values layer, so the pin has to travel via
+        // setValues — both on the pre-flight dry-run and the real install.
+        var dto = BaseDto() with { Hibernated = true };
+
+        await Reconciler.DeployAsync(dto, CancellationToken.None);
+
+        await Helm.Received(1).UpgradeInstallDryRunAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Is<IReadOnlyDictionary<string, string>>(set =>
+                set.ContainsKey("replicaCount") && set["replicaCount"] == "0"),
+            Arg.Any<CancellationToken>());
+        await Helm.Received(1).UpgradeInstallAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Is<IReadOnlyDictionary<string, string>>(set =>
+                set.ContainsKey("replicaCount") && set["replicaCount"] == "0"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployAsync_NotHibernated_DoesNotSetReplicaCount()
+    {
+        // Default DTO has Hibernated = false — the chart / values layers own
+        // the replica count; no --set pin must be emitted.
+        await Reconciler.DeployAsync(BaseDto(), CancellationToken.None);
+
+        await Helm.Received(1).UpgradeInstallDryRunAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Is<IReadOnlyDictionary<string, string>>(set => !set.ContainsKey("replicaCount")),
+            Arg.Any<CancellationToken>());
+        await Helm.Received(1).UpgradeInstallAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Is<IReadOnlyDictionary<string, string>>(set => !set.ContainsKey("replicaCount")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
     public async Task DeployAsync_NoOperatorContextButHasWorkloadIdentity_StillEmitsContextFile()
     {
         // OperatorOptions in the base class are empty, but the DTO always

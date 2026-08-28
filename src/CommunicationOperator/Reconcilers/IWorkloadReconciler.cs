@@ -19,4 +19,14 @@ public interface IWorkloadReconciler
     /// operator-owned Kubernetes <c>Secret</c> created at deploy time (if any).
     /// </summary>
     Task UndeployAsync(WorkloadUndeployedDto workload, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Scales the release's Deployments to the requested replica count via a plain
+    /// Kubernetes patch — no helm involved, so the release history is untouched and the
+    /// operation completes in seconds (AB#4917, on-demand lifecycle AB#4914).
+    /// Returns the number of Deployments patched; 0 means the release has no
+    /// Deployments (not deployed, or already uninstalled) and the caller should
+    /// report a failure.
+    /// </summary>
+    Task<int> ScaleAsync(ScaleWorkloadDto workload, CancellationToken cancellationToken);
 }

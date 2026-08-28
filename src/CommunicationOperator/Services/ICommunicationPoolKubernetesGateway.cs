@@ -30,4 +30,16 @@ public interface ICommunicationPoolKubernetesGateway
     /// </summary>
     Task<DateTime?> GetSecretCreationTimestampAsync(string @namespace, string name,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Patches <c>spec.replicas</c> on every Deployment carrying the
+    /// <c>app.kubernetes.io/instance={instance}</c> label (AB#4917, on-demand lifecycle).
+    /// The label lookup is deliberate — Application charts may render resource names as
+    /// <c>{release}-{chart}</c>, so deriving the Deployment name from the release is unsafe.
+    /// A plain merge patch on the Deployment (not the scale subresource) so the call runs
+    /// under the operator's existing <c>apps/deployments: ['*']</c> RBAC.
+    /// Returns the number of Deployments patched (0 when the release has none).
+    /// </summary>
+    Task<int> ScaleDeploymentsByInstanceAsync(string @namespace, string instance, int replicas,
+        CancellationToken cancellationToken = default);
 }

@@ -59,6 +59,24 @@ public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGa
     public Task DeleteSecretAsync(string @namespace, string name, CancellationToken cancellationToken = default) =>
         _kubernetesClient.CoreV1.DeleteNamespacedSecretAsync(name, @namespace, cancellationToken: cancellationToken);
 
+    public async Task<int> ScaleDeploymentsByInstanceAsync(string @namespace, string instance, int replicas,
+        CancellationToken cancellationToken = default)
+    {
+        var deployments = await _kubernetesClient.AppsV1.ListNamespacedDeploymentAsync(@namespace,
+            labelSelector: $"app.kubernetes.io/instance={instance}", cancellationToken: cancellationToken);
+
+        var patch = new V1Patch($"{{\"spec\":{{\"replicas\":{replicas}}}}}", V1Patch.PatchType.MergePatch);
+        var patched = 0;
+        foreach (var deployment in deployments.Items)
+        {
+            await _kubernetesClient.AppsV1.PatchNamespacedDeploymentAsync(patch,
+                deployment.Metadata.Name, @namespace, cancellationToken: cancellationToken);
+            patched++;
+        }
+
+        return patched;
+    }
+
     public async Task<DateTime?> GetSecretCreationTimestampAsync(string @namespace, string name,
         CancellationToken cancellationToken = default)
     {
