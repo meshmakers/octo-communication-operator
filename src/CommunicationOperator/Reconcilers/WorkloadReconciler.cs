@@ -161,6 +161,13 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 // provably stale lock before the pre-flight runs.
                 await TryClearStaleHelmLockAsync(release, ns, deployToken);
 
+                // AB#4955: an empty ChartVersion means "newest in the repository", resolved right
+                // here by helm. That is what the user asked for on a deploy they triggered — but a
+                // reconciliation is not a release decision, it restores what was already supposed to
+                // be running. Resolving anew there let unrelated platform events (an operator
+                // restart, a blueprint re-apply) silently move a customer's app to a newer version.
+                var chartVersion = await ResolveChartVersionAsync(workload, release, ns, deployToken);
+
                 // Pre-flight: helm upgrade --install --dry-run=server submits the
                 // rendered manifests to the apiserver with dryRun=All. This
                 // catches schema errors, admission-webhook rejections, RBAC
@@ -172,7 +179,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 // diagnostic collector below AND by the live watcher started
                 // before the real install.
                 await _helm.UpgradeInstallDryRunAsync(release, chartRef,
-                    workload.ChartVersion, ns, valuesFiles, setValues, deployToken);
+                    chartVersion, ns, valuesFiles, setValues, deployToken);
 
                 // Start the live watcher BEFORE the real install begins. The
                 // watcher polls the cluster every few seconds and pushes any
@@ -189,7 +196,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 try
                 {
                     await _helm.UpgradeInstallAsync(release, chartRef,
-                        workload.ChartVersion, ns, valuesFiles, setValues, deployToken);
+                        chartVersion, ns, valuesFiles, setValues, deployToken);
                 }
                 catch (HelmException ex)
                 {
@@ -263,6 +270,62 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
             _inFlightDeploys.TryRemove(release, out _);
         }
+    }
+
+    /// <summary>
+    /// Decides which chart version this deploy runs with (AB#4955).
+    ///
+    /// A pinned <c>ChartVersion</c> is always honoured, and so is an empty one on a deploy a human
+    /// triggered — there "newest in the repository" is the request. The one case that needs a
+    /// different answer is an unpinned workload on a <see cref="WorkloadDeployedDto.IsReconciliation"/>
+    /// dispatch: that is the controller restoring what was supposed to be running (AB#4894), so it
+    /// must land on the version already installed rather than on whatever happens to be newest at
+    /// that moment. Reading it back from the installed release keeps "latest" meaning "latest when
+    /// somebody deployed", not "latest whenever a pod restarts".
+    ///
+    /// Falls back to the workload's own (empty) version whenever there is nothing to read — a
+    /// reconcile for a release that was never installed is a first install and legitimately resolves
+    /// to newest.
+    /// </summary>
+    private async Task<string> ResolveChartVersionAsync(WorkloadDeployedDto workload, string release, string ns,
+        CancellationToken cancellationToken)
+    {
+        if (!workload.IsReconciliation || !string.IsNullOrWhiteSpace(workload.ChartVersion))
+        {
+            return workload.ChartVersion;
+        }
+
+        string? installed;
+        try
+        {
+            installed = await _helm.GetInstalledChartVersionAsync(release, workload.ChartName, ns, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            // Best effort: a failed lookup must not fail the deploy. Falling through to the empty
+            // version reproduces the pre-AB#4955 behaviour rather than blocking the reconcile.
+            _logger.LogWarning(e,
+                "Could not read the installed chart version of release '{Release}' — reconciling with the newest chart instead",
+                release);
+            return workload.ChartVersion;
+        }
+
+        if (string.IsNullOrWhiteSpace(installed))
+        {
+            _logger.LogInformation(
+                "Reconciling unpinned workload '{WorkloadName}' (release '{Release}'): nothing installed to read a version from, resolving the newest chart",
+                workload.WorkloadName, release);
+            return workload.ChartVersion;
+        }
+
+        _logger.LogInformation(
+            "Reconciling unpinned workload '{WorkloadName}' (release '{Release}'): keeping the installed chart version {ChartVersion} instead of resolving the newest chart (AB#4955)",
+            workload.WorkloadName, release, installed);
+        return installed;
     }
 
     /// <summary>

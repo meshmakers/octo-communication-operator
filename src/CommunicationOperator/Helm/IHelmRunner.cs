@@ -64,6 +64,22 @@ public interface IHelmRunner
     /// </summary>
     Task<HelmReleaseRevision?> GetLatestReleaseRevisionAsync(string release, string @namespace,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the chart version of the release currently installed under <paramref name="release"/>,
+    /// via <c>helm list --filter ^{release}$ -o json</c>. <c>null</c> when nothing is installed, when
+    /// helm cannot be read, or when the reported chart does not belong to <paramref name="chartName"/>
+    /// (in which case guessing a version would be worse than falling back to the caller's default).
+    ///
+    /// Used by the reconciliation path (AB#4955) to keep an unpinned workload on the version it is
+    /// already running instead of resolving "newest in the repository" anew.
+    /// </summary>
+    /// <param name="release">Helm release name.</param>
+    /// <param name="chartName">Expected chart name — helm reports <c>{name}-{version}</c> and the
+    /// name itself may contain dashes, so the version can only be split off against a known name.</param>
+    /// <param name="namespace">Kubernetes namespace.</param>
+    Task<string?> GetInstalledChartVersionAsync(string release, string chartName, string @namespace,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

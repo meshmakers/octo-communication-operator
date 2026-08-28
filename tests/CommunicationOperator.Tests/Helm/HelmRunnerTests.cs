@@ -262,6 +262,80 @@ internal class HelmRunnerTests
     }
 
     [Test]
+    public async Task GetInstalledChartVersionAsync_BuildsListArgs_AndSplitsTheVersionOffTheChart()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(0,
+                """[{"name":"acme-app","status":"deployed","chart":"octo-mesh-app-1.0.71"}]""",
+                string.Empty));
+
+        var version = await _runner.GetInstalledChartVersionAsync("acme-app", "octo-mesh-app", "octo",
+            CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a =>
+                a.SequenceEqual(new[]
+                {
+                    "list", "--namespace", "octo", "--filter", "^acme-app$", "-o", "json",
+                })),
+            Arg.Any<CancellationToken>());
+        // The chart name itself contains dashes, so the split only works against the known name.
+        await Assert.That(version).IsEqualTo("1.0.71");
+    }
+
+    [Test]
+    public async Task GetInstalledChartVersionAsync_NothingInstalled_ReturnsNull()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(0, "[]", string.Empty));
+
+        var version = await _runner.GetInstalledChartVersionAsync("nope", "octo-mesh-app", "octo",
+            CancellationToken.None);
+
+        await Assert.That(version).IsNull();
+    }
+
+    [Test]
+    public async Task GetInstalledChartVersionAsync_ForeignChart_ReturnsNullRatherThanGuessing()
+    {
+        // A release whose chart was swapped underneath us: deriving a version from an unrelated
+        // chart name would pin the deploy to something that does not exist in this repository.
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(0,
+                """[{"name":"acme-app","status":"deployed","chart":"other-chart-9.9.9"}]""",
+                string.Empty));
+
+        var version = await _runner.GetInstalledChartVersionAsync("acme-app", "octo-mesh-app", "octo",
+            CancellationToken.None);
+
+        await Assert.That(version).IsNull();
+    }
+
+    [Test]
+    public async Task GetInstalledChartVersionAsync_HelmFails_ReturnsNull()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(1, string.Empty, "Error: Kubernetes cluster unreachable"));
+
+        var version = await _runner.GetInstalledChartVersionAsync("acme-app", "octo-mesh-app", "octo",
+            CancellationToken.None);
+
+        await Assert.That(version).IsNull();
+    }
+
+    [Test]
+    public async Task GetInstalledChartVersionAsync_UnparsableOutput_ReturnsNull()
+    {
+        _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
+            .Returns(new HelmProcessResult(0, "WARNING: not json", string.Empty));
+
+        var version = await _runner.GetInstalledChartVersionAsync("acme-app", "octo-mesh-app", "octo",
+            CancellationToken.None);
+
+        await Assert.That(version).IsNull();
+    }
+
+    [Test]
     public async Task HelmReleaseRevision_IsPending_MatchesOnlyPendingStates()
     {
         await Assert.That(new HelmReleaseRevision(1, "pending-install").IsPending).IsTrue();
