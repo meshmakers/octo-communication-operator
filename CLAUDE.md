@@ -72,6 +72,52 @@ the `WorkloadReconciler` over the `helm` CLI.
     `System.Communication.MainLatest` on dev/test clusters — the blueprint
     seeds an empty `ChartVersion` and the CD pipeline writes a concrete
     `0.1.<yyMMDDxxx>` later. Pass a non-blank value to pin a specific chart.
+  - `GetInstalledChartVersionAsync` (`helm list --filter ^{release}$ -o json`)
+    reads the chart version of the release as it currently stands. Helm reports
+    `{chartName}-{version}` and chart names routinely contain dashes
+    (`octo-mesh-adapter`), so the version is split off against the known chart
+    name and the method returns `null` — rather than a guess — when the prefix
+    does not match. `helm list` rather than `helm history` on purpose: the
+    newest history entry may be a failed or still-pending attempt, and the
+    question here is what is *running*.
+
+### Reconciliation Keeps the Installed Chart Version (AB#4955)
+
+An empty `ChartVersion` means "newest in the repository", resolved by helm at
+`helm upgrade` time. On a deploy a human triggered that is the request. But the
+controller also re-dispatches stranded `Pending` workloads on every pool
+re-registration (AB#4894) — which happens on operator restarts, blueprint
+re-applies, CK-model updates and `EnableCommunication`. Resolving anew there
+moved six prod-1 accounting workloads from chart 1.0.71 to 1.0.72 with nobody
+deploying them, and the new version happened to carry a defect (AB#4951), which
+is the only reason it was noticed.
+
+`WorkloadDeployedDto.IsReconciliation` (SDK contract) marks a dispatch as
+"restore what was supposed to be running" rather than a release decision.
+`WorkloadReconciler.ResolveChartVersionAsync` decides accordingly:
+
+| `IsReconciliation` | `ChartVersion` | Version used |
+|---|---|---|
+| false (user deploy) | empty | newest in the repository — unchanged, this is what `System.Communication.MainLatest` depends on |
+| false | pinned | the pin |
+| true | pinned | the pin (helm is not even asked) |
+| true | empty | the version of the **installed release**, read back via `GetInstalledChartVersionAsync` |
+| true | empty, nothing installed | newest — a reconcile for a release that was never installed is a first install |
+
+The resolved version feeds both the `--dry-run=server` pre-flight and the real
+install, so the pre-flight validates the chart that actually gets applied. The
+lookup is best effort: a helm failure is logged and the deploy proceeds with the
+workload's own (empty) version, because recovering the stranded workload matters
+more than pinning it.
+
+The flag is additive and defaults to false, so an operator that pre-dates it
+behaves exactly as before, and a controller that pre-dates it never sets it.
+That mixed-fleet window is why the controller still writes a warning event on
+every unpinned re-dispatch.
+
+Tests: `Reconcilers/WorkloadReconcilerTests/ReconcileChartVersionTests` (all six
+rows of the table above plus the pre-flight pinning) and the
+`GetInstalledChartVersionAsync` parsing cases in `Helm/HelmRunnerTests`.
 - `Reconcilers/WorkloadContextValuesBuilder` — turns the operator's own
   `OperatorOptions` (cluster-internal Mongo/RabbitMQ/CrateDB hosts,
   reporting service URI, instance prefix, ingress defaults) plus

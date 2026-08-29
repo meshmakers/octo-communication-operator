@@ -167,6 +167,79 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         return ParseLatestRevision(result.StdOut, release);
     }
 
+    public async Task<string?> GetInstalledChartVersionAsync(string release, string chartName, string @namespace,
+        CancellationToken cancellationToken)
+    {
+        // `helm list` reports the release as it currently stands (one row, newest revision),
+        // which is exactly the question here — unlike `helm history`, whose newest entry may be
+        // a failed or still-pending attempt rather than what is running.
+        var args = new List<string>
+        {
+            "list",
+            "--namespace", @namespace,
+            "--filter", $"^{System.Text.RegularExpressions.Regex.Escape(release)}$",
+            "-o", "json",
+        };
+
+        var result = await invoker.InvokeAsync(args, cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            logger.LogDebug("helm list for release '{Release}' returned exit code {ExitCode}: {StdErr}",
+                release, result.ExitCode, result.StdErr);
+            return null;
+        }
+
+        return ParseInstalledChartVersion(result.StdOut, release, chartName);
+    }
+
+    /// <summary>
+    /// Parses the <c>helm list -o json</c> output (a JSON array of release entries) and returns the
+    /// chart version of the first entry, provided its <c>chart</c> field belongs to
+    /// <paramref name="chartName"/>. Internal so the parsing contract is unit-testable without a
+    /// helm binary.
+    /// </summary>
+    internal string? ParseInstalledChartVersion(string listJson, string release, string chartName)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(listJson);
+            foreach (var entry in doc.RootElement.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("chart", out var chartProperty))
+                {
+                    continue;
+                }
+
+                var chart = chartProperty.GetString();
+                if (string.IsNullOrEmpty(chart))
+                {
+                    continue;
+                }
+
+                // helm reports "{chartName}-{version}", and chart names routinely contain dashes
+                // (octo-mesh-adapter), so the split is only unambiguous against the known name.
+                var prefix = $"{chartName}-";
+                if (!chart.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    logger.LogWarning(
+                        "Release '{Release}' reports chart '{Chart}', which does not belong to expected chart '{ChartName}' — not deriving a version from it",
+                        release, chart, chartName);
+                    return null;
+                }
+
+                var version = chart[prefix.Length..];
+                return string.IsNullOrWhiteSpace(version) ? null : version;
+            }
+
+            return null;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Could not parse helm list output for release '{Release}'", release);
+            return null;
+        }
+    }
+
     /// <summary>
     /// Parses the <c>helm history -o json</c> output (a JSON array of revision entries) and
     /// returns the newest one. Internal so the parsing contract is unit-testable without a
