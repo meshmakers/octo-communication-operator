@@ -61,9 +61,15 @@ public static class WorkloadContextValuesBuilder
             root["instancePrefix"] = options.InstancePrefix!;
         }
 
-        if (!string.IsNullOrWhiteSpace(options.CommunicationControllerUri))
+        // Workloads may need a different controller address than the operator's own hub
+        // connection (see OperatorOptions.WorkloadCommunicationControllerUri); empty falls back
+        // to the shared URI, so existing installations project exactly what they always did.
+        var workloadControllerUri = !string.IsNullOrWhiteSpace(options.WorkloadCommunicationControllerUri)
+            ? options.WorkloadCommunicationControllerUri
+            : options.CommunicationControllerUri;
+        if (!string.IsNullOrWhiteSpace(workloadControllerUri))
         {
-            root["communicationControllerServiceUri"] = options.CommunicationControllerUri;
+            root["communicationControllerServiceUri"] = workloadControllerUri;
         }
 
         if (!string.IsNullOrWhiteSpace(options.ReportingServiceUri))

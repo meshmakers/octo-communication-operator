@@ -42,6 +42,18 @@ public class OperatorOptions
     public string CommunicationControllerUri { get; set; } = string.Empty;
 
     /// <summary>
+    /// Controller URI projected into the Helm values of every deployed workload. When empty
+    /// (the default), <see cref="CommunicationControllerUri"/> is projected — one address serves
+    /// both the operator's own hub connection and the workloads, which is correct wherever both
+    /// resolve the same name the same way. They stop doing that as soon as the operator needs an
+    /// address the workloads cannot use: observed on a local kind cluster, where the operator
+    /// reached a host-run controller through a name only it could be given, and every adapter
+    /// silently sat at Unregistered while the operator looked healthy (AB#4967). This option
+    /// splits the two consumers without changing any existing installation.
+    /// </summary>
+    public string WorkloadCommunicationControllerUri { get; set; } = string.Empty;
+
+    /// <summary>
     /// Interval in seconds between retry attempts for pool registrations
     /// that the controller rejected while the hub connection stayed alive
     /// (e.g. a transient CkCache error during a parallel service startup).

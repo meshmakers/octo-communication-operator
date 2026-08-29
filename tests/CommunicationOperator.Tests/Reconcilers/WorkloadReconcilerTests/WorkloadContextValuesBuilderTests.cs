@@ -35,6 +35,32 @@ internal class WorkloadContextValuesBuilderTests
     }
 
     [Test]
+    public async Task Build_WorkloadControllerUri_OverridesTheSharedUriForWorkloads()
+    {
+        // The operator may reach the controller through an address the workloads cannot use
+        // (AB#4967); this option splits the two consumers.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            CommunicationControllerUri = "https://operator-only.example:5015",
+            WorkloadCommunicationControllerUri = "https://workloads.example:5015",
+        });
+
+        await Assert.That(yaml!).Contains("\"communicationControllerServiceUri\": \"https://workloads.example:5015\"");
+        await Assert.That(yaml!).DoesNotContain("operator-only.example");
+    }
+
+    [Test]
+    public async Task Build_NoWorkloadControllerUri_FallsBackToTheSharedUri()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            CommunicationControllerUri = "https://shared.example:5015",
+        });
+
+        await Assert.That(yaml!).Contains("\"communicationControllerServiceUri\": \"https://shared.example:5015\"");
+    }
+
+    [Test]
     public async Task Build_FullClusterDependencies_EmitsNestedMap()
     {
         var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
