@@ -13,7 +13,11 @@ using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
+using Meshmakers.Octo.Sdk.ServiceClient;
+using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
+using Meshmakers.Octo.Sdk.ServiceClient.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -125,6 +129,19 @@ try
     builder.Services.AddSingleton<IHelmRunner, HelmRunner>();
     builder.Services.AddSingleton<IWorkloadDiagnosticsCollector, WorkloadDiagnosticsCollector>();
     builder.Services.AddSingleton<IWorkloadReconciler, WorkloadReconciler>();
+    // AB#5062 - the operator's own service credential for /operatorHub.
+    // The access token object is a singleton because the SDK's SignalR client reads it on every
+    // (re)connect: OperatorAccessTokenService writes into the very instance
+    // OperatorHubClientFactory hands to the hub client, so a refresh reaches the next reconnect
+    // without any notification path. Registered as a hosted service BEFORE OperatorHubService so
+    // that its StartAsync (which acquires the first token) completes before the hub connects -
+    // hosted services are started sequentially.
+    builder.Services.AddSingleton<IServiceClientAccessToken, ServiceClientAccessToken>();
+    builder.Services
+        .AddSingleton<IConfigureOptions<AuthenticatorOptions>, ConfigureOperatorAuthenticatorOptions>();
+    builder.Services.AddSingleton<IAuthenticatorClient, AuthenticatorClient>();
+    builder.Services.AddSingleton<OperatorAccessTokenService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<OperatorAccessTokenService>());
     builder.Services.AddSingleton<IOperatorHubClientFactory, OperatorHubClientFactory>();
     // OperatorHubService is the SignalR client lifecycle owner AND the
     // IOperatorHubInvoker implementation that other services (PoolService)

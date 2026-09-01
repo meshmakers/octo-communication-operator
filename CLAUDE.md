@@ -602,14 +602,72 @@ consequences, both easy to get wrong:
     host, so the `v1` in the template *is* the version pin. Adding `[ApiVersion]` would mean wiring
     `Asp.Versioning` into an operator that publishes no API surface.
   - Tests: `tests/CommunicationOperator.Tests/Controller/DiagnosticsControllerTests.cs`.
-- **Outbound, the operator sends no credential either**, which is the other half of the same gap:
-  `OperatorHubClientFactory` hands `OperatorHubClient` a freshly constructed, never-populated
-  `ServiceClientAccessToken`, and `SignalRClient.CreateHubConnection` in **octo-sdk** sets the literal
-  `Authorization: Bearer your-access-token` under a `// TODO: Handle authentication`. The controller's
-  `/operatorHub` gate (AB#5059, see `octo-communication-controller-services/CLAUDE.md`) therefore
-  ships in `LogOnly` and **cannot be armed until this repo and octo-sdk give the operator a real
-  token** — `OperatorOptions` has no client id, secret or authority to obtain one from. Arming it
-  before that disconnects the whole fleet.
+- **Outbound, the operator can now send a credential (AB#5062)** — see
+  [Operator Hub Authentication](#operator-hub-authentication-ab5062) below. It used to send none at
+  all: `OperatorHubClientFactory` handed `OperatorHubClient` a freshly constructed, never-populated
+  `ServiceClientAccessToken`, and `SignalRClient.CreateHubConnection` in **octo-sdk** set the literal
+  `Authorization: Bearer your-access-token` under a `// TODO: Handle authentication`.
+
+### Operator Hub Authentication (AB#5062)
+
+The operator obtains its own client-credentials access token and presents it on the `/operatorHub`
+connection. Four pieces, in the order the token travels:
+
+1. **`OperatorOptions.Authentication`** (`OperatorAuthenticationOptions`: `IssuerUri`, `ClientId`,
+   `ClientSecret`, `TenantId`; env `OPERATOR__AUTHENTICATION__…`). `IsEnabled` is
+   `IssuerUri && ClientId` — the secret is deliberately not part of the check, so a confidential
+   client with a missing secret fails loudly at the token endpoint instead of silently degrading to
+   an anonymous connection that looks healthy until the gate is armed.
+2. **`ConfigureOperatorAuthenticatorOptions`** (`IConfigureOptions<AuthenticatorOptions>`) projects
+   that onto the SDK's `AuthenticatorOptions`, which `AuthenticatorClient` reads. An
+   `IConfigureOptions` rather than an inline delegate in `Program.cs` so the projection — above all
+   `TenantId`, whose loss produces an AB#5058 `invalid_request` that points nowhere near the mapping
+   — is pinned by a test.
+3. **`OperatorAccessTokenService`** (`BackgroundService`) requests the token
+   (`ApiScopes.OctoApiFullAccess`, `DefaultScopes.None` → exactly `octo_api`, no `offline_access`)
+   and writes it into the singleton `IServiceClientAccessToken`.
+4. **`OperatorHubClientFactory`** hands that *same instance* to `OperatorHubClient`. The SDK reads it
+   through `HttpConnectionOptions.AccessTokenProvider` on every connection attempt, so a refresh
+   reaches the next (re)connect with no notification path. The old per-client
+   `new ServiceClientAccessToken()` was unreachable by construction.
+
+🔴 **Unconfigured is a supported state and must stay one.** Every operator in the estate runs without
+these keys today. Without a client id the service logs one warning, never calls the authenticator,
+and the access token stays null — which makes the SDK send no `Authorization` header and no
+`access_token` query parameter at all, i.e. exactly today's connection. A hard requirement here would
+take down the control plane for all workload management on upgrade, which is the outage AB#5059 was
+staged to avoid in the first place.
+
+🔴 **`TenantId` is an identity decision, not an address.** The operator is tenant-crossing; the hub is
+not tenant-scoped (`SystemCommunicationApiPolicy` is a plain `scope=octo_api` check and never asks
+which tenant the caller is in). The value picks which tenant's `ClientStore` resolves `ClientId`.
+Register the client in the **system tenant** (`OctoSystem` by default) and name it here: the
+operator's authority is system-level, and pinning it to a managed tenant lets a tenant delete take
+the whole fleet's credential with it. Omitting it is only safe for a provably unmirrored client
+(AB#5058 refuses a no-`acr_values` request outright once the id is ambiguous), so the service warns
+at startup when a client id is configured without one.
+
+**Renewal.** A live SignalR connection is authorized once, in `OnConnectedAsync`, and the controller
+does not set `HubOptions.CloseOnAuthenticationExpiration` — expiry does not drop an established
+connection. The *re*connect is the exposure, and operators reconnect routinely (controller rollout,
+node drain, network blip, SDK watchdog). Hence the refresh loop: replace the token
+`RefreshSkew` (5 min) before its own `exp`, retry every `RetryInterval` (30 s) after a failure, and
+**keep the previous token on failure** — it is no less usable than none, and dropping it would
+guarantee a refusal for what is usually a transient identity blip. The first acquisition runs inside
+`StartAsync`, before `base.StartAsync`; hosted services start sequentially and this one is registered
+before `OperatorHubService`, so the first hub connection already carries a token rather than racing
+it.
+
+⚠️ **Rollout order.** Operators with credentials first; read the controller's `LogOnly` inventory
+until no operator connection is reported as failing `SystemCommunicationApiPolicy`; only then set
+`OCTO_OPERATORHUBAUTHORIZATION__MODE=Enforce` on the controller.
+
+Tests: `Services/OperatorAccessTokenServiceTests` (token published into the shared access token,
+scope shape, unconfigured never calls the authenticator, valid token not re-acquired, refresh-window
+replacement, failure keeps the previous token, tokenless response not published, `StartAsync`
+acquires before returning in both configured and unconfigured shapes),
+`Services/OperatorHubClientFactoryTests` (+ `ConfigureOperatorAuthenticatorOptionsTests`) and the
+`Authentication` cases in `Options/OperatorOptionsBindingTests`.
 
 ## Configuration
 
@@ -636,6 +694,7 @@ Key options:
 | `ClusterDependencies.SystemDatabaseName` / `StreamDataSchemaInstancePrefix` | Instance isolation (Epic AB#4944), projected into every workload the same way. They must mirror what the core services of the same instance run with (`serviceDefaults.systemDatabaseName` / `clusterDependencies.streamDataSchemaInstancePrefix`): a workload resolves its own tenant through the system database, so a second instance's adapters fail every CK-model load with `Tenant '<id>' does not exist` without the first, and read/write the *first* instance's CrateDB schemas without the second. Both empty on a single-instance cluster — the workload then keeps its compiled-in `OctoSystem` and the unprefixed schema names, so existing installations render byte-identically. |
 | `Ingress.ClassName` / `ClusterIssuer` / `Tls` / `Annotations` | Cluster-wide ingress defaults projected into each workload's `ingress.*` values. `ClusterIssuer` is rendered into the `cert-manager.io/cluster-issuer` annotation. `Annotations` is a list of name/value pairs (env-bindable as `OPERATOR__INGRESS__ANNOTATIONS__<n>__NAME/__VALUE` because annotation keys contain dots/slashes) merged into `ingress.annotations`; an entry with the cluster-issuer key wins over `ClusterIssuer`. Per-workload public-ingress opt-in (`ingress.enabled=true` + top-level `publicUri`) comes from the workload's typed `IngressEnabled` / `Hostname` attributes via `WorkloadDeployedDto`; the cluster-wide defaults here are not overridable per workload. |
 | `ClusterSecrets.MongodbUserPassword` / `MongodbAdminPassword` / `StreamDataPassword` | Data-store credentials the operator injects as secret-flagged value overrides when the workload's `ReceivesClusterSecrets` opt-in is true. The RabbitMQ password is NOT here — it stays on `BrokerPassword` and is injected unconditionally because every adapter needs the broker. Each field is optional — unset values are skipped. Operator chart wires these from a per-release Kubernetes Secret. |
+| `Authentication.IssuerUri` / `ClientId` / `ClientSecret` / `TenantId` | Client-credentials configuration for the operator's **own** `/operatorHub` token (AB#5062). All optional — without a `ClientId` the operator connects anonymously exactly as before. `TenantId` should name the installation's system tenant; see [Operator Hub Authentication](#operator-hub-authentication-ab5062). |
 | `RootCaCertificate` | PEM-encoded root CA (chain) the operator's own pod was given via the chart's `secrets.rootCa` value, forwarded here as a `secretKeyRef`-backed env var (`OPERATOR__ROOTCACERTIFICATE`). When set, injected into every workload's Helm values as `secrets.rootCa` — unconditionally, like `BrokerPassword`, and **not** secret-flagged (plain string; the workload chart's own `secrets.rootCa` template requires a literal to `b64enc`). AB#4417. |
 
 ## Build & Test
@@ -754,7 +813,7 @@ The `ICommunicationPoolKubernetesGateway` interface (in `Services/`) collapses t
 ### Not yet covered
 
 - `CommunicationPoolKubernetesGateway` itself — would need either an integration test against a real (or fake) k8s API or low-level `IKubernetes` mocking. Treated as a thin pass-through layer; covered indirectly by E2E tests.
-- `OperatorHubClientFactory` — the production `new OperatorHubClient(...)` wrapper; same rationale as above.
+- The `AuthenticatorClient` token round trip itself (`Services/OperatorAccessTokenServiceTests` mocks `IAuthenticatorClient`). The grant, the `acr_values` injection and the discovery cache are the SDK's, tested in `octo-sdk`'s `Authentication/AuthenticatorClientTests`.
 
 ## Code Quality Standards
 

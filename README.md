@@ -25,6 +25,10 @@ The operator can be configured via environment variables:
 | `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see AB#4417 below. | _(none)_ |
 | `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
 | `OPERATOR__AUTHURI` | Public URI of the identity service issuing the access tokens secured trigger nodes accept. Projected into each workload's Helm values as `authUri`. Must be the public issuer address, not a cluster-internal service name — the adapter compares it against the token's `iss` claim. | _(none)_ |
+| `OPERATOR__AUTHENTICATION__ISSUERURI` | Public issuer URI of the identity service the operator obtains its **own** access token from, for the `/operatorHub` connection (AB#5062). Optional — see [Operator hub authentication](#operator-hub-authentication-ab5062). | _(none)_ |
+| `OPERATOR__AUTHENTICATION__CLIENTID` | Client id of the confidential OAuth client representing this operator. Empty ⇒ the operator connects without a token, exactly as before. | _(none)_ |
+| `OPERATOR__AUTHENTICATION__CLIENTSECRET` | Client secret for that client. Supply via `secretKeyRef`, like `OPERATOR__BROKERPASSWORD`. | _(none)_ |
+| `OPERATOR__AUTHENTICATION__TENANTID` | Tenant the operator authenticates **against** (`acr_values=tenant:…`). Set it to the installation's **system tenant** (`OctoSystem` by default). | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__MONGODBHOST` | MongoDB connection string projected into workload `clusterDependencies.mongodbHost`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__MONGODBREPLICASET` | MongoDB replica-set name projected into workload `clusterDependencies.mongodbReplicaSet`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__RABBITMQHOST` | RabbitMQ host projected into workload `clusterDependencies.rabbitMqHost`. | _(none)_ |
@@ -46,6 +50,55 @@ The `ClusterSecrets.*` settings are different: they are injected only when the w
 `BrokerPassword` and `RootCaCertificate` are injected unconditionally instead — independent of `ReceivesClusterSecrets` — because every workload needs the controller command bus and, on private-CA clusters, the same TLS trust anchor the operator itself was given (AB#4417). `BrokerPassword` still renders as a `valueFrom.secretKeyRef` envelope like the gated secrets above; `RootCaCertificate` is the one exception that renders as a plain string at `secrets.rootCa` — the workload chart's own root-CA handling `b64enc`s the value directly and requires a literal, not a `valueFrom` map.
 
 For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
+
+### Operator hub authentication (AB#5062)
+
+The operator can present a client-credentials access token on its `/operatorHub` connection to the
+Communication Controller. It is acquired at startup and refreshed for the lifetime of the process,
+and the SDK reads it on every (re)connect.
+
+**Configuring it is optional and the default is the previous behaviour.** With no
+`OPERATOR__AUTHENTICATION__CLIENTID` the operator starts and connects anonymously, precisely as
+every installation does today. This is deliberate: the operator is the control plane for all
+workload management, so a hard requirement would take the whole fleet down on upgrade.
+
+```yaml
+Operator:
+  Authentication:
+    IssuerUri: https://connect.test-2.mm.cloud   # public issuer, not a cluster-internal name
+    ClientId: octo-communication-operator
+    ClientSecret: <from a secretKeyRef>
+    TenantId: OctoSystem                          # the system tenant — see below
+```
+
+**Which tenant, and why it matters.** The operator is tenant-crossing: one process, one connection,
+every tenant's pools. `/operatorHub` is correspondingly *not* tenant-scoped — the controller gates it
+with `SystemCommunicationApiPolicy`, a plain `scope=octo_api` requirement that never asks which
+tenant the caller belongs to. `TenantId` therefore does not decide what the operator may do; it
+decides which tenant's `ClientStore` the identity service resolves `ClientId` in. Register the
+operator's client in the **system tenant** and name it here. Pinning the credential to one of the
+managed tenants would let a tenant delete take the whole fleet's credential with it — including the
+credential needed to tear that tenant's own pools down.
+
+Since **AB#5058**, omitting `TenantId` is only safe for a client that is provably unmirrored: a
+`client_credentials` request without `acr_values` is refused with `invalid_request` as soon as the
+client id is ambiguous (flagged `AutoProvisionInChildTenants`, a mirror itself, or with live mirror
+rows). Always set it. The operator logs a warning at startup when a client id is configured without
+one.
+
+**Token renewal.** An established SignalR connection is authorized once, at connect time, and the
+controller does not set `CloseOnAuthenticationExpiration` — so an expiring token does not drop a live
+connection. The exposure is the *re*connect, which happens routinely (controller rollout, node drain,
+network blip, SDK watchdog). `OperatorAccessTokenService` therefore replaces the token five minutes
+before its own expiry; a failed acquisition retries every 30 seconds and keeps the previous token in
+the meantime.
+
+**Rollout order.** The controller's `/operatorHub` gate (AB#5059) ships in `LogOnly`. Roll operators
+with credentials out **first**, read the controller's `LogOnly` warnings until no operator connection
+is listed as failing the policy any more, and only then set
+`OCTO_OPERATORHUBAUTHORIZATION__MODE=Enforce` on the controller. Arming it earlier disconnects every
+operator that has not been given a credential yet — central and edge alike — leaving all pools
+unregistered and no workload deploys.
 
 ## Getting started as developer
 

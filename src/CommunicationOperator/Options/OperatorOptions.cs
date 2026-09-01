@@ -166,6 +166,14 @@ public class OperatorOptions
     public string? ImageRegistry { get; set; }
 
     /// <summary>
+    /// Credentials the operator uses to obtain its own access token for the
+    /// Communication Controller's <c>/operatorHub</c> (AB#5062). Optional: an
+    /// operator with no client id connects exactly as it always has, without a
+    /// token. See <see cref="OperatorAuthenticationOptions"/>.
+    /// </summary>
+    public OperatorAuthenticationOptions Authentication { get; set; } = new();
+
+    /// <summary>
     /// Cluster-internal service endpoints (Mongo, RabbitMQ, CrateDB) that
     /// workloads need. Each field is optional: only those that are set are
     /// projected into the workload's Helm values at deploy time. Edge
@@ -194,6 +202,93 @@ public class OperatorOptions
     /// pipeline from Vault).
     /// </summary>
     public ClusterSecretsOptions ClusterSecrets { get; set; } = new();
+}
+
+/// <summary>
+/// Client-credentials configuration the operator authenticates its own
+/// <c>/operatorHub</c> connection with (AB#5062).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Bound from <c>Operator:Authentication</c>, i.e. <c>OPERATOR__AUTHENTICATION__ISSUERURI</c>,
+/// <c>__CLIENTID</c>, <c>__CLIENTSECRET</c>, <c>__TENANTID</c>.
+/// </para>
+/// <para>
+/// 🔴 <b>Every field is optional and the operator starts and connects without them.</b> This is a
+/// deliberate compatibility guarantee, not an oversight: the operator is the control plane for
+/// all workload management, and every installation in the estate — central and edge — currently
+/// runs without any of these keys. A hard requirement here would take the whole fleet down on
+/// upgrade, which is precisely the outage this work item exists to prevent. Unconfigured, the
+/// operator connects anonymously exactly as before; the controller's <c>/operatorHub</c> gate
+/// (AB#5059) must therefore stay in <c>LogOnly</c> until every operator has been given
+/// credentials.
+/// </para>
+/// </remarks>
+public class OperatorAuthenticationOptions
+{
+    /// <summary>
+    /// Public issuer URI of the identity service (e.g. <c>https://connect.test-2.mm.cloud</c>).
+    /// OIDC discovery runs against it, so it must be the address the identity service itself
+    /// issues tokens under — not a cluster-internal service name whose discovery document would
+    /// advertise a different issuer than the controller validates against.
+    /// </summary>
+    public string? IssuerUri { get; set; }
+
+    /// <summary>
+    /// Client id of the confidential OAuth client representing this operator. When empty, no
+    /// token is acquired and the operator connects unauthenticated (see the remarks on
+    /// <see cref="OperatorAuthenticationOptions"/>).
+    /// </summary>
+    public string? ClientId { get; set; }
+
+    /// <summary>
+    /// Client secret for <see cref="ClientId"/>. Supply it through a <c>secretKeyRef</c>-backed
+    /// environment variable the same way <c>OPERATOR__BROKERPASSWORD</c> is supplied — never as a
+    /// literal in a values file.
+    /// </summary>
+    public string? ClientSecret { get; set; }
+
+    /// <summary>
+    /// The tenant the operator authenticates <b>against</b>, sent as
+    /// <c>acr_values=tenant:{TenantId}</c> on the token request.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>This is a deliberate identity decision, not an address.</b> The operator is
+    /// tenant-crossing by construction: one process, one hub connection, every tenant's pools and
+    /// workloads. Accordingly <c>/operatorHub</c> is <b>not</b> tenant-scoped — the controller
+    /// gates it with <c>SystemCommunicationApiPolicy</c>, which is a plain
+    /// <c>scope=octo_api</c> requirement and never asks which tenant the caller belongs to. So the
+    /// value here does not decide what the operator may do; it decides which tenant's
+    /// <c>ClientStore</c> the identity service resolves <see cref="ClientId"/> in.
+    /// </para>
+    /// <para>
+    /// Set it to the installation's <b>system tenant</b> (<c>OctoSystem</c> by default) and
+    /// register the operator's client there. Two reasons, both structural: the operator's
+    /// authority is system-level, and pinning it to one of the tenants it manages would let a
+    /// tenant delete take the credential of the entire fleet with it — including the credential
+    /// needed to tear that very tenant's pools down.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Leaving it empty is only safe for a provably unmirrored client (AB#5058).</b> A
+    /// <c>client_credentials</c> request without <c>acr_values</c> is refused outright with
+    /// <c>invalid_request</c> as soon as the client id is ambiguous — flagged
+    /// <c>AutoProvisionInChildTenants</c>, being a mirror itself, or having live
+    /// <c>RtClientMirror</c> rows. Since a fleet-wide credential is exactly the kind of client
+    /// somebody eventually flags for mirroring, always set this rather than relying on the
+    /// unambiguous case holding forever. The operator logs a warning at startup when a client id
+    /// is configured without one.
+    /// </para>
+    /// </remarks>
+    public string? TenantId { get; set; }
+
+    /// <summary>
+    /// Whether enough is configured to attempt a token request at all. The secret is not part of
+    /// the check — a public client has none, and a confidential client with a missing secret must
+    /// fail loudly at the token endpoint rather than silently degrade to an anonymous connection
+    /// that looks healthy until the gate is armed.
+    /// </summary>
+    public bool IsEnabled => !string.IsNullOrWhiteSpace(IssuerUri) && !string.IsNullOrWhiteSpace(ClientId);
 }
 
 /// <summary>
