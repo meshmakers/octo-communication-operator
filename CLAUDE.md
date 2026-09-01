@@ -569,6 +569,48 @@ Tests:
   and leave the CR stuck Unregistered.
 - `CommunicationPoolMutator`: currently a no-op (`NoChanges()`).
 
+### HTTP surface: this host has no authentication at all (AB#5059)
+
+`Program.cs` registers `AddKubernetesOperator()`, `AddHealthChecks()` and `AddControllers()` — and
+nothing else. There is **no `AddAuthentication`, no `AddAuthorization`, no `UseAuthentication`, no
+`UseAuthorization`, no token authority and no JWT configuration anywhere in this repository.** Two
+consequences, both easy to get wrong:
+
+- **`[Authorize]` does not gate anything here — it breaks the endpoint.** Without a scheme the
+  attribute makes every request to it fail with `InvalidOperationException: No authenticationScheme
+  was specified, and there was no DefaultChallengeScheme found`. Anyone tempted to "just add
+  `[Authorize]`" to a controller in this repo has to bring an authority, an OIDC client and a bearer
+  scheme with it first.
+- **`Controller/DiagnosticsController` is therefore restricted by network origin instead.**
+  `POST system/v1/diagnostics/reconfigureLogLevel` reconfigures NLog **process-wide** and used to be
+  reachable by anything that could open a TCP connection to the pod — any workload in the cluster
+  could turn every logger to Trace (a disk / log-pipeline denial of service on a process handling
+  broker credentials, cluster secrets and helm values) or silence them all. It now answers **403** to
+  any request whose remote address is not loopback. What remains reachable is `kubectl exec … curl`
+  and `kubectl port-forward` (the kubelet proxies that stream *into* the pod's network namespace, so
+  it arrives from `127.0.0.1`) — both gated by Kubernetes RBAC, which is the authorization this
+  process cannot perform but the cluster already does.
+  - It was kept rather than deleted — no caller exists anywhere in the checkout (`octo-cli`'s
+    `ReconfigureLogLevel` covers identity / asset-repo / bot / communication-controller / reporting,
+    there is no operator service client in `octo-sdk`, and the MCP `reconfigure_log_level` tool goes
+    to bot services) — because raising the operator's log level *without restarting the pod* is
+    genuinely useful while a helm rollout misbehaves, and a restart loses the state one wants to see.
+  - A missing remote address is **not** loopback (fail closed). IPv4-mapped IPv6 (`::ffff:127.0.0.1`,
+    what a dual-stack Kestrel reports) is unmapped first — `IPAddress.IsLoopback` does not recognise
+    it, and getting that wrong would lock out the one access path being preserved.
+  - The route keeps its literal `system/v1/[controller]`; there are no API-versioning services in this
+    host, so the `v1` in the template *is* the version pin. Adding `[ApiVersion]` would mean wiring
+    `Asp.Versioning` into an operator that publishes no API surface.
+  - Tests: `tests/CommunicationOperator.Tests/Controller/DiagnosticsControllerTests.cs`.
+- **Outbound, the operator sends no credential either**, which is the other half of the same gap:
+  `OperatorHubClientFactory` hands `OperatorHubClient` a freshly constructed, never-populated
+  `ServiceClientAccessToken`, and `SignalRClient.CreateHubConnection` in **octo-sdk** sets the literal
+  `Authorization: Bearer your-access-token` under a `// TODO: Handle authentication`. The controller's
+  `/operatorHub` gate (AB#5059, see `octo-communication-controller-services/CLAUDE.md`) therefore
+  ships in `LogOnly` and **cannot be armed until this repo and octo-sdk give the operator a real
+  token** — `OperatorOptions` has no client id, secret or authority to obtain one from. Arming it
+  before that disconnects the whole fleet.
+
 ## Configuration
 
 `OperatorOptions` is bound from the `Operator` configuration section. All keys are also available as environment variables prefixed `OPERATOR__`. See `README.md` for the full table.
