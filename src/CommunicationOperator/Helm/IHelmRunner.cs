@@ -19,7 +19,10 @@ public interface IHelmRunner
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Runs <c>helm upgrade --install</c> for the given release.
+    /// Runs <c>helm upgrade --install --rollback-on-failure</c> for the given
+    /// release. <c>--rollback-on-failure</c> (Helm 4, replaces the deprecated
+    /// <c>--atomic</c>) implies <c>--wait</c> and rolls the release back when
+    /// the upgrade fails.
     /// </summary>
     /// <param name="release">Helm release name (typically <c>{tenant}-{workload}</c>).</param>
     /// <param name="chart">Chart reference, e.g. <c>{alias}/{chartName}</c>.</param>
@@ -34,13 +37,13 @@ public interface IHelmRunner
     /// <summary>
     /// Runs <c>helm upgrade --install --dry-run=server</c> for the given
     /// release. Same arguments as <see cref="UpgradeInstallAsync"/> minus
-    /// <c>--atomic</c> (nothing to roll back) plus <c>--dry-run=server</c>,
+    /// <c>--rollback-on-failure</c> (nothing to roll back) plus <c>--dry-run=server</c>,
     /// which submits the manifests to the API server with <c>dryRun=All</c>
     /// — so admission webhooks, OpenAPI schema validation and RBAC checks
     /// all run, but no resources are created. Catches misconfigurations
     /// (missing required values, RBAC, Gatekeeper policies, invalid
-    /// annotations) in &lt;2s instead of waiting 5min for the atomic
-    /// timeout. Does NOT catch ImagePull / CrashLoop / probe failures
+    /// annotations) in &lt;2s instead of waiting 5min for the rollback-on-failure
+    /// wait timeout. Does NOT catch ImagePull / CrashLoop / probe failures
     /// because no pods are created — those are covered by the
     /// post-failure diagnostic collector path in
     /// <see cref="Diagnostics.IWorkloadDiagnosticsCollector"/>.

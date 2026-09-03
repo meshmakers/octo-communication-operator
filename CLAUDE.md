@@ -61,8 +61,8 @@ the `WorkloadReconciler` over the `helm` CLI.
   the debug log line.
 - `Helm/IHelmRunner` + `HelmRunner` — high-level operations:
   `EnsureRepoAsync` (idempotent `helm repo add --force-update` + `helm repo update`),
-  `UpgradeInstallAsync` (with `-f`, `--set`, `--atomic`),
-  `UpgradeInstallDryRunAsync` (same args minus `--atomic`, plus
+  `UpgradeInstallAsync` (with `-f`, `--set`, `--rollback-on-failure`),
+  `UpgradeInstallDryRunAsync` (same args minus `--rollback-on-failure`, plus
   `--dry-run=server` — see [Pre-flight + Diagnostics](#pre-flight--diagnostics) below),
   `UninstallAsync` (uses `--ignore-not-found`). Non-zero exit codes become
   `HelmException` with full stderr.
@@ -233,12 +233,12 @@ blocks the deploy) and the history/parse cases in `Helm/HelmRunnerTests`.
 
 ### Pre-flight + Diagnostics
 
-`helm upgrade --install --atomic` collapses every failure into one
+`helm upgrade --install --rollback-on-failure` collapses every failure into one
 opaque stderr line — typically `Error: release X failed, and has been
 uninstalled due to atomic being set: context deadline exceeded`. The
 actual root cause (`ImagePullBackOff`, admission-webhook denial,
 `CrashLoopBackOff`, missing secret, …) is observable on the cluster
-while helm waits, but `--atomic` rolls everything back before the
+while helm waits, but `--rollback-on-failure` rolls everything back before the
 caller sees the failure. Two layers wrap the real install to surface
 the actual reason:
 
@@ -297,7 +297,7 @@ between "something is wrong" and "user sees it": helm waits its full
 `Reconcilers/WorkloadDeployWatcher` closes that gap.
 
 Started by `WorkloadReconciler.DeployAsync` right before the real
-`helm upgrade --install --atomic`, the watcher loop:
+`helm upgrade --install --rollback-on-failure`, the watcher loop:
 
 1. Sleeps `DefaultPollInterval` (3 s) — overridable per call so tests
    can drive the loop at millisecond speeds.
@@ -359,7 +359,7 @@ a controlled failure with an actionable message.
 official `helm` binary tarball from `get.helm.sh` (CNAME for the helm
 GitHub Releases) — the previous baltocdn.com apt-repo path was blocked
 on the `meshmakers-ci-agents` pool. Version is pinned via the
-`HELM_VERSION` build-arg (default `v3.16.4`); multi-arch builds work
+`HELM_VERSION` build-arg (default `v4.2.4`; Helm 4 — the reconciler passes `--rollback-on-failure`, the Helm 4 replacement for `--atomic`); multi-arch builds work
 because `TARGETARCH` is forwarded by Buildx. `HELM_CONFIG_HOME` /
 `HELM_CACHE_HOME` / `HELM_DATA_HOME` are set under `/operator/` so the
 non-root `operator-user` can write the repo cache.
@@ -390,7 +390,7 @@ generated resource as the
 Tests:
 - `Helm/HelmRunnerTests` — argument construction for repo-add (with /
   without auth), upgrade-install (files + `--set` escaping),
-  upgrade-install dry-run (`--dry-run=server` present, `--atomic`
+  upgrade-install dry-run (`--dry-run=server` present, `--rollback-on-failure`
   absent, operation tag flags pre-flight failures), uninstall;
   non-zero exit-code → `HelmException`.
 - `Diagnostics/WorkloadDiagnosticsCollectorTests` — pure-formatter

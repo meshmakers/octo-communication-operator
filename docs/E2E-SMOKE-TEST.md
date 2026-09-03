@@ -45,7 +45,7 @@ depend on.
 [WorkloadReconciler.DeployAsync]
             ├─ materialize K8s Secret '{release}-octo-secrets' for IsSecret values
             ├─ helm repo add (alias derived from URL hash) + helm repo update
-            └─ helm upgrade --install --atomic '{tenantId}-{workloadName}' {alias}/{chart}
+            └─ helm upgrade --install --rollback-on-failure '{tenantId}-{workloadName}' {alias}/{chart}
             ↓
 [Helm release + chart-defined Deployment / Service / … in 'octo' namespace]  ← helm + kubectl assertions
 ```
@@ -354,7 +354,7 @@ The operator log should print the pool-CR creation lines from step 3,
 ```
 Workload deployed event received: tenant 'e2etest', release 'e2etest-e2e-nginx'
 Ensuring helm repo 'r-<hash>' (https://charts.bitnami.com/bitnami)
-Running 'helm upgrade --install e2etest-e2e-nginx r-<hash>/nginx --namespace octo --create-namespace --atomic -f <values.yaml> -f <overrides.yaml>'
+Running 'helm upgrade --install e2etest-e2e-nginx r-<hash>/nginx --namespace octo --create-namespace --rollback-on-failure -f <values.yaml> -f <overrides.yaml>'
 Helm release 'e2etest-e2e-nginx' deployed successfully
 ```
 

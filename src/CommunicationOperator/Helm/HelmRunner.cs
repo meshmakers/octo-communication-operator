@@ -102,13 +102,18 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
 
         if (dryRunServer)
         {
-            // --atomic is meaningless for a dry-run (nothing to roll back) and
-            // forces helm to wait for resources that will never exist.
+            // --rollback-on-failure is meaningless for a dry-run (nothing to roll
+            // back) and its implied --wait would make helm wait for resources
+            // that will never exist.
             args.Add("--dry-run=server");
         }
         else
         {
-            args.Add("--atomic");
+            // Helm 4: --rollback-on-failure replaces the deprecated --atomic. It
+            // implies --wait (watcher strategy) and rolls the release back when
+            // the upgrade fails, so a failed deploy never leaves a half-applied
+            // release behind.
+            args.Add("--rollback-on-failure");
         }
 
         foreach (var file in valuesFiles)
