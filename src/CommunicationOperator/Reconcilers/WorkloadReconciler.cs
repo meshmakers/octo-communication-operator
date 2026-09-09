@@ -42,7 +42,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     // Tracks the cancellation source of every in-flight DeployAsync so that
     // a concurrent UndeployAsync for the same release can abort the running
     // helm process instead of serializing behind it (which would otherwise
-    // block on helm's --atomic timeout, typically 5 min).
+    // block on helm's --rollback-on-failure wait timeout, typically 5 min).
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _inFlightDeploys = new();
 
     public WorkloadReconciler(IHelmRunner helm, ICommunicationPoolKubernetesGateway gateway,
@@ -214,10 +214,10 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 }
                 catch (HelmException ex)
                 {
-                    // --atomic leaves only an opaque helm-side error on its
-                    // stderr (typically "context deadline exceeded"); the
+                    // --rollback-on-failure leaves only an opaque helm-side error
+                    // on its stderr (typically "context deadline exceeded"); the
                     // actual pod-level root cause is observable on the
-                    // cluster but vanishes when atomic rolls the release
+                    // cluster but vanishes when helm rolls the release
                     // back. Events outlive the pods that produced them
                     // (default TTL 1h), so a post-failure snapshot still
                     // catches ImagePull / scheduling / mount errors. Use a

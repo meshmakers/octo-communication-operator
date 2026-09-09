@@ -3,7 +3,7 @@ namespace Meshmakers.Octo.Communication.Operator.Diagnostics;
 /// <summary>
 /// Collects pod-level failure context for a Helm release so that an opaque
 /// helm error like <c>context deadline exceeded</c> (the only signal
-/// <c>helm upgrade --install --atomic</c> emits when its wait window
+/// <c>helm upgrade --install --rollback-on-failure</c> emits when its wait window
 /// elapses) can be enriched with the actual root cause: image-pull
 /// failures, scheduling errors, crash loops, etc.
 /// </summary>

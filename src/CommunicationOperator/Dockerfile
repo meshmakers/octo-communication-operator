@@ -26,7 +26,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS final
 # We pull the binary directly from get.helm.sh (CNAME for the official GitHub
 # Releases) rather than via the baltocdn.com apt repo — the meshmakers-ci-agents
 # pool does not allow outbound DNS to baltocdn.com.
-ARG HELM_VERSION=v3.16.4
+ARG HELM_VERSION=v4.2.4
 ARG TARGETARCH
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \

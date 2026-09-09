@@ -6,7 +6,7 @@ namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 
 /// <summary>
 /// Background loop that polls the cluster for failure-relevant signals on
-/// a workload's pods / events while <c>helm upgrade --install --atomic</c>
+/// a workload's pods / events while <c>helm upgrade --install --rollback-on-failure</c>
 /// is running, and pushes any new diagnostic snapshot to the controller via
 /// <see cref="IOperatorHubInvoker.ReportWorkloadDeploymentProgressAsync"/>.
 ///

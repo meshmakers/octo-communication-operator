@@ -75,7 +75,7 @@ internal class HelmRunnerTests
                     "upgrade", "--install", "acme-app", "acme/voest-app",
                     "--version", "1.2.3",
                     "--namespace", "octo",
-                    "--atomic",
+                    "--rollback-on-failure",
                     "-f", "/tmp/values-a.yaml",
                     "-f", "/tmp/values-b.yaml",
                     "--set", "image.tag=dev",
@@ -101,7 +101,7 @@ internal class HelmRunnerTests
                 {
                     "upgrade", "--install", "rel", "acme/app",
                     "--namespace", "octo",
-                    "--atomic",
+                    "--rollback-on-failure",
                 })),
             Arg.Any<CancellationToken>());
     }
@@ -157,7 +157,7 @@ internal class HelmRunnerTests
     }
 
     [Test]
-    public async Task UpgradeInstallDryRunAsync_AddsDryRunServerAndOmitsAtomic()
+    public async Task UpgradeInstallDryRunAsync_AddsDryRunServerAndOmitsRollbackOnFailure()
     {
         await _runner.UpgradeInstallDryRunAsync("acme-app", "acme/voest-app", "1.2.3", "octo",
             valuesFiles: new[] { "/tmp/values-a.yaml" },
