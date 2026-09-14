@@ -42,4 +42,24 @@ public interface ICommunicationPoolKubernetesGateway
     /// </summary>
     Task<int> ScaleDeploymentsByInstanceAsync(string @namespace, string instance, int replicas,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Builds an owner reference to the <c>CommunicationPool</c> CR named <paramref name="name"/>
+    /// in <paramref name="namespace"/>, or returns <c>null</c> when that CR does not exist
+    /// (AB#4924). The CR is the only Kubernetes object that represents a tenant, so it is what a
+    /// pool's resources are owned by: deleting the tenant deletes the CR, and the garbage
+    /// collector then takes the pool with it.
+    /// </summary>
+    Task<V1OwnerReference?> TryGetCommunicationPoolOwnerReferenceAsync(string @namespace, string name,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes <paramref name="ownerReference"/> onto every Deployment carrying the
+    /// <c>app.kubernetes.io/instance={instance}</c> label (AB#4924). The list is <b>replaced</b>,
+    /// not merged: the operator is the only writer of owner references on the resources it
+    /// deploys, so a replace is deterministic and cannot accumulate stale entries across
+    /// redeploys. Returns the number of Deployments patched (0 when the release has none).
+    /// </summary>
+    Task<int> SetDeploymentOwnerReferenceByInstanceAsync(string @namespace, string instance,
+        V1OwnerReference ownerReference, CancellationToken cancellationToken = default);
 }

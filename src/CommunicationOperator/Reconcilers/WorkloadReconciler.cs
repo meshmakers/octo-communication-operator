@@ -67,7 +67,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     public async Task DeployAsync(WorkloadDeployedDto workload, CancellationToken cancellationToken)
     {
         var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
-        var ns = _options.PoolNamespace;
+        var ns = ResolveNamespace(workload.WorkloadType);
         var secretName = SecretName(release);
 
         _logger.LogInformation(
@@ -104,13 +104,23 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             //    The resulting overrides flow through the normal secret-flagged
             //    path: materialized into {release}-octo-secrets, referenced from
             //    the chart via valueFrom secretKeyRef.
-            workload = workload with { Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets, _options) };
+            workload = workload with
+            {
+                Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets,
+                    workload.WorkloadType, _options),
+            };
+
+            // AB#4924: a pool's resources belong to the tenant that lends it out, so that deleting
+            // the tenant takes the pool with it even when the controller-driven undeploy cascade
+            // never runs (controller down, operator restarted, tracking lost). Resolved before the
+            // secret is written so both the secret and the release's Deployments carry it.
+            var ownerReference = await TryResolvePoolOwnerReferenceAsync(workload, ns, deployToken);
 
             // 1. Materialize / refresh the operator-owned secret. We replace it
             //    every deploy so a value rotation propagates without manual
             //    intervention. When no secret-flagged overrides exist, ensure any
             //    leftover secret from a previous deploy is removed.
-            await ReconcileSecretAsync(ns, secretName, workload, deployToken);
+            await ReconcileSecretAsync(ns, secretName, workload, ownerReference, deployToken);
 
             // 2. Make sure the chart repository is registered + index refreshed.
             var alias = RepoAlias(workload.RepositoryUrl);
@@ -211,6 +221,9 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 {
                     await _helm.UpgradeInstallAsync(release, chartRef,
                         chartVersion, ns, valuesFiles, setValues, deployToken);
+                    // Only after the install: the Deployments the reference is written to are
+                    // created by helm, so there is nothing to stamp before this point.
+                    await ApplyPoolOwnerReferenceAsync(release, ns, ownerReference, deployToken);
                 }
                 catch (HelmException ex)
                 {
@@ -395,7 +408,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     public async Task UndeployAsync(WorkloadUndeployedDto workload, CancellationToken cancellationToken)
     {
         var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
-        var ns = _options.PoolNamespace;
+        var ns = ResolveNamespace(workload.WorkloadType);
         var secretName = SecretName(release);
 
         _logger.LogInformation(
@@ -444,7 +457,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     public async Task<int> ScaleAsync(ScaleWorkloadDto workload, CancellationToken cancellationToken)
     {
         var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
-        var ns = _options.PoolNamespace;
+        var ns = ResolveNamespace(workload.WorkloadType);
 
         _logger.LogInformation(
             "Scaling workload: tenant '{TenantId}', workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}' to {Replicas} replica(s)",
@@ -463,7 +476,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     }
 
     private async Task ReconcileSecretAsync(string ns, string secretName, WorkloadDeployedDto workload,
-        CancellationToken cancellationToken)
+        V1OwnerReference? ownerReference, CancellationToken cancellationToken)
     {
         var secretEntries = workload.Values.Where(v => v.IsSecret).ToArray();
 
@@ -507,6 +520,9 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 {
                     ["octo-mesh.meshmakers.io/workload-name"] = workload.WorkloadName,
                 },
+                // Null for every non-pool workload — those are undeployed through the controller
+                // cascade and have never needed a garbage-collection safety net (AB#4924).
+                OwnerReferences = ownerReference is null ? null : [ownerReference],
             },
             Type = "Opaque",
             Data = data,
@@ -536,7 +552,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// are skipped silently.
     /// </summary>
     internal static IReadOnlyList<ValueOverrideDto> AppendClusterSecrets(
-        IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets, OperatorOptions options)
+        IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets,
+        WorkloadTypeDto workloadType, OperatorOptions options)
     {
         var injected = new List<ValueOverrideDto>(5);
 
@@ -567,6 +584,21 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         if (!string.IsNullOrEmpty(options.RootCaCertificate))
         {
             injected.Add(new ValueOverrideDto { Path = "secrets.rootCa", Value = options.RootCaCertificate, IsSecret = false });
+        }
+
+        // 🔴 AB#4924: an adapter POOL never receives them, whatever the entity says. These are the
+        // cluster's SHARED data-store credentials — one Mongo user, one CrateDB user, every
+        // tenant's data behind them. A pool member executes work for tenants other than the one
+        // that owns it, and a lease is the mechanism that hands it exactly one tenant at a time;
+        // a standing credential to all of them makes that mechanism decorative. What a member does
+        // get is the two unconditional tiers above (the RabbitMQ command bus and the TLS trust
+        // anchor, neither of which carries tenant authority) plus its own per-release secret in
+        // the platform namespace. Tenant-scoped data access arrives with the lease and leaves with
+        // it. The controller refuses to set ReceivesClusterSecrets on a pool as well — two gates,
+        // one on each side of the wire, because either side alone is one edit away from silence.
+        if (workloadType == WorkloadTypeDto.AdapterPool)
+        {
+            receivesClusterSecrets = false;
         }
 
         // Data-store credentials (Mongo / CrateDB) only matter for adapters
@@ -601,6 +633,121 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         merged.AddRange(injected);
         merged.AddRange(existing);
         return merged;
+    }
+
+    /// <summary>
+    /// Kubernetes namespace a workload is deployed into (AB#4924).
+    ///
+    /// Everything except an adapter pool goes to <see cref="OperatorOptions.PoolNamespace"/>,
+    /// unchanged. A pool goes to <see cref="OperatorOptions.PlatformNamespace"/> when one is
+    /// configured, because its members run work for tenants other than the one that owns it and
+    /// must not sit among that tenant's own workloads (concept §4b, Q1). An unset platform
+    /// namespace resolves to the pool namespace — see the option's documentation for why that is
+    /// the correct default and not a fallback.
+    /// </summary>
+    internal string ResolveNamespace(WorkloadTypeDto workloadType) =>
+        workloadType == WorkloadTypeDto.AdapterPool && !string.IsNullOrWhiteSpace(_options.PlatformNamespace)
+            ? _options.PlatformNamespace!
+            : _options.PoolNamespace;
+
+    /// <summary>
+    /// Owner reference to the lending tenant's <c>CommunicationPool</c> CR for a pool workload,
+    /// or <c>null</c> for anything else — and for a pool whose namespace is not the CR's
+    /// namespace (AB#4924).
+    ///
+    /// 🔴 That last case is a refusal, not a gap. Kubernetes forbids cross-namespace owner
+    /// references: a namespaced dependent whose owner lives elsewhere is treated as having a
+    /// <i>missing</i> owner and is deleted by the garbage collector. Writing one anyway would not
+    /// merely fail to clean up after a deleted tenant, it would delete a live tenant's pool within
+    /// seconds of the deploy. So the reference is written only where it is valid, and its absence
+    /// is logged where it is not.
+    /// </summary>
+    private async Task<V1OwnerReference?> TryResolvePoolOwnerReferenceAsync(WorkloadDeployedDto workload,
+        string ns, CancellationToken cancellationToken)
+    {
+        if (workload.WorkloadType != WorkloadTypeDto.AdapterPool)
+        {
+            return null;
+        }
+
+        if (!string.Equals(ns, _options.PoolNamespace, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "Adapter pool '{WorkloadName}' is deployed to namespace '{Namespace}' but its tenant's CommunicationPool CR lives in '{CrNamespace}'. Kubernetes rejects cross-namespace owner references, so the pool will NOT be garbage-collected when tenant '{TenantId}' is deleted; it is removed by the controller's undeploy cascade only.",
+                workload.WorkloadName, ns, _options.PoolNamespace, workload.TenantId);
+            return null;
+        }
+
+        try
+        {
+            var crName = CommunicationPoolManager.GetCrName(workload.TenantId, workload.PoolRtId);
+            var ownerReference =
+                await _gateway.TryGetCommunicationPoolOwnerReferenceAsync(ns, crName, cancellationToken);
+            if (ownerReference == null)
+            {
+                _logger.LogWarning(
+                    "No CommunicationPool CR '{CrName}' in namespace '{Namespace}' to own adapter pool '{WorkloadName}'; deploying without an owner reference",
+                    crName, ns, workload.WorkloadName);
+            }
+
+            return ownerReference;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            // Best effort, like every other cluster-state read on this path: garbage collection is
+            // a safety net behind the controller's undeploy cascade, and losing the net is not a
+            // reason to refuse the deploy.
+            _logger.LogWarning(e,
+                "Could not resolve the owner reference for adapter pool '{WorkloadName}'; deploying without one",
+                workload.WorkloadName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Stamps the resolved owner reference onto the Deployments helm just created (AB#4924).
+    /// No-op when there is no reference to write. Best effort: the release is already installed
+    /// and running at this point, and failing the deploy over a missing safety net would trade a
+    /// working pool for a clean one.
+    /// </summary>
+    private async Task ApplyPoolOwnerReferenceAsync(string release, string ns, V1OwnerReference? ownerReference,
+        CancellationToken cancellationToken)
+    {
+        if (ownerReference == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var patched = await _gateway.SetDeploymentOwnerReferenceByInstanceAsync(ns, release, ownerReference,
+                cancellationToken);
+            if (patched == 0)
+            {
+                _logger.LogWarning(
+                    "Release '{Release}' has no Deployments to own in namespace '{Namespace}'; the adapter pool will not be garbage-collected with its tenant",
+                    release, ns);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Adapter pool release '{Release}': {Count} Deployment(s) now owned by CommunicationPool '{Owner}'",
+                release, patched, ownerReference.Name);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e,
+                "Could not write the owner reference onto release '{Release}'; the adapter pool will not be garbage-collected with its tenant",
+                release);
+        }
     }
 
     /// <summary>

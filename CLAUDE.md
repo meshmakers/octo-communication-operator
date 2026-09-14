@@ -497,6 +497,63 @@ changes through a dedicated hub callback instead of helm:
 Tests: `Reconcilers/WorkloadReconcilerTests/ScaleAsyncTests`, the hibernation-pin cases in
 `DeployAsyncTests`, and `Services/OperatorHubServiceTests/ScaleWorkloadTests`.
 
+### Adapter Pools — Platform Namespace, Owner References, Secret Tier (AB#4924 increment 5)
+
+An **adapter pool** (`WorkloadTypeDto.AdapterPool`) is one workload with a replica range whose
+members are leased to tenants in the owning tenant's subtree, one work item per lease. It goes
+through the same `DeployAsync` / `UndeployAsync` / `ScaleAsync` path as every other workload — the
+1:1 workload ↔ helm release model is untouched, `MinReplicas`/`MaxReplicas` are a replica count on
+one release, and the AB#4917 scale verb is the scaling mechanism. Three things are different.
+
+**1. Namespace.** `WorkloadReconciler.ResolveNamespace` sends a pool to `PlatformNamespace` and
+everything else to `PoolNamespace`. A pool member runs work for tenants other than the one that owns
+it, so it deliberately does not sit among that tenant's own workloads — consumption is attributed to
+the tenant whose work ran, not to the lender. Deploy, undeploy, scale, the per-release secret, the
+stale-lock check and the diagnostics collector all use the resolved namespace.
+
+🔴 **`PlatformNamespace` defaults to empty, which resolves to `PoolNamespace`, and that is a
+decision rather than a gap.** Kubernetes forbids cross-namespace owner references: a namespaced
+dependent whose owner lives elsewhere is treated as having a *missing* owner and is **deleted** by
+the garbage collector. The owner of a pool is the lending tenant's `CommunicationPool` CR, which
+lives in `PoolNamespace`. So the two namespaces have to be the same one for owner-reference garbage
+collection to exist at all — and `PoolNamespace` is already a platform namespace rather than a
+tenant namespace, so the default satisfies both halves of the requirement. Configuring a distinct
+platform namespace is supported and moves the release there, but the operator then refuses to write
+the owner reference and logs why, once per deploy.
+
+**2. Owner references.** For a pool, `DeployAsync` resolves an owner reference to the CR
+`{tenantId}-{poolRtId}` (`CommunicationPoolManager.GetCrName`, shared so both call sites cannot
+drift) and puts it on the operator-owned `{release}-octo-secrets` Secret and — **after** the real
+install, because helm creates them — on the release's Deployments. Deleting the tenant deletes the
+CR and Kubernetes takes the pool with it, which is the safety net behind the controller's undeploy
+cascade for the cases where that cascade cannot run. Every step is best effort: a missing CR, a
+failed lookup or a failed patch logs and lets the deploy finish. `Controller = false` (helm manages
+these objects; claiming controller ownership would make the operator their single controlling owner)
+and `BlockOwnerDeletion = false` (that needs `update` on the owner's finalizers subresource and turns
+a tenant delete into a wait on every dependent).
+
+**3. Secret tier.** `AppendClusterSecrets` forces `receivesClusterSecrets` to false for a pool,
+whatever the DTO says. Tiers 1 and 2 still apply — `secrets.rabbitmq` (the controller command bus)
+and `secrets.rootCa` (the TLS trust anchor) — because neither carries tenant authority. Tier 3, the
+cluster's *shared* Mongo / CrateDB credentials, never does: one user, every tenant's data behind it,
+handed to a process whose whole purpose is to be granted one tenant at a time by a lease. The
+controller refuses the same thing independently when it builds the DTO; two gates, one on each side
+of the wire, because either alone is one edit away from silence.
+
+**RBAC.** The operator's Role/ClusterRole lives in `octo-helm-core`
+(`src/octo-mesh-communication-operator/templates/operator-role.yaml`), not in this repo. With
+`rbac.scope: cluster` (the default binding shape) nothing has to change — the ClusterRole already
+covers secrets and deployments in every namespace. With `rbac.scope: namespace` the Role is bound in
+the release namespace only, so a **distinct** platform namespace needs its own Role + RoleBinding
+there. A missing grant surfaces on the `--dry-run=server` pre-flight rather than mid-rollout, which
+is what that pre-flight is for.
+
+Tests: `Reconcilers/WorkloadReconcilerTests/PlatformNamespaceTests` (routing, plus the
+tenant-workload cases that pin the one-namespace assumption as *unchanged* for Adapter and
+Application), `…/PoolOwnerReferenceTests` (lookup, stamping order, the cross-namespace refusal,
+every best-effort path), the pool cases in `…/AppendClusterSecretsTests`, and the kind end-to-end
+suite below.
+
 ### Reverse-Sync on Reconnect
 
 After the operator has re-registered every owned `CommunicationPool` CR
@@ -683,6 +740,7 @@ Key options:
 | `WorkloadCommunicationControllerUri` | Controller URI projected into every deployed workload's Helm values. Empty (default) projects `CommunicationControllerUri` — one address serves the operator's own hub connection and the workloads, correct wherever both resolve it the same way. Set it when the operator needs an address the workloads cannot use (local kind: host-run controller reachable for the operator via a pod hostAlias only — the adapters then sat at Unregistered while the operator looked healthy, AB#4967). |
 | `PoolRegistrationRetrySeconds` | Cadence of the pool-registration retry loop (see "Pool-Registration Retry Loop" above). Default 30; fractional values allowed; `<= 0` disables the loop. |
 | `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
+| `PlatformNamespace` | Namespace adapter-pool workloads (AB#4924) are deployed into. Empty (default) resolves to `PoolNamespace`, which is required for owner-reference garbage collection to work at all — Kubernetes forbids cross-namespace owner references and deletes dependents that carry one. Setting a distinct namespace moves the release there and disables the owner reference, with a warning per deploy. |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |
 | `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter/application pods |
 | `BrokerUser`, `BrokerPassword` | Credentials baked into `<tenantId>-<poolName>-octo-mesh-connection` secret consumed by the Helm charts |
@@ -834,6 +892,28 @@ non-trivial changes in `OperatorHubService` or `CommunicationPoolManager`.
 `start-operator.ps1` is intentionally **not** named `octo-start.ps1` — that
 would cause `Start-Octo` to launch the operator automatically, which we want
 to keep opt-in for now.
+
+## Kubernetes End-to-End Tests (AB#4924)
+
+`tests/CommunicationOperator.Tests/E2E/AdapterPoolKindE2ETests` runs the adapter-pool paths against
+a **real apiserver**: a pool scaled 1 → 3 → 1 through `WorkloadReconciler.ScaleAsync`, and a pool
+garbage-collected when its tenant's `CommunicationPool` CR is deleted. Both prove things a
+substitute cannot — Kubernetes' garbage collector is a real controller with real rules, and a merge
+patch either moves `spec.replicas` on the live object or it does not.
+
+```bash
+OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
+  dotnet test --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj \
+  -c DebugL --filter "/*/*/AdapterPoolKindE2ETests/*"
+```
+
+Without `OCTO_OPERATOR_E2E_KUBECONTEXT` both tests report as **skipped**, never as passed — a green
+run on a machine with no cluster would be a lie about what was verified. The context needs the
+`communicationpools.octo-mesh.meshmakers.io` CRD installed (the `octo-mesh-crds` chart) and
+permission to create a namespace; everything is created in and cleaned up from `octo-pool-e2e`.
+Helm is deliberately not in the loop — nothing in this increment changed the helm layer, and a
+directly created Deployment carrying the release's `app.kubernetes.io/instance` label is exactly
+the shape the scale path selects on.
 
 ## Related Documentation
 

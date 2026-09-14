@@ -148,7 +148,7 @@ public class CommunicationPoolManager : ICommunicationPoolManager
     // the 53-char cap from K8sNaming so the secret name (which appends
     // "-octo-mesh-connection") still fits comfortably under the apiserver
     // 253-char ceiling for any reasonable combination of inputs.
-    private static string GetCrName(string tenantId, string poolRtId) =>
+    internal static string GetCrName(string tenantId, string poolRtId) =>
         K8sNaming.DnsName(K8sNaming.DefaultDnsNameMaxLength, tenantId, poolRtId);
 
     private static string GetSecretName(string tenantId, string poolRtId) =>

@@ -36,6 +36,30 @@ public class OperatorOptions
     public string PoolNamespace { get; set; } = "octo";
 
     /// <summary>
+    /// Kubernetes namespace that <b>adapter pool</b> workloads (AB#4924,
+    /// <see cref="Meshmakers.Octo.Communication.Contracts.DataTransferObjects.WorkloadTypeDto.AdapterPool"/>)
+    /// are deployed into. A pool member executes work on behalf of tenants that are not the
+    /// tenant owning the pool, so it deliberately does not live where that tenant's own
+    /// workloads live — consumption is attributed to the tenant whose work ran, not to the
+    /// lender (concept §4b, Q1).
+    ///
+    /// 🔴 <b>When empty (the default) pool workloads land in <see cref="PoolNamespace"/>.</b> That is
+    /// not a fallback for lack of a better idea: Kubernetes forbids cross-namespace owner
+    /// references, and a namespaced dependent whose owner lives in another namespace is treated
+    /// as having a missing owner and is <i>deleted</i> by the garbage collector. The owner of a
+    /// pool is the lending tenant's <c>CommunicationPool</c> CR, which lives in
+    /// <see cref="PoolNamespace"/> — so owner-reference garbage collection only exists while the
+    /// two namespaces are the same one. <see cref="PoolNamespace"/> is already a platform
+    /// namespace rather than a tenant namespace, so the default satisfies both halves of Q1.
+    ///
+    /// Setting this to a different namespace is supported and moves the pool's Helm release
+    /// there, but the operator then refuses to write the owner reference and says so once per
+    /// deploy: an invalid cross-namespace reference would not merely fail to garbage-collect,
+    /// it would have the pool deleted out from under a live tenant.
+    /// </summary>
+    public string? PlatformNamespace { get; set; }
+
+    /// <summary>
     /// Cluster-internal URI of the communication controller service,
     /// used as the communicationControllerUri in auto-created CommunicationPool CRs.
     /// </summary>

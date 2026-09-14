@@ -26,7 +26,7 @@ internal class AppendClusterSecretsTests
         // secrets stay gated on the flag.
         var existing = new[] { new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false } };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, FullClusterOptions());
+        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, WorkloadTypeDto.Adapter, FullClusterOptions());
 
         var injected = result.Where(e => e.IsSecret).ToArray();
         await Assert.That(injected.Length).IsEqualTo(1);
@@ -44,7 +44,7 @@ internal class AppendClusterSecretsTests
     {
         var existing = new[] { new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false } };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, new OperatorOptions());
+        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, WorkloadTypeDto.Adapter, new OperatorOptions());
 
         await Assert.That(result).IsSameReferenceAs(existing);
     }
@@ -54,7 +54,7 @@ internal class AppendClusterSecretsTests
     {
         var existing = new[] { new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false } };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: true, new OperatorOptions());
+        var result = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: true, WorkloadTypeDto.Adapter, new OperatorOptions());
 
         await Assert.That(result).IsSameReferenceAs(existing);
     }
@@ -62,7 +62,7 @@ internal class AppendClusterSecretsTests
     [Test]
     public async Task FlagOn_FullOptions_InjectsAllFourSecretFlaggedEntries()
     {
-        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, FullClusterOptions());
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, FullClusterOptions());
 
         await Assert.That(result.Count).IsEqualTo(4);
         foreach (var entry in result)
@@ -85,7 +85,7 @@ internal class AppendClusterSecretsTests
             BrokerPassword = "only-rabbit",
         };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts);
 
         await Assert.That(result.Count).IsEqualTo(1);
         await Assert.That(result[0].Path).IsEqualTo("secrets.rabbitmq");
@@ -102,7 +102,7 @@ internal class AppendClusterSecretsTests
         // operator entry in the merged list.
         var entityOverride = new ValueOverrideDto { Path = "secrets.databaseUser", Value = "entity-pwd", IsSecret = true };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(new[] { entityOverride }, receivesClusterSecrets: true, FullClusterOptions());
+        var result = WorkloadReconciler.AppendClusterSecrets(new[] { entityOverride }, receivesClusterSecrets: true, WorkloadTypeDto.Adapter, FullClusterOptions());
 
         var index = result.Select((e, i) => new { e, i })
             .Where(x => x.e.Path == "secrets.databaseUser")
@@ -133,7 +133,7 @@ internal class AppendClusterSecretsTests
     {
         var opts = new OperatorOptions { RootCaCertificate = "ca-pem-content" };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, opts);
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, WorkloadTypeDto.Adapter, opts);
 
         await Assert.That(result.Count).IsEqualTo(1);
         await Assert.That(result[0].Path).IsEqualTo("secrets.rootCa");
@@ -147,7 +147,7 @@ internal class AppendClusterSecretsTests
         var opts = FullClusterOptions();
         opts.RootCaCertificate = "ca-pem-content";
 
-        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts);
 
         var paths = result.Select(e => e.Path).ToArray();
         await Assert.That(paths).Contains("secrets.rootCa");
@@ -167,8 +167,8 @@ internal class AppendClusterSecretsTests
     {
         var existing = new[] { new ValueOverrideDto { Path = "image.tag", Value = "v1", IsSecret = false } };
 
-        var resultFlagOff = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, FullClusterOptions());
-        var resultFlagOn = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: true, FullClusterOptions());
+        var resultFlagOff = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: false, WorkloadTypeDto.Adapter, FullClusterOptions());
+        var resultFlagOn = WorkloadReconciler.AppendClusterSecrets(existing, receivesClusterSecrets: true, WorkloadTypeDto.Adapter, FullClusterOptions());
 
         await Assert.That(resultFlagOff.Select(e => e.Path)).DoesNotContain("secrets.rootCa");
         await Assert.That(resultFlagOn.Select(e => e.Path)).DoesNotContain("secrets.rootCa");
@@ -180,7 +180,7 @@ internal class AppendClusterSecretsTests
         var entityOverride = new ValueOverrideDto { Path = "secrets.rootCa", Value = "entity-ca-pem", IsSecret = false };
         var opts = new OperatorOptions { RootCaCertificate = "operator-ca-pem" };
 
-        var result = WorkloadReconciler.AppendClusterSecrets(new[] { entityOverride }, receivesClusterSecrets: false, opts);
+        var result = WorkloadReconciler.AppendClusterSecrets(new[] { entityOverride }, receivesClusterSecrets: false, WorkloadTypeDto.Adapter, opts);
 
         var index = result.Select((e, i) => new { e, i })
             .Where(x => x.e.Path == "secrets.rootCa")
@@ -198,11 +198,58 @@ internal class AppendClusterSecretsTests
         // string at secrets.rootCa, not a valueFrom.secretKeyRef envelope.
         var opts = new OperatorOptions { RootCaCertificate = "ca-pem-content" };
 
-        var injected = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, opts);
+        var injected = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, WorkloadTypeDto.Adapter, opts);
         var yaml = WorkloadOverrideYamlBuilder.Build(injected, "rel-octo-secrets");
 
         await Assert.That(yaml).IsNotNull();
         await Assert.That(yaml!).Contains("\"rootCa\": \"ca-pem-content\"");
         await Assert.That(yaml!).DoesNotContain("valueFrom");
+    }
+
+    [Test]
+    public async Task AdapterPool_FlagOn_StillRefusesTheClusterDataStoreCredentials()
+    {
+        // 🔴 AB#4924. These are the cluster's SHARED Mongo / CrateDB credentials — every tenant's
+        // data behind one user. A pool member executes work for tenants other than the one that
+        // owns it, and the lease is what hands it exactly one tenant at a time; a standing
+        // credential to all of them would make that mechanism decorative. The flag is refused on
+        // this side of the wire even when the entity sets it, because the controller-side gate is
+        // one edit away from silence.
+        var opts = new OperatorOptions
+        {
+            BrokerPassword = "rabbit-pwd",
+            RootCaCertificate = "ca-pem",
+            ClusterSecrets = new ClusterSecretsOptions
+            {
+                MongodbUserPassword = "mongo-user-pwd",
+                MongodbAdminPassword = "mongo-admin-pwd",
+                StreamDataPassword = "crate-pwd",
+            },
+        };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(),
+            receivesClusterSecrets: true, WorkloadTypeDto.AdapterPool, opts);
+
+        var paths = result.Select(v => v.Path).ToArray();
+        await Assert.That(paths).DoesNotContain("secrets.databaseUser");
+        await Assert.That(paths).DoesNotContain("secrets.databaseAdmin");
+        await Assert.That(paths).DoesNotContain("secrets.streamDataPassword");
+    }
+
+    [Test]
+    public async Task AdapterPool_StillGetsTheCommandBusAndTheTrustAnchor()
+    {
+        // What a pool member CAN pick up, stated positively: the two unconditional tiers. Neither
+        // carries tenant authority — the RabbitMQ command bus connects it to the controller, and
+        // the root CA lets it complete the TLS handshake. Tenant-scoped access arrives with a
+        // lease and leaves with it.
+        var opts = new OperatorOptions { BrokerPassword = "rabbit-pwd", RootCaCertificate = "ca-pem" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(),
+            receivesClusterSecrets: true, WorkloadTypeDto.AdapterPool, opts);
+
+        var paths = result.Select(v => v.Path).ToArray();
+        await Assert.That(paths).Contains("secrets.rabbitmq");
+        await Assert.That(paths).Contains("secrets.rootCa");
     }
 }
