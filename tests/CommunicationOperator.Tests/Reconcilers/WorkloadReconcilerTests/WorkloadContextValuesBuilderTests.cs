@@ -304,6 +304,53 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).Contains("\"authUri\": \"https://connect.test-2.mm.cloud\"");
     }
 
+    [Test]
+    public async Task Build_AdditionalValidIssuers_EmitsQuotedSequence()
+    {
+        // Local kind split-horizon (AB#5232): adapters reach identity via
+        // https://host.docker.internal:5003 while callers mint tokens via
+        // https://localhost:5003/ — the extra issuer widens only the issuer
+        // string comparison in the adapter's JWT validation.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            AuthUri = "https://host.docker.internal:5003",
+            AdditionalValidIssuers = ["https://localhost:5003/"],
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"authUri\": \"https://host.docker.internal:5003\"");
+        await Assert.That(yaml!).Contains("\"additionalValidIssuers\":");
+        await Assert.That(yaml!).Contains("\"https://localhost:5003/\"");
+    }
+
+    [Test]
+    public async Task Build_AdditionalValidIssuersWithBlankEntries_DropsTheBlanks()
+    {
+        // A whitespace entry must not be projected: the adapter normalizes each
+        // entry with a trailing slash, so an empty string would silently widen
+        // the accepted issuers to "/".
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            AdditionalValidIssuers = ["  ", "https://localhost:5003/", ""],
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"https://localhost:5003/\"");
+    }
+
+    [Test]
+    public async Task Build_AdditionalValidIssuersAllBlank_OmitsTheKey()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            AuthUri = "https://connect.test-2.mm.cloud",
+            AdditionalValidIssuers = ["", "   "],
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("additionalValidIssuers");
+    }
+
     // An emitted empty value is worse than an absent key: the adapter chart would render
     // OCTO_ADAPTER__AUTHORITYURL as an empty string, which overrides the default compiled
     // into the adapter instead of leaving it in place.

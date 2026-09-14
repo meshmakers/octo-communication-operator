@@ -179,6 +179,23 @@ public class OperatorOptions
     public string? AuthUri { get; set; }
 
     /// <summary>
+    /// Additional token issuer values workloads accept on top of
+    /// <see cref="AuthUri"/> (split-horizon setups). When set, the operator
+    /// injects the list into each workload's Helm values as
+    /// <c>additionalValidIssuers</c>; the adapter chart renders them as
+    /// <c>OCTO_ADAPTER__ADDITIONALVALIDISSUERS__&lt;n&gt;</c>, widening only the
+    /// issuer STRING comparison (signing keys still come from
+    /// <see cref="AuthUri"/>'s discovery document). Needed wherever callers
+    /// obtain tokens under a different host name than the one the workloads
+    /// reach the identity service by — e.g. the local kind dev cluster, where
+    /// adapters use <c>https://host.docker.internal:5003</c> while tokens are
+    /// minted via <c>https://localhost:5003/</c>. Env-bindable as
+    /// <c>OPERATOR__ADDITIONALVALIDISSUERS__0</c> etc. Empty (default) projects
+    /// nothing.
+    /// </summary>
+    public string[] AdditionalValidIssuers { get; set; } = [];
+
+    /// <summary>
     /// Private container registry the cluster uses to pull workload images
     /// (e.g. <c>docker.mm.cloud</c>). When set, the operator projects this
     /// into each workload's Helm values as <c>image.privateRegistry</c>, so
