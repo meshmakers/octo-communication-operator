@@ -82,6 +82,18 @@ public static class WorkloadContextValuesBuilder
             root["authUri"] = options.AuthUri!;
         }
 
+        // Split-horizon issuer widening (see OperatorOptions.AdditionalValidIssuers):
+        // whitespace-only entries are dropped rather than projected, because the
+        // adapter normalizes each entry with a trailing slash and an empty entry
+        // would silently widen the comparison to "/".
+        var additionalIssuers = options.AdditionalValidIssuers
+            .Where(i => !string.IsNullOrWhiteSpace(i))
+            .ToList();
+        if (additionalIssuers.Count > 0)
+        {
+            root["additionalValidIssuers"] = additionalIssuers;
+        }
+
         if (!string.IsNullOrWhiteSpace(options.ImageRegistry))
         {
             // Adapter / application charts read `.Values.image.privateRegistry`

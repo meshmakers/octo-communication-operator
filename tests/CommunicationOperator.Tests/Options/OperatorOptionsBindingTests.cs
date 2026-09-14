@@ -34,6 +34,42 @@ public class OperatorOptionsBindingTests
         }
     }
 
+    // AB#5232 - same contract, for the extra issuer list projected into every workload.
+    // Arrays bind through indexed keys, so the deployment contract is the __0/__1 spelling.
+    [Test]
+    [NotInParallel]
+    public async Task AdditionalValidIssuers_BindFromTheDocumentedEnvironmentVariables()
+    {
+        var variables = new Dictionary<string, string>
+        {
+            ["OPERATOR__ADDITIONALVALIDISSUERS__0"] = "https://localhost:5003/",
+            ["OPERATOR__ADDITIONALVALIDISSUERS__1"] = "https://connect.example/"
+        };
+
+        foreach (var variable in variables)
+        {
+            Environment.SetEnvironmentVariable(variable.Key, variable.Value);
+        }
+
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+
+            var options = configuration.GetSection("Operator").Get<OperatorOptions>();
+
+            await Assert.That(options).IsNotNull();
+            await Assert.That(options!.AdditionalValidIssuers).IsEquivalentTo(
+                new[] { "https://localhost:5003/", "https://connect.example/" });
+        }
+        finally
+        {
+            foreach (var variable in variables.Keys)
+            {
+                Environment.SetEnvironmentVariable(variable, null);
+            }
+        }
+    }
+
     // AB#5062 - same contract, for the credential the operator authenticates /operatorHub with.
     // These four variable names are what a cluster values file writes; a rename here silently
     // leaves the operator unconfigured, which means anonymous, which means refused as soon as the
