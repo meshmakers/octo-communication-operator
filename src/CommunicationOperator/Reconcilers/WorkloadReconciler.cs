@@ -593,9 +593,31 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         // a standing credential to all of them makes that mechanism decorative. What a member does
         // get is the two unconditional tiers above (the RabbitMQ command bus and the TLS trust
         // anchor, neither of which carries tenant authority) plus its own per-release secret in
-        // the platform namespace. Tenant-scoped data access arrives with the lease and leaves with
-        // it. The controller refuses to set ReceivesClusterSecrets on a pool as well — two gates,
-        // one on each side of the wire, because either side alone is one edit away from silence.
+        // the platform namespace. The controller refuses to set ReceivesClusterSecrets on a pool as
+        // well — two gates, one on each side of the wire, because either side alone is one edit
+        // away from silence.
+        //
+        // 🔴 WHERE TENANT-SCOPED DATA ACCESS COMES FROM INSTEAD, precisely — this comment used to
+        // assert it and the code did not yet provide it:
+        //
+        //   MONGO: the lease carries the borrowing tenant's database name, database user and
+        //   database password (LeaseDto.DatabaseName/DatabaseUser/DatabasePassword, resolved by
+        //   the controller's TenantDatabaseCredentialResolver). The member installs them for that
+        //   one database through ITenantDatabaseCredentialSource and drops them — and the engine's
+        //   cached, authenticated repository clients — on release. A lease whose credential cannot
+        //   be resolved is refused, and a member handed a lease without one refuses to take it, so
+        //   neither side can degrade into "use whatever this process happens to hold". The password
+        //   itself is still installation-wide today; AB#5255 makes it per database and changes only
+        //   that resolver.
+        //
+        //   CRATEDB: NOT covered, and deliberately. There is no per-tenant CrateDB principal to
+        //   carry — one connection string per installation, tenants separated by schema — so a
+        //   lease-carried stream-data credential would be time-scoped but not tenant-scoped, which
+        //   is the shape of the Mongo mechanism without its substance. Withholding
+        //   secrets.streamDataPassword therefore means a leased pipeline that writes an archive
+        //   fails to connect rather than reaching another tenant's schema. Archive-writing
+        //   pipelines stay on dedicated adapters until a per-tenant CrateDB user exists (the
+        //   stream-data sibling of AB#5255).
         if (workloadType == WorkloadTypeDto.AdapterPool)
         {
             receivesClusterSecrets = false;
