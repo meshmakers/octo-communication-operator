@@ -89,6 +89,14 @@ internal class AdapterPoolKindE2ETests
 
     private static string SecretName => WorkloadReconciler.SecretName(Release);
 
+    // A second tenant's pool, sharing the namespace. Its only job is to still be where it was
+    // after the scale verb has run against the release above.
+    private const string NeighbourTenantId = "e2eneighbour";
+    private const string NeighbourWorkloadRtId = "65d5c447b420da3fb1232e2e";
+
+    private static string NeighbourRelease =>
+        WorkloadReconciler.ReleaseName(NeighbourTenantId, NeighbourWorkloadRtId);
+
     private static async Task<(IKubernetes Client, WorkloadReconciler Reconciler,
         CommunicationPoolKubernetesGateway Gateway, OperatorOptions Options)> ArrangeAsync(
         string? platformNamespace = null)
@@ -119,6 +127,7 @@ internal class AdapterPoolKindE2ETests
 
         await EnsureNamespaceAsync(client, Namespace);
         await DeleteDeploymentIfPresentAsync(client, Namespace);
+        await DeleteDeploymentIfPresentAsync(client, Namespace, NeighbourRelease);
         await DeleteSecretIfPresentAsync(client);
         await DeleteCommunicationPoolIfPresentAsync(client);
 
@@ -158,13 +167,14 @@ internal class AdapterPoolKindE2ETests
         }
     }
 
-    private static async Task DeleteDeploymentIfPresentAsync(IKubernetes client, string @namespace)
+    private static async Task DeleteDeploymentIfPresentAsync(IKubernetes client, string @namespace,
+        string? release = null)
     {
         try
         {
-            await client.AppsV1.DeleteNamespacedDeploymentAsync(Release, @namespace);
-            await WaitUntilAsync(async () => !await DeploymentExistsAsync(client, @namespace),
-                $"the leftover deployment in '{@namespace}' to disappear");
+            await client.AppsV1.DeleteNamespacedDeploymentAsync(release ?? Release, @namespace);
+            await WaitUntilAsync(async () => !await DeploymentExistsAsync(client, @namespace, release),
+                $"the leftover deployment '{release ?? Release}' in '{@namespace}' to disappear");
         }
         catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -236,17 +246,19 @@ internal class AdapterPoolKindE2ETests
         });
 
     private static Task CreatePoolMemberDeploymentAsync(IKubernetes client, int replicas,
-        string @namespace = Namespace)
+        string @namespace = Namespace, string? release = null)
     {
+        release ??= Release;
         var labels = new Dictionary<string, string>
         {
-            ["app.kubernetes.io/instance"] = Release,
+            // The release label is the ONLY thing the scale and owner-stamp paths select on.
+            ["app.kubernetes.io/instance"] = release,
             ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator-e2e",
         };
 
         return client.AppsV1.CreateNamespacedDeploymentAsync(new V1Deployment
         {
-            Metadata = new V1ObjectMeta { Name = Release, NamespaceProperty = @namespace, Labels = labels },
+            Metadata = new V1ObjectMeta { Name = release, NamespaceProperty = @namespace, Labels = labels },
             Spec = new V1DeploymentSpec
             {
                 Replicas = replicas,
@@ -264,11 +276,12 @@ internal class AdapterPoolKindE2ETests
         }, @namespace);
     }
 
-    private static async Task<bool> DeploymentExistsAsync(IKubernetes client, string @namespace = Namespace)
+    private static async Task<bool> DeploymentExistsAsync(IKubernetes client, string @namespace = Namespace,
+        string? release = null)
     {
         try
         {
-            await client.AppsV1.ReadNamespacedDeploymentAsync(Release, @namespace);
+            await client.AppsV1.ReadNamespacedDeploymentAsync(release ?? Release, @namespace);
             return true;
         }
         catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -318,9 +331,9 @@ internal class AdapterPoolKindE2ETests
         return events.Items.Count > 0;
     }
 
-    private static async Task<int?> ReadSpecReplicasAsync(IKubernetes client)
+    private static async Task<int?> ReadSpecReplicasAsync(IKubernetes client, string? release = null)
     {
-        var deployment = await client.AppsV1.ReadNamespacedDeploymentAsync(Release, Namespace);
+        var deployment = await client.AppsV1.ReadNamespacedDeploymentAsync(release ?? Release, Namespace);
         return deployment.Spec?.Replicas;
     }
 
@@ -385,6 +398,12 @@ internal class AdapterPoolKindE2ETests
         {
             await CreateCommunicationPoolAsync(gateway);
             await CreatePoolMemberDeploymentAsync(client, replicas: 1);
+            // 🔴 Another tenant's pool, in the same namespace, for the whole test. The stamp path
+            // selects by label exactly as the scale path does, and a selector that matched too
+            // broadly here would hand this tenant's CR ownership of the neighbour — so deleting
+            // this tenant would collect someone else's pool. That failure has no symptom until
+            // the unrelated tenant notices its adapters are gone.
+            await CreatePoolMemberDeploymentAsync(client, replicas: 1, Namespace, NeighbourRelease);
 
             var owner = await gateway.TryGetCommunicationPoolOwnerReferenceAsync(Namespace, CrName);
             await Assert.That(owner).IsNotNull();
@@ -396,16 +415,23 @@ internal class AdapterPoolKindE2ETests
             await Assert.That(deployment.Metadata.OwnerReferences).IsNotNull();
             await Assert.That(deployment.Metadata.OwnerReferences.Single().Uid).IsEqualTo(owner!.Uid);
 
+            var neighbour = await client.AppsV1.ReadNamespacedDeploymentAsync(NeighbourRelease, Namespace);
+            await Assert.That(neighbour.Metadata.OwnerReferences ?? []).IsEmpty();
+
             // The tenant goes away: the operator deletes its CommunicationPool CR, and nothing else
             // is done about the pool. Kubernetes' garbage collector is what removes it.
             await DeleteCommunicationPoolIfPresentAsync(client);
 
             await WaitUntilAsync(async () => !await DeploymentExistsAsync(client),
                 "the pool's deployment to be garbage-collected with its tenant");
+
+            // And the collection stopped at this tenant's boundary.
+            await Assert.That(await DeploymentExistsAsync(client, Namespace, NeighbourRelease)).IsTrue();
         }
         finally
         {
             await DeleteDeploymentIfPresentAsync(client, Namespace);
+            await DeleteDeploymentIfPresentAsync(client, Namespace, NeighbourRelease);
             await DeleteCommunicationPoolIfPresentAsync(client);
         }
     }
@@ -531,6 +557,52 @@ internal class AdapterPoolKindE2ETests
         {
             await DeleteDeploymentIfPresentAsync(client, PlatformNamespace);
             await DeleteCommunicationPoolIfPresentAsync(client);
+        }
+    }
+
+    /// <summary>
+    ///     AB#4924 §7.3 / AB#4917 — the scale verb moves its own release and nothing else.
+    ///
+    ///     <para>
+    ///     <c>ScaleDeploymentsByInstanceAsync</c> selects on
+    ///     <c>app.kubernetes.io/instance={release}</c> and patches every Deployment it gets back.
+    ///     The blast radius of that selector being wrong is not a pool that fails to scale — it is
+    ///     <i>another tenant's</i> pool being resized, in a namespace that by design holds the pools
+    ///     of many tenants at once. Nothing about that is visible with a substituted gateway, where
+    ///     the selector string is whatever the test asserted it would be and no apiserver ever
+    ///     evaluates it.
+    ///     </para>
+    ///
+    ///     <para>
+    ///     So a second tenant's pool sits in the same namespace for the duration, and the assertion
+    ///     is as much about the Deployment that did <b>not</b> move as the one that did.
+    ///     </para>
+    /// </summary>
+    [Test]
+    [NotInParallel(nameof(AdapterPoolKindE2ETests))]
+    public async Task Scale_MovesItsOwnReleaseAndLeavesAnotherTenantsPoolWhereItWas()
+    {
+        var (client, reconciler, _, _) = await ArrangeAsync();
+
+        try
+        {
+            await CreatePoolMemberDeploymentAsync(client, replicas: 1);
+            await CreatePoolMemberDeploymentAsync(client, replicas: 1, Namespace, NeighbourRelease);
+
+            var patched = await reconciler.ScaleAsync(ScaleDto(3), CancellationToken.None);
+            // 🔴 Exactly one. Two would mean the selector matched the neighbour as well, and the
+            // replica assertions below would then both be satisfied by the wrong thing happening.
+            await Assert.That(patched).IsEqualTo(1);
+
+            await WaitUntilAsync(async () => await ReadSpecReplicasAsync(client) == 3,
+                "the pool under test to report three members");
+
+            await Assert.That(await ReadSpecReplicasAsync(client, NeighbourRelease)).IsEqualTo(1);
+        }
+        finally
+        {
+            await DeleteDeploymentIfPresentAsync(client, Namespace);
+            await DeleteDeploymentIfPresentAsync(client, Namespace, NeighbourRelease);
         }
     }
 

@@ -897,7 +897,7 @@ to keep opt-in for now.
 ## Kubernetes End-to-End Tests (AB#4924)
 
 `tests/CommunicationOperator.Tests/E2E/AdapterPoolKindE2ETests` runs the adapter-pool paths against
-a **real apiserver**. Five tests:
+a **real apiserver**. Six tests:
 
 | Test | What only a real cluster can show |
 |---|---|
@@ -905,6 +905,7 @@ a **real apiserver**. Five tests:
 | `DeletingTheLendingTenantsCommunicationPool_GarbageCollectsThePool` | The GC removes the pool when its tenant's CR goes. |
 | `CrossNamespaceOwner_DestroysThePoolWhileItsOwnerIsStillAlive` | 🔴 The fact §7.1a's refusal exists for: a cross-namespace owner reference destroys a live pool *without* its owner being deleted. Asserts the GC's own `OwnerRefInvalidNamespace` event, so the test cannot pass on an unrelated deletion. |
 | `DeployingAPoolIntoAPlatformNamespace_WritesNoOwnerAndThePoolSurvives` | The operator declines to write one against that same apiserver, and the pool is still there afterwards. |
+| `Scale_MovesItsOwnReleaseAndLeavesAnotherTenantsPoolWhereItWas` | 🔴 The scale and owner-stamp paths both select on `app.kubernetes.io/instance={release}`. A selector that matches too broadly does not fail to scale — it resizes *another tenant's* pool, in a namespace that by design holds many tenants' pools. Only a real apiserver evaluates the selector. |
 | `DeletingTheLendingTenantsCommunicationPool_AlsoCollectsTheReleaseSecret` | 🔴 The release Secret is the *other* dependent, reached by a different path — its owner reference is set at creation, not patched on after the install. It is also the one that matters if the net fails: a Secret outliving its tenant is credential material with nothing left to own it. |
 
 ```bash
@@ -924,7 +925,7 @@ The guard is defence in depth — the load-bearing protection is that those two 
 variable. The regression the test does catch is repointing the lookup at `_options.PoolNamespace`
 (which the guard's own warning text invites) while the write stays on `ns`.
 
-Without `OCTO_OPERATOR_E2E_KUBECONTEXT` all five tests report as **skipped**, never as passed — a green
+Without `OCTO_OPERATOR_E2E_KUBECONTEXT` all six tests report as **skipped**, never as passed — a green
 run on a machine with no cluster would be a lie about what was verified. The context needs the
 `communicationpools.octo-mesh.meshmakers.io` CRD installed (the `octo-mesh-crds` chart) and
 permission to create namespaces; everything is created in and cleaned up from `octo-pool-e2e` and
