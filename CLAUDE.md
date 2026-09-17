@@ -897,21 +897,37 @@ to keep opt-in for now.
 ## Kubernetes End-to-End Tests (AB#4924)
 
 `tests/CommunicationOperator.Tests/E2E/AdapterPoolKindE2ETests` runs the adapter-pool paths against
-a **real apiserver**: a pool scaled 1 → 3 → 1 through `WorkloadReconciler.ScaleAsync`, and a pool
-garbage-collected when its tenant's `CommunicationPool` CR is deleted. Both prove things a
-substitute cannot — Kubernetes' garbage collector is a real controller with real rules, and a merge
-patch either moves `spec.replicas` on the live object or it does not.
+a **real apiserver**. Four tests, in two pairs:
+
+| Test | What only a real cluster can show |
+|---|---|
+| `AdapterPool_ScalesOneToThreeAndBackToOne` | A merge patch either moves `spec.replicas` on the live object or it does not; `status.replicas` is the ReplicaSet controller agreeing. |
+| `DeletingTheLendingTenantsCommunicationPool_GarbageCollectsThePool` | The GC removes the pool when its tenant's CR goes. |
+| `CrossNamespaceOwner_DestroysThePoolWhileItsOwnerIsStillAlive` | 🔴 The fact §7.1a's refusal exists for: a cross-namespace owner reference destroys a live pool *without* its owner being deleted. Asserts the GC's own `OwnerRefInvalidNamespace` event, so the test cannot pass on an unrelated deletion. |
+| `DeployingAPoolIntoAPlatformNamespace_WritesNoOwnerAndThePoolSurvives` | The operator declines to write one against that same apiserver, and the pool is still there afterwards. |
 
 ```bash
 OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
   dotnet test --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj \
-  -c DebugL --filter "/*/*/AdapterPoolKindE2ETests/*"
+  -c DebugL --treenode-filter "/*/*/AdapterPoolKindE2ETests/*"
 ```
 
-Without `OCTO_OPERATOR_E2E_KUBECONTEXT` both tests report as **skipped**, never as passed — a green
+🔴 `--treenode-filter`, **not** `--filter`. Under this repo's Microsoft.Testing.Platform runner
+`--filter` is accepted, matches nothing and exits **5** with "no tests were run" — which reads like a
+broken environment rather than a wrong flag.
+
+🔴 **What the last test pins, measured rather than assumed.** Deleting the namespace guard in
+`TryResolvePoolOwnerReferenceAsync` alone does *not* fail it: the CR lookup and the owner-reference
+write both take the same `ns`, so the lookup just moves to the platform namespace and finds nothing.
+The guard is defence in depth — the load-bearing protection is that those two namespaces are one
+variable. The regression the test does catch is repointing the lookup at `_options.PoolNamespace`
+(which the guard's own warning text invites) while the write stays on `ns`.
+
+Without `OCTO_OPERATOR_E2E_KUBECONTEXT` all four tests report as **skipped**, never as passed — a green
 run on a machine with no cluster would be a lie about what was verified. The context needs the
 `communicationpools.octo-mesh.meshmakers.io` CRD installed (the `octo-mesh-crds` chart) and
-permission to create a namespace; everything is created in and cleaned up from `octo-pool-e2e`.
+permission to create namespaces; everything is created in and cleaned up from `octo-pool-e2e` and
+`octo-pool-e2e-platform`.
 Helm is deliberately not in the loop — nothing in this increment changed the helm layer, and a
 directly created Deployment carrying the release's `app.kubernetes.io/instance` label is exactly
 the shape the scale path selects on.
