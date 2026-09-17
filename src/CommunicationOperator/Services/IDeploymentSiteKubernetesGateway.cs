@@ -4,18 +4,18 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 
 /// <summary>
 /// Thin abstraction over <see cref="k8s.IKubernetes"/> for the resources the
-/// <see cref="CommunicationPoolManager"/> touches: CommunicationPool custom
+/// <see cref="DeploymentSiteManager"/> touches: DeploymentSite custom
 /// resources and the per-tenant broker credentials Secret. Encapsulates the
 /// 404-via-<c>HttpOperationException</c> idiom of the Kubernetes client so
 /// that the manager can be tested without mocking the k8s SDK directly.
 /// </summary>
-public interface ICommunicationPoolKubernetesGateway
+public interface IDeploymentSiteKubernetesGateway
 {
-    Task<bool> CommunicationPoolExistsAsync(string @namespace, string name, CancellationToken cancellationToken = default);
+    Task<bool> DeploymentSiteExistsAsync(string @namespace, string name, CancellationToken cancellationToken = default);
 
-    Task CreateCommunicationPoolAsync(string @namespace, object resource, CancellationToken cancellationToken = default);
+    Task CreateDeploymentSiteAsync(string @namespace, object resource, CancellationToken cancellationToken = default);
 
-    Task DeleteCommunicationPoolAsync(string @namespace, string name, CancellationToken cancellationToken = default);
+    Task DeleteDeploymentSiteAsync(string @namespace, string name, CancellationToken cancellationToken = default);
 
     Task<bool> SecretExistsAsync(string @namespace, string name, CancellationToken cancellationToken = default);
 
@@ -44,13 +44,13 @@ public interface ICommunicationPoolKubernetesGateway
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Builds an owner reference to the <c>CommunicationPool</c> CR named <paramref name="name"/>
+    /// Builds an owner reference to the <c>DeploymentSite</c> CR named <paramref name="name"/>
     /// in <paramref name="namespace"/>, or returns <c>null</c> when that CR does not exist
     /// (AB#4924). The CR is the only Kubernetes object that represents a tenant, so it is what a
-    /// pool's resources are owned by: deleting the tenant deletes the CR, and the garbage
-    /// collector then takes the pool with it.
+    /// deployment site's resources are owned by: deleting the tenant deletes the CR, and the garbage
+    /// collector then takes the deployment site with it.
     /// </summary>
-    Task<V1OwnerReference?> TryGetCommunicationPoolOwnerReferenceAsync(string @namespace, string name,
+    Task<V1OwnerReference?> TryGetDeploymentSiteOwnerReferenceAsync(string @namespace, string name,
         CancellationToken cancellationToken = default);
 
     /// <summary>

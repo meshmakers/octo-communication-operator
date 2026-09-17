@@ -18,8 +18,8 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.E2E;
 /// <summary>
 ///     AB#4924 §7.3 — end-to-end against a real Kubernetes apiserver: an adapter pool is one
 ///     workload with a replica range, scaled 1 → 3 → 1 through the AB#4917 scale verb, and owned by
-///     its lending tenant's <c>CommunicationPool</c> CR so that deleting the tenant garbage-collects
-///     the pool.
+///     its lending tenant's <c>DeploymentSite</c> CR so that deleting the tenant garbage-collects
+///     the deployment site.
 ///
 ///     <para>
 ///     The things these tests prove cannot be proved with a substitute. Kubernetes' garbage
@@ -33,7 +33,7 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.E2E;
 ///     Four tests, in two pairs. <b>Scale</b> (1 → 3 → 1) and <b>garbage collection</b> on tenant
 ///     delete cover the happy path. <b>Cross-namespace destruction</b> and the operator's
 ///     <b>refusal</b> cover §7.1a from both sides: the first shows a cross-namespace owner
-///     reference destroying a pool whose owner is still alive — the fact the refusal exists for,
+///     reference destroying a deployment site whose owner is still alive — the fact the refusal exists for,
 ///     and the one thing a substituted gateway can never demonstrate — and the second shows the
 ///     operator declining to write one against that same live apiserver.
 ///     </para>
@@ -59,22 +59,22 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.E2E;
 ///     Without the environment variable every test in this class reports as <b>skipped</b>, never as
 ///     passed — a green run on a machine with no cluster would be a lie about what was verified.
 ///     </para>
-///     Requires the <c>communicationpools.octo-mesh.meshmakers.io</c> CRD and permission to create
-///     the <c>octo-pool-e2e</c> and <c>octo-pool-e2e-platform</c> namespaces.
+///     Requires the <c>deploymentsites.octo-mesh.meshmakers.io</c> CRD and permission to create
+///     the <c>octo-deployment-site-e2e</c> and <c>octo-deployment-site-e2e-platform</c> namespaces.
 ///     </para>
 /// </summary>
 internal class AdapterPoolKindE2ETests
 {
     private const string EnvironmentVariable = "OCTO_OPERATOR_E2E_KUBECONTEXT";
-    private const string Namespace = "octo-pool-e2e";
+    private const string Namespace = "octo-deployment-site-e2e";
 
     // A second namespace standing in for a distinct OperatorOptions.PlatformNamespace. The CR — the
-    // only object that represents a tenant — never moves out of PoolNamespace, so a pool routed
-    // here is a pool whose owner lives somewhere else. That is the topology §7.1a refuses to write
+    // only object that represents a tenant — never moves out of DeploymentSiteNamespace, so a deployment site routed
+    // here is a deployment site whose owner lives somewhere else. That is the topology §7.1a refuses to write
     // an owner reference in, and the two tests below prove both halves of the refusal.
-    private const string PlatformNamespace = "octo-pool-e2e-platform";
+    private const string PlatformNamespace = "octo-deployment-site-e2e-platform";
     private const string TenantId = "e2etenant";
-    private const string PoolRtId = "65d5c447b420da3fb1230e2e";
+    private const string DeploymentSiteRtId = "65d5c447b420da3fb1230e2e";
     private const string WorkloadRtId = "65d5c447b420da3fb1231e2e";
     private const string WorkloadName = "e2e-adapter-pool";
 
@@ -85,11 +85,11 @@ internal class AdapterPoolKindE2ETests
 
     private static string Release => WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
 
-    private static string CrName => CommunicationPoolManager.GetCrName(TenantId, PoolRtId);
+    private static string CrName => DeploymentSiteManager.GetCrName(TenantId, DeploymentSiteRtId);
 
     private static string SecretName => WorkloadReconciler.SecretName(Release);
 
-    // A second tenant's pool, sharing the namespace. Its only job is to still be where it was
+    // A second tenant's deployment site, sharing the namespace. Its only job is to still be where it was
     // after the scale verb has run against the release above.
     private const string NeighbourTenantId = "e2eneighbour";
     private const string NeighbourWorkloadRtId = "65d5c447b420da3fb1232e2e";
@@ -98,7 +98,7 @@ internal class AdapterPoolKindE2ETests
         WorkloadReconciler.ReleaseName(NeighbourTenantId, NeighbourWorkloadRtId);
 
     private static async Task<(IKubernetes Client, WorkloadReconciler Reconciler,
-        CommunicationPoolKubernetesGateway Gateway, OperatorOptions Options)> ArrangeAsync(
+        DeploymentSiteKubernetesGateway Gateway, OperatorOptions Options)> ArrangeAsync(
         string? platformNamespace = null)
     {
         var context = Environment.GetEnvironmentVariable(EnvironmentVariable);
@@ -111,12 +111,12 @@ internal class AdapterPoolKindE2ETests
 
         var config = KubernetesClientConfiguration.BuildConfigFromConfigFile(currentContext: context);
         var client = new Kubernetes(config);
-        var gateway = new CommunicationPoolKubernetesGateway(client);
+        var gateway = new DeploymentSiteKubernetesGateway(client);
 
-        // PlatformNamespace unset: the pool lands in PoolNamespace, which is where its tenant's CR
+        // PlatformNamespace unset: the deployment site lands in DeploymentSiteNamespace, which is where its tenant's CR
         // lives and therefore the only namespace in which the owner reference is valid. The tests
         // that pass one in are exercising the opposite topology deliberately.
-        var options = new OperatorOptions { PoolNamespace = Namespace, PlatformNamespace = platformNamespace };
+        var options = new OperatorOptions { DeploymentSiteNamespace = Namespace, PlatformNamespace = platformNamespace };
         var reconciler = new WorkloadReconciler(
             Substitute.For<IHelmRunner>(),
             gateway,
@@ -129,7 +129,7 @@ internal class AdapterPoolKindE2ETests
         await DeleteDeploymentIfPresentAsync(client, Namespace);
         await DeleteDeploymentIfPresentAsync(client, Namespace, NeighbourRelease);
         await DeleteSecretIfPresentAsync(client);
-        await DeleteCommunicationPoolIfPresentAsync(client);
+        await DeleteDeploymentSiteIfPresentAsync(client);
 
         if (platformNamespace != null)
         {
@@ -208,28 +208,28 @@ internal class AdapterPoolKindE2ETests
     ///     On a cluster with no operator deployed there is no finalizer and the wait returns
     ///     immediately.
     /// </summary>
-    private static async Task DeleteCommunicationPoolIfPresentAsync(IKubernetes client)
+    private static async Task DeleteDeploymentSiteIfPresentAsync(IKubernetes client)
     {
         try
         {
             await client.CustomObjects.DeleteNamespacedCustomObjectAsync(
-                "octo-mesh.meshmakers.io", "v1alpha1", Namespace, "communicationpools", CrName);
+                "octo-mesh.meshmakers.io", "v1", Namespace, "deploymentsites", CrName);
         }
         catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return;
         }
 
-        await WaitUntilAsync(async () => !await CommunicationPoolStillPresentAsync(client),
-            $"the CommunicationPool CR '{CrName}' to finish terminating");
+        await WaitUntilAsync(async () => !await DeploymentSiteStillPresentAsync(client),
+            $"the DeploymentSite CR '{CrName}' to finish terminating");
     }
 
-    private static async Task<bool> CommunicationPoolStillPresentAsync(IKubernetes client)
+    private static async Task<bool> DeploymentSiteStillPresentAsync(IKubernetes client)
     {
         try
         {
             await client.CustomObjects.GetNamespacedCustomObjectAsync(
-                "octo-mesh.meshmakers.io", "v1alpha1", Namespace, "communicationpools", CrName);
+                "octo-mesh.meshmakers.io", "v1", Namespace, "deploymentsites", CrName);
             return true;
         }
         catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -238,11 +238,11 @@ internal class AdapterPoolKindE2ETests
         }
     }
 
-    private static Task CreateCommunicationPoolAsync(CommunicationPoolKubernetesGateway gateway) =>
-        gateway.CreateCommunicationPoolAsync(Namespace, new E2ECommunicationPoolResource
+    private static Task CreateDeploymentSiteAsync(DeploymentSiteKubernetesGateway gateway) =>
+        gateway.CreateDeploymentSiteAsync(Namespace, new E2EDeploymentSiteResource
         {
             Metadata = new E2EMetadata { Name = CrName, Namespace = Namespace },
-            Spec = new E2ESpec { TenantId = TenantId, PoolRtId = PoolRtId },
+            Spec = new E2ESpec { TenantId = TenantId, DeploymentSiteRtId = DeploymentSiteRtId },
         });
 
     private static Task CreatePoolMemberDeploymentAsync(IKubernetes client, int replicas,
@@ -315,8 +315,8 @@ internal class AdapterPoolKindE2ETests
         }
     }
 
-    private static async Task<bool> CommunicationPoolExistsAsync(CommunicationPoolKubernetesGateway gateway) =>
-        await gateway.CommunicationPoolExistsAsync(Namespace, CrName);
+    private static async Task<bool> DeploymentSiteExistsAsync(DeploymentSiteKubernetesGateway gateway) =>
+        await gateway.DeploymentSiteExistsAsync(Namespace, CrName);
 
     /// <summary>
     ///     Did the garbage collector delete the release's Deployment <i>because</i> its owner sat in
@@ -369,7 +369,7 @@ internal class AdapterPoolKindE2ETests
             await Assert.That(scaledUp).IsEqualTo(1); // one Deployment patched
 
             await WaitUntilAsync(async () => await ReadSpecReplicasAsync(client) == 3,
-                "the pool to report three members");
+                "the deployment site to report three members");
             // status.replicas is written by the ReplicaSet controller once the pods exist, so this
             // is the cluster agreeing rather than the spec merely having been accepted.
             await WaitUntilAsync(async () =>
@@ -380,7 +380,7 @@ internal class AdapterPoolKindE2ETests
             await Assert.That(scaledDown).IsEqualTo(1);
 
             await WaitUntilAsync(async () => await ReadSpecReplicasAsync(client) == 1,
-                "the pool to come back to one member");
+                "the deployment site to come back to one member");
         }
         finally
         {
@@ -390,22 +390,22 @@ internal class AdapterPoolKindE2ETests
 
     [Test]
     [NotInParallel(nameof(AdapterPoolKindE2ETests))]
-    public async Task DeletingTheLendingTenantsCommunicationPool_GarbageCollectsThePool()
+    public async Task DeletingTheLendingTenantsDeploymentSite_GarbageCollectsTheDeploymentSite()
     {
         var (client, _, gateway, _) = await ArrangeAsync();
 
         try
         {
-            await CreateCommunicationPoolAsync(gateway);
+            await CreateDeploymentSiteAsync(gateway);
             await CreatePoolMemberDeploymentAsync(client, replicas: 1);
-            // 🔴 Another tenant's pool, in the same namespace, for the whole test. The stamp path
+            // 🔴 Another tenant's deployment site, in the same namespace, for the whole test. The stamp path
             // selects by label exactly as the scale path does, and a selector that matched too
             // broadly here would hand this tenant's CR ownership of the neighbour — so deleting
-            // this tenant would collect someone else's pool. That failure has no symptom until
+            // this tenant would collect someone else's deployment site. That failure has no symptom until
             // the unrelated tenant notices its adapters are gone.
             await CreatePoolMemberDeploymentAsync(client, replicas: 1, Namespace, NeighbourRelease);
 
-            var owner = await gateway.TryGetCommunicationPoolOwnerReferenceAsync(Namespace, CrName);
+            var owner = await gateway.TryGetDeploymentSiteOwnerReferenceAsync(Namespace, CrName);
             await Assert.That(owner).IsNotNull();
 
             var patched = await gateway.SetDeploymentOwnerReferenceByInstanceAsync(Namespace, Release, owner!);
@@ -418,12 +418,12 @@ internal class AdapterPoolKindE2ETests
             var neighbour = await client.AppsV1.ReadNamespacedDeploymentAsync(NeighbourRelease, Namespace);
             await Assert.That(neighbour.Metadata.OwnerReferences ?? []).IsEmpty();
 
-            // The tenant goes away: the operator deletes its CommunicationPool CR, and nothing else
-            // is done about the pool. Kubernetes' garbage collector is what removes it.
-            await DeleteCommunicationPoolIfPresentAsync(client);
+            // The tenant goes away: the operator deletes its DeploymentSite CR, and nothing else
+            // is done about the deployment site. Kubernetes' garbage collector is what removes it.
+            await DeleteDeploymentSiteIfPresentAsync(client);
 
             await WaitUntilAsync(async () => !await DeploymentExistsAsync(client),
-                "the pool's deployment to be garbage-collected with its tenant");
+                "the deployment site's deployment to be garbage-collected with its tenant");
 
             // And the collection stopped at this tenant's boundary.
             await Assert.That(await DeploymentExistsAsync(client, Namespace, NeighbourRelease)).IsTrue();
@@ -432,7 +432,7 @@ internal class AdapterPoolKindE2ETests
         {
             await DeleteDeploymentIfPresentAsync(client, Namespace);
             await DeleteDeploymentIfPresentAsync(client, Namespace, NeighbourRelease);
-            await DeleteCommunicationPoolIfPresentAsync(client);
+            await DeleteDeploymentSiteIfPresentAsync(client);
         }
     }
 
@@ -440,11 +440,11 @@ internal class AdapterPoolKindE2ETests
     ///     AB#4924 §7.1a — the premise the refusal rests on, asserted rather than assumed.
     ///
     ///     <para>
-    ///     <see cref="PoolOwnerReferenceTests" /> proves the operator declines to write a
+    ///     <see cref="DeploymentSiteOwnerReferenceTests" /> proves the operator declines to write a
     ///     cross-namespace owner reference. It cannot prove <i>why that matters</i>: with a
     ///     substituted gateway there is no garbage collector, so "Kubernetes deletes a dependent
     ///     whose owner lives in another namespace" stays an unverified claim in a comment, and the
-    ///     refusal looks like caution rather than the difference between a pool that survives and
+    ///     refusal looks like caution rather than the difference between a deployment site that survives and
     ///     one that is destroyed seconds after deploy.
     ///     </para>
     ///
@@ -457,18 +457,18 @@ internal class AdapterPoolKindE2ETests
     /// </summary>
     [Test]
     [NotInParallel(nameof(AdapterPoolKindE2ETests))]
-    public async Task CrossNamespaceOwner_DestroysThePoolWhileItsOwnerIsStillAlive()
+    public async Task CrossNamespaceOwner_DestroysTheDeploymentSiteWhileItsOwnerIsStillAlive()
     {
         var (client, _, gateway, _) = await ArrangeAsync(PlatformNamespace);
 
         try
         {
-            await CreateCommunicationPoolAsync(gateway);
-            // The pool lands in the platform namespace; its tenant's CR stays in the pool
+            await CreateDeploymentSiteAsync(gateway);
+            // The deployment site lands in the platform namespace; its tenant's CR stays in the deployment site
             // namespace. This is exactly the split a distinct PlatformNamespace produces.
             await CreatePoolMemberDeploymentAsync(client, replicas: 1, PlatformNamespace);
 
-            var owner = await gateway.TryGetCommunicationPoolOwnerReferenceAsync(Namespace, CrName);
+            var owner = await gateway.TryGetDeploymentSiteOwnerReferenceAsync(Namespace, CrName);
             await Assert.That(owner).IsNotNull();
 
             var patched = await gateway.SetDeploymentOwnerReferenceByInstanceAsync(
@@ -486,18 +486,18 @@ internal class AdapterPoolKindE2ETests
 
             // The owner never went anywhere. Had this test deleted the CR, the deletion above
             // would have proved nothing that the previous test does not already prove.
-            await Assert.That(await CommunicationPoolExistsAsync(gateway)).IsTrue();
+            await Assert.That(await DeploymentSiteExistsAsync(gateway)).IsTrue();
         }
         finally
         {
             await DeleteDeploymentIfPresentAsync(client, PlatformNamespace);
-            await DeleteCommunicationPoolIfPresentAsync(client);
+            await DeleteDeploymentSiteIfPresentAsync(client);
         }
     }
 
     /// <summary>
     ///     AB#4924 §7.1a — the other half: the operator, run against a real apiserver, does not do
-    ///     the thing the test above shows to be fatal. A pool routed to a distinct platform
+    ///     the thing the test above shows to be fatal. A deployment site routed to a distinct platform
     ///     namespace deploys with <b>no</b> owner reference and is still there afterwards.
     ///
     ///     <para>
@@ -510,7 +510,7 @@ internal class AdapterPoolKindE2ETests
     ///
     ///     <para>
     ///     🔴 <b>What this actually pins, established by mutation rather than assumed.</b> Deleting
-    ///     the namespace guard in <c>TryResolvePoolOwnerReferenceAsync</c> on its own does
+    ///     the namespace guard in <c>TryResolveDeploymentSiteOwnerReferenceAsync</c> on its own does
     ///     <i>not</i> fail this test, and that is not a weakness in the test — it is a fact about
     ///     the code worth knowing. The CR lookup and the owner-reference write both take the same
     ///     <c>ns</c>, so with the guard gone the lookup simply moves to the platform namespace,
@@ -520,7 +520,7 @@ internal class AdapterPoolKindE2ETests
     ///
     ///     <para>
     ///     The regression this test does catch is the realistic one: repointing the lookup at
-    ///     <c>_options.PoolNamespace</c> — which the guard's own warning text invites, since it
+    ///     <c>_options.DeploymentSiteNamespace</c> — which the guard's own warning text invites, since it
     ///     says that is where the CR lives — while the write stays on <c>ns</c>. That combination
     ///     produces a genuine cross-namespace reference, and this test fails on the empty-owner
     ///     assertion before the garbage collector has even acted.
@@ -528,7 +528,7 @@ internal class AdapterPoolKindE2ETests
     /// </summary>
     [Test]
     [NotInParallel(nameof(AdapterPoolKindE2ETests))]
-    public async Task DeployingAPoolIntoAPlatformNamespace_WritesNoOwnerAndThePoolSurvives()
+    public async Task DeployingADeploymentSiteIntoAPlatformNamespace_WritesNoOwnerAndTheDeploymentSiteSurvives()
     {
         var (client, reconciler, gateway, options) = await ArrangeAsync(PlatformNamespace);
 
@@ -536,12 +536,12 @@ internal class AdapterPoolKindE2ETests
         {
             // The CR exists and is resolvable, so a regression would find an owner to write
             // rather than merely having none available.
-            await CreateCommunicationPoolAsync(gateway);
+            await CreateDeploymentSiteAsync(gateway);
             await CreatePoolMemberDeploymentAsync(client, replicas: 1, PlatformNamespace);
 
             await Assert.That(reconciler.ResolveNamespace(WorkloadTypeDto.AdapterPool))
                 .IsEqualTo(PlatformNamespace);
-            await Assert.That(options.PoolNamespace).IsEqualTo(Namespace);
+            await Assert.That(options.DeploymentSiteNamespace).IsEqualTo(Namespace);
 
             await reconciler.DeployAsync(DeployDto(), CancellationToken.None);
 
@@ -556,7 +556,7 @@ internal class AdapterPoolKindE2ETests
         finally
         {
             await DeleteDeploymentIfPresentAsync(client, PlatformNamespace);
-            await DeleteCommunicationPoolIfPresentAsync(client);
+            await DeleteDeploymentSiteIfPresentAsync(client);
         }
     }
 
@@ -566,21 +566,21 @@ internal class AdapterPoolKindE2ETests
     ///     <para>
     ///     <c>ScaleDeploymentsByInstanceAsync</c> selects on
     ///     <c>app.kubernetes.io/instance={release}</c> and patches every Deployment it gets back.
-    ///     The blast radius of that selector being wrong is not a pool that fails to scale — it is
-    ///     <i>another tenant's</i> pool being resized, in a namespace that by design holds the pools
+    ///     The blast radius of that selector being wrong is not a deployment site that fails to scale — it is
+    ///     <i>another tenant's</i> deployment site being resized, in a namespace that by design holds the deployment sites
     ///     of many tenants at once. Nothing about that is visible with a substituted gateway, where
     ///     the selector string is whatever the test asserted it would be and no apiserver ever
     ///     evaluates it.
     ///     </para>
     ///
     ///     <para>
-    ///     So a second tenant's pool sits in the same namespace for the duration, and the assertion
+    ///     So a second tenant's deployment site sits in the same namespace for the duration, and the assertion
     ///     is as much about the Deployment that did <b>not</b> move as the one that did.
     ///     </para>
     /// </summary>
     [Test]
     [NotInParallel(nameof(AdapterPoolKindE2ETests))]
-    public async Task Scale_MovesItsOwnReleaseAndLeavesAnotherTenantsPoolWhereItWas()
+    public async Task Scale_MovesItsOwnReleaseAndLeavesAnotherTenantsDeploymentSiteWhereItWas()
     {
         var (client, reconciler, _, _) = await ArrangeAsync();
 
@@ -595,7 +595,7 @@ internal class AdapterPoolKindE2ETests
             await Assert.That(patched).IsEqualTo(1);
 
             await WaitUntilAsync(async () => await ReadSpecReplicasAsync(client) == 3,
-                "the pool under test to report three members");
+                "the deployment site under test to report three members");
 
             await Assert.That(await ReadSpecReplicasAsync(client, NeighbourRelease)).IsEqualTo(1);
         }
@@ -621,26 +621,26 @@ internal class AdapterPoolKindE2ETests
     /// </summary>
     [Test]
     [NotInParallel(nameof(AdapterPoolKindE2ETests))]
-    public async Task DeletingTheLendingTenantsCommunicationPool_AlsoCollectsTheReleaseSecret()
+    public async Task DeletingTheLendingTenantsDeploymentSite_AlsoCollectsTheReleaseSecret()
     {
         var (client, reconciler, gateway, _) = await ArrangeAsync();
 
         try
         {
-            await CreateCommunicationPoolAsync(gateway);
+            await CreateDeploymentSiteAsync(gateway);
 
             // The real ReconcileSecretAsync, against the real apiserver — helm is substituted, but
             // nothing about the Secret goes through helm.
             await reconciler.DeployAsync(DeployDto(withSecretValue: true), CancellationToken.None);
 
-            var owner = await gateway.TryGetCommunicationPoolOwnerReferenceAsync(Namespace, CrName);
+            var owner = await gateway.TryGetDeploymentSiteOwnerReferenceAsync(Namespace, CrName);
             await Assert.That(owner).IsNotNull();
 
             var secret = await client.CoreV1.ReadNamespacedSecretAsync(SecretName, Namespace);
             await Assert.That(secret.Metadata.OwnerReferences).IsNotNull();
             await Assert.That(secret.Metadata.OwnerReferences.Single().Uid).IsEqualTo(owner!.Uid);
 
-            await DeleteCommunicationPoolIfPresentAsync(client);
+            await DeleteDeploymentSiteIfPresentAsync(client);
 
             await WaitUntilAsync(async () => !await SecretExistsAsync(client),
                 "the release secret to be garbage-collected with its tenant");
@@ -648,14 +648,14 @@ internal class AdapterPoolKindE2ETests
         finally
         {
             await DeleteSecretIfPresentAsync(client);
-            await DeleteCommunicationPoolIfPresentAsync(client);
+            await DeleteDeploymentSiteIfPresentAsync(client);
         }
     }
 
     private static WorkloadDeployedDto DeployDto(bool withSecretValue = false) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.AdapterPool,
@@ -672,7 +672,7 @@ internal class AdapterPoolKindE2ETests
     private static ScaleWorkloadDto ScaleDto(int replicas) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.AdapterPool,
@@ -680,14 +680,14 @@ internal class AdapterPoolKindE2ETests
     };
 
     // Minimal wire shape for the CR; the operator's own resource model is internal to
-    // CommunicationPoolManager and deliberately not exposed for test fixtures.
-    private sealed class E2ECommunicationPoolResource
+    // DeploymentSiteManager and deliberately not exposed for test fixtures.
+    private sealed class E2EDeploymentSiteResource
     {
         [JsonPropertyName("apiVersion")]
-        public string ApiVersion => "octo-mesh.meshmakers.io/v1alpha1";
+        public string ApiVersion => "octo-mesh.meshmakers.io/v1";
 
         [JsonPropertyName("kind")]
-        public string Kind => "CommunicationPool";
+        public string Kind => "DeploymentSite";
 
         [JsonPropertyName("metadata")]
         public E2EMetadata Metadata { get; init; } = new();
@@ -710,7 +710,7 @@ internal class AdapterPoolKindE2ETests
         [JsonPropertyName("tenantId")]
         public string TenantId { get; init; } = string.Empty;
 
-        [JsonPropertyName("poolRtId")]
-        public string PoolRtId { get; init; } = string.Empty;
+        [JsonPropertyName("deploymentSiteRtId")]
+        public string DeploymentSiteRtId { get; init; } = string.Empty;
     }
 }

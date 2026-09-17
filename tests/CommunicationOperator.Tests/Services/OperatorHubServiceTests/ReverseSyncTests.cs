@@ -12,39 +12,39 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Services.OperatorHubServi
 
 /// <summary>
 /// Pins the post-(re)connect reverse-sync handshake: a Cloud operator with
-/// active CommunicationPool CRs reports them via <c>ReportDeployedStateAsync</c>
-/// so the controller can restore <c>DeploymentState=Deployed</c> on any pool
+/// active DeploymentSite CRs reports them via <c>ReportDeployedStateAsync</c>
+/// so the controller can restore <c>DeploymentState=Deployed</c> on any deployment site
 /// whose state drifted while the operator was offline. Edge operators must
 /// NOT call it — the hub contract rejects them.
 /// </summary>
 public class ReverseSyncTests : OperatorHubServiceTestsBase
 {
-    private static Pool MakePool(string tenantId, string poolRtId)
+    private static DeploymentSite MakeDeploymentSite(string tenantId, string deploymentSiteRtId)
     {
-        var entity = new V1CommunicationPoolEntity
+        var entity = new V1DeploymentSiteEntity
         {
-            Spec = new V1CommunicationPoolEntity.V1CommunicationPoolEntitySpec
+            Spec = new V1DeploymentSiteEntity.V1DeploymentSiteEntitySpec
             {
                 TenantId = tenantId,
-                PoolRtId = poolRtId,
+                DeploymentSiteRtId = deploymentSiteRtId,
             },
         };
-        return new Pool(new K8Pool { TenantId = tenantId, PoolRtId = poolRtId, Namespace = "octo" }, entity);
+        return new DeploymentSite(new K8DeploymentSite { TenantId = tenantId, DeploymentSiteRtId = deploymentSiteRtId, Namespace = "octo" }, entity);
     }
 
     [Test]
-    public async Task CloudMode_WithOwnedPools_SendsReverseSync()
+    public async Task CloudMode_WithOwnedDeploymentSites_SendsReverseSync()
     {
         // Smoking-gun fix path: operator was restarted, CRs survived in k8s,
-        // controller may have lost track of the pools' deployed state. The
+        // controller may have lost track of the deployment sites' deployed state. The
         // reverse-sync hands the controller the list to restore from.
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
-        PoolService.GetPools().Returns(new[]
+        DeploymentSiteService.GetDeploymentSites().Returns(new[]
         {
-            MakePool("tenant-a", "65d5c447b420da3fb12381a1"),
-            MakePool("tenant-b", "65d5c447b420da3fb12381a2"),
+            MakeDeploymentSite("tenant-a", "65d5c447b420da3fb12381a1"),
+            MakeDeploymentSite("tenant-b", "65d5c447b420da3fb12381a2"),
         });
 
         var setup = SetupClient();
@@ -54,10 +54,10 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         await setup.Client.Received(1).ReportDeployedStateAsync(
-            Arg.Is<IReadOnlyList<OperatorDeployedPoolReportDto>>(reports =>
+            Arg.Is<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>(reports =>
                 reports.Count == 2
-                && reports.Any(r => r.TenantId == "tenant-a" && r.PoolRtId == "65d5c447b420da3fb12381a1")
-                && reports.Any(r => r.TenantId == "tenant-b" && r.PoolRtId == "65d5c447b420da3fb12381a2")));
+                && reports.Any(r => r.TenantId == "tenant-a" && r.DeploymentSiteRtId == "65d5c447b420da3fb12381a1")
+                && reports.Any(r => r.TenantId == "tenant-b" && r.DeploymentSiteRtId == "65d5c447b420da3fb12381a2")));
 
         await hosted.StopAsync(CancellationToken.None);
     }
@@ -69,9 +69,9 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         // must not even attempt the call from the edge side, otherwise every
         // reconnect would emit an avoidable error audit event on the
         // controller.
-        OperatorOptions.AutoManagePools = false;
+        OperatorOptions.AutoManageDeploymentSites = false;
         OperatorOptions.CommunicationControllerUri = "https://controller";
-        PoolService.GetPools().Returns(new[] { MakePool("tenant-a", "65d5c447b420da3fb12381a1") });
+        DeploymentSiteService.GetDeploymentSites().Returns(new[] { MakeDeploymentSite("tenant-a", "65d5c447b420da3fb12381a1") });
 
         var setup = SetupClient();
 
@@ -85,15 +85,15 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
     }
 
     [Test]
-    public async Task CloudMode_NoOwnedPools_DoesNotCallReportDeployedState()
+    public async Task CloudMode_NoOwnedDeploymentSites_DoesNotCallReportDeployedState()
     {
         // Fresh install: CR list is empty, nothing to report. Skip the call
         // entirely — sending an empty list is a valid no-op on the controller
         // but adds round-trip cost and log noise on every reconnect for
         // no benefit.
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
-        PoolService.GetPools().Returns(Array.Empty<Pool>());
+        DeploymentSiteService.GetDeploymentSites().Returns(Array.Empty<DeploymentSite>());
 
         var setup = SetupClient();
 
@@ -115,13 +115,13 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         // deploy/undeploy event write the state — failing the reconnect
         // because the reverse-sync threw would leave us in an even worse
         // place (no connection, no future event reception).
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
-        PoolService.GetPools().Returns(new[] { MakePool("tenant-a", "65d5c447b420da3fb12381a1") });
+        DeploymentSiteService.GetDeploymentSites().Returns(new[] { MakeDeploymentSite("tenant-a", "65d5c447b420da3fb12381a1") });
 
         var setup = SetupClient();
         setup.Client
-            .ReportDeployedStateAsync(Arg.Any<IReadOnlyList<OperatorDeployedPoolReportDto>>())
+            .ReportDeployedStateAsync(Arg.Any<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>())
             .ThrowsAsync(new InvalidOperationException("controller-rejected"));
 
         var hosted = (IHostedService)Service;
@@ -133,19 +133,19 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         // callback completes), so the service is parked and shutting it down
         // is the only signal we have for "callback exited cleanly".
         await setup.Client.Received(1).ReportDeployedStateAsync(
-            Arg.Any<IReadOnlyList<OperatorDeployedPoolReportDto>>());
+            Arg.Any<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>());
 
         await hosted.StopAsync(CancellationToken.None);
     }
 
     [Test]
-    public async Task ReportDeployedPoolAsync_CloudConnected_SendsSingleEntryReport()
+    public async Task ReportDeployedDeploymentSiteAsync_CloudConnected_SendsSingleEntryReport()
     {
-        // The per-pool path called from PoolService.RegisterPoolAsync after
+        // The per-deployment-site path called from DeploymentSiteService.RegisterDeploymentSiteAsync after
         // a late-arriving CR is reconciled. Wraps the call in a 1-element
-        // OperatorDeployedPoolReportDto array so it goes through the same
+        // OperatorDeployedDeploymentSiteReportDto array so it goes through the same
         // controller-side handler as the bulk reverse-sync.
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
@@ -156,24 +156,24 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         setup.Client.ClearReceivedCalls();
-        await ((IOperatorHubInvoker)Service).ReportDeployedPoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
+        await ((IOperatorHubInvoker)Service).ReportDeployedDeploymentSiteAsync("tenant-a", "65d5c447b420da3fb12381a1");
 
         await setup.Client.Received(1).ReportDeployedStateAsync(
-            Arg.Is<IReadOnlyList<OperatorDeployedPoolReportDto>>(reports =>
+            Arg.Is<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>(reports =>
                 reports.Count == 1
                 && reports[0].TenantId == "tenant-a"
-                && reports[0].PoolRtId == "65d5c447b420da3fb12381a1"));
+                && reports[0].DeploymentSiteRtId == "65d5c447b420da3fb12381a1"));
 
         await hosted.StopAsync(CancellationToken.None);
     }
 
     [Test]
-    public async Task ReportDeployedPoolAsync_EdgeMode_IsNoOp()
+    public async Task ReportDeployedDeploymentSiteAsync_EdgeMode_IsNoOp()
     {
         // The hub contract rejects edge operators with HubException, so
         // skipping at the source avoids per-CR error audit events on the
         // controller. Same gate as the bulk reverse-sync.
-        OperatorOptions.AutoManagePools = false;
+        OperatorOptions.AutoManageDeploymentSites = false;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
@@ -184,7 +184,7 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         setup.Client.ClearReceivedCalls();
-        await ((IOperatorHubInvoker)Service).ReportDeployedPoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
+        await ((IOperatorHubInvoker)Service).ReportDeployedDeploymentSiteAsync("tenant-a", "65d5c447b420da3fb12381a1");
 
         await setup.Client.DidNotReceiveWithAnyArgs().ReportDeployedStateAsync(default!);
 
@@ -192,14 +192,14 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
     }
 
     [Test]
-    public async Task ReportDeployedPoolAsync_HubDisconnected_IsNoOp()
+    public async Task ReportDeployedDeploymentSiteAsync_HubDisconnected_IsNoOp()
     {
-        // Hub connection lost between RegisterPoolAsync succeeding (which
+        // Hub connection lost between RegisterDeploymentSiteAsync succeeding (which
         // probably happened against the prior connection) and this call.
-        // No-op rather than throw; PoolService's RegisterPoolAsync only
-        // calls this when pool.IsRegistered == true anyway, but be
+        // No-op rather than throw; DeploymentSiteService's RegisterDeploymentSiteAsync only
+        // calls this when deployment site.IsRegistered == true anyway, but be
         // defensive in case IsAlive flips mid-sequence.
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
@@ -210,7 +210,7 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         setup.Client.ClearReceivedCalls();
-        await ((IOperatorHubInvoker)Service).ReportDeployedPoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
+        await ((IOperatorHubInvoker)Service).ReportDeployedDeploymentSiteAsync("tenant-a", "65d5c447b420da3fb12381a1");
 
         await setup.Client.DidNotReceiveWithAnyArgs().ReportDeployedStateAsync(default!);
 
@@ -226,7 +226,7 @@ public class ReverseSyncTests : OperatorHubServiceTestsBase
         client.StartAsync(Arg.Any<Func<bool, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async ci => await ci.Arg<Func<bool, Task>>()(false));
 
-        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedPoolDto>());
+        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedDeploymentSiteDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

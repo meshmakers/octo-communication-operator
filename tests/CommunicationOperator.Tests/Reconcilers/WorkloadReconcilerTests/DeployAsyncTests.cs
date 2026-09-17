@@ -12,7 +12,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     private static WorkloadDeployedDto BaseDto(IReadOnlyList<ValueOverrideDto>? overrides = null) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
         RepositoryUrl = "https://meshmakers.github.io/charts",
@@ -63,7 +63,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
                 && s.Data.ContainsKey("db.password")
                 && s.Type == "Opaque"
                 && s.Metadata.Labels["octo-mesh.meshmakers.io/tenant"] == TenantId
-                && s.Metadata.Labels["octo-mesh.meshmakers.io/pool-rt-id"] == PoolRtId
+                && s.Metadata.Labels["octo-mesh.meshmakers.io/deployment-site-rt-id"] == DeploymentSiteRtId
                 && s.Metadata.Labels["octo-mesh.meshmakers.io/workload-rt-id"] == WorkloadRtId
                 && s.Metadata.Annotations["octo-mesh.meshmakers.io/workload-name"] == WorkloadName),
             Arg.Any<CancellationToken>());
@@ -176,7 +176,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
 
         var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
         await Diagnostics.Received(1).CollectAsync(
-            PoolNamespace, expectedRelease, Arg.Any<CancellationToken>());
+            DeploymentSiteNamespace, expectedRelease, Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -246,7 +246,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Is<string>(r => r == expectedRelease),
             Arg.Is<string>(c => c.EndsWith("/voest-app")),
             Arg.Is<string>(v => v == "1.2.3"),
-            Arg.Is<string>(n => n == PoolNamespace),
+            Arg.Is<string>(n => n == DeploymentSiteNamespace),
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());

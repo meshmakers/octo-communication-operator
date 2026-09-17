@@ -13,7 +13,7 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers.WorkloadRecon
 ///     everything the operator deploys" is the whole risk of this increment, so the same three verbs
 ///     are pinned for <see cref="WorkloadTypeDto.Adapter"/> and <see cref="WorkloadTypeDto.Application"/>
 ///     with a platform namespace configured: those must keep landing in
-///     <c>PoolNamespace</c>, whatever the new option says. A relaxation that reaches one notch too
+///     <c>DeploymentSiteNamespace</c>, whatever the new option says. A relaxation that reaches one notch too
 ///     far shows up here and nowhere else.
 /// </summary>
 internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
@@ -23,7 +23,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     private static WorkloadDeployedDto DeployDto(WorkloadTypeDto workloadType) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = workloadType,
@@ -35,7 +35,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     private static WorkloadUndeployedDto UndeployDto(WorkloadTypeDto workloadType) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = workloadType,
@@ -44,7 +44,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     private static ScaleWorkloadDto ScaleDto(WorkloadTypeDto workloadType, int replicas) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = workloadType,
@@ -69,15 +69,15 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
-    public async Task DeployAsync_AdapterPool_WithoutAConfiguredPlatformNamespace_StaysInThePoolNamespace()
+    public async Task DeployAsync_AdapterPool_WithoutAConfiguredPlatformNamespace_StaysInTheDeploymentSiteNamespace()
     {
-        // Unset is the default and resolves to the pool namespace, which is a platform namespace
-        // already — and the only one in which the tenant's CommunicationPool CR can own the pool
+        // Unset is the default and resolves to the deployment site namespace, which is a platform namespace
+        // already — and the only one in which the tenant's DeploymentSite CR can own the deployment site
         // (see OperatorOptions.PlatformNamespace).
         await Reconciler.DeployAsync(DeployDto(WorkloadTypeDto.AdapterPool), CancellationToken.None);
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
-            PoolNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+            DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -107,7 +107,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     [Test]
     [Arguments(WorkloadTypeDto.Adapter)]
     [Arguments(WorkloadTypeDto.Application)]
-    public async Task DeployAsync_TenantWorkload_StaysInThePoolNamespaceEvenWithAPlatformNamespaceConfigured(
+    public async Task DeployAsync_TenantWorkload_StaysInTheDeploymentSiteNamespaceEvenWithAPlatformNamespaceConfigured(
         WorkloadTypeDto workloadType)
     {
         Options.PlatformNamespace = PlatformNamespace;
@@ -115,7 +115,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
         await Reconciler.DeployAsync(DeployDto(workloadType), CancellationToken.None);
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
-            PoolNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
+            DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
         await Helm.DidNotReceive().UpgradeInstallAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             PlatformNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
@@ -125,21 +125,21 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     [Test]
     [Arguments(WorkloadTypeDto.Adapter)]
     [Arguments(WorkloadTypeDto.Application)]
-    public async Task UndeployAsync_TenantWorkload_StaysInThePoolNamespaceEvenWithAPlatformNamespaceConfigured(
+    public async Task UndeployAsync_TenantWorkload_StaysInTheDeploymentSiteNamespaceEvenWithAPlatformNamespaceConfigured(
         WorkloadTypeDto workloadType)
     {
         Options.PlatformNamespace = PlatformNamespace;
 
         await Reconciler.UndeployAsync(UndeployDto(workloadType), CancellationToken.None);
 
-        await Helm.Received(1).UninstallAsync(Release, PoolNamespace, Arg.Any<CancellationToken>());
+        await Helm.Received(1).UninstallAsync(Release, DeploymentSiteNamespace, Arg.Any<CancellationToken>());
         await Helm.DidNotReceive().UninstallAsync(Arg.Any<string>(), PlatformNamespace, Arg.Any<CancellationToken>());
     }
 
     [Test]
     [Arguments(WorkloadTypeDto.Adapter)]
     [Arguments(WorkloadTypeDto.Application)]
-    public async Task ScaleAsync_TenantWorkload_StaysInThePoolNamespaceEvenWithAPlatformNamespaceConfigured(
+    public async Task ScaleAsync_TenantWorkload_StaysInTheDeploymentSiteNamespaceEvenWithAPlatformNamespaceConfigured(
         WorkloadTypeDto workloadType)
     {
         Options.PlatformNamespace = PlatformNamespace;
@@ -148,7 +148,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
 
         await Reconciler.ScaleAsync(ScaleDto(workloadType, replicas: 0), CancellationToken.None);
 
-        await Gateway.Received(1).ScaleDeploymentsByInstanceAsync(PoolNamespace, Release, 0,
+        await Gateway.Received(1).ScaleDeploymentsByInstanceAsync(DeploymentSiteNamespace, Release, 0,
             Arg.Any<CancellationToken>());
         await Gateway.DidNotReceive().ScaleDeploymentsByInstanceAsync(PlatformNamespace, Arg.Any<string>(),
             Arg.Any<int>(), Arg.Any<CancellationToken>());
@@ -157,7 +157,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
     [Test]
     [Arguments(WorkloadTypeDto.Adapter)]
     [Arguments(WorkloadTypeDto.Application)]
-    public async Task DeployAsync_TenantWorkload_WritesItsSecretIntoThePoolNamespace(WorkloadTypeDto workloadType)
+    public async Task DeployAsync_TenantWorkload_WritesItsSecretIntoTheDeploymentSiteNamespace(WorkloadTypeDto workloadType)
     {
         Options.PlatformNamespace = PlatformNamespace;
         var dto = DeployDto(workloadType) with
@@ -167,7 +167,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
 
         await Reconciler.DeployAsync(dto, CancellationToken.None);
 
-        await Gateway.Received(1).CreateSecretAsync(PoolNamespace, Arg.Any<k8s.Models.V1Secret>(),
+        await Gateway.Received(1).CreateSecretAsync(DeploymentSiteNamespace, Arg.Any<k8s.Models.V1Secret>(),
             Arg.Any<CancellationToken>());
     }
 

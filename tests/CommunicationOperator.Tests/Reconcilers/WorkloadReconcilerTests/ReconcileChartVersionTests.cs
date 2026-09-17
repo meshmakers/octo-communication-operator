@@ -8,7 +8,7 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers.WorkloadRecon
 /// <summary>
 ///     AB#4955: an empty ChartVersion means "newest in the repository", resolved by helm at
 ///     upgrade time. On a deploy a human triggered that is the request — but the controller also
-///     re-dispatches stranded Pending workloads on every pool re-registration (AB#4894), which
+///     re-dispatches stranded Pending workloads on every deployment site re-registration (AB#4894), which
 ///     happens on operator restarts, blueprint re-applies and CK-model updates. Resolving anew
 ///     there moved six prod accounting workloads from chart 1.0.71 to 1.0.72 with nobody
 ///     deploying them. A reconciliation must therefore land on the version already installed.
@@ -20,7 +20,7 @@ internal class ReconcileChartVersionTests : WorkloadReconcilerTestsBase
     private static WorkloadDeployedDto Dto(string chartVersion, bool isReconciliation) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
@@ -38,7 +38,7 @@ internal class ReconcileChartVersionTests : WorkloadReconcilerTestsBase
     [Test]
     public async Task Reconcile_Unpinned_KeepsTheInstalledChartVersion()
     {
-        Helm.GetInstalledChartVersionAsync(Arg.Any<string>(), ChartName, PoolNamespace,
+        Helm.GetInstalledChartVersionAsync(Arg.Any<string>(), ChartName, DeploymentSiteNamespace,
             Arg.Any<CancellationToken>()).Returns("1.0.71");
 
         await Reconciler.DeployAsync(Dto(string.Empty, isReconciliation: true), CancellationToken.None);
@@ -51,7 +51,7 @@ internal class ReconcileChartVersionTests : WorkloadReconcilerTestsBase
     {
         // The dry-run renders the same chart the real install will apply; letting it resolve a
         // different version would validate something other than what gets deployed.
-        Helm.GetInstalledChartVersionAsync(Arg.Any<string>(), ChartName, PoolNamespace,
+        Helm.GetInstalledChartVersionAsync(Arg.Any<string>(), ChartName, DeploymentSiteNamespace,
             Arg.Any<CancellationToken>()).Returns("1.0.71");
 
         await Reconciler.DeployAsync(Dto(string.Empty, isReconciliation: true), CancellationToken.None);

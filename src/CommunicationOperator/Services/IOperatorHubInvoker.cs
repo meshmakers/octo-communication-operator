@@ -4,13 +4,13 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 
 /// <summary>
 /// Thin client-side wrapper around the single <c>/operatorHub</c> connection.
-/// Exists so non-hosted services (currently <see cref="PoolService"/>) can
+/// Exists so non-hosted services (currently <see cref="DeploymentSiteService"/>) can
 /// invoke hub methods without taking a dependency on
 /// <see cref="OperatorHubService"/> — the latter holds the connection's
 /// lifecycle.
 ///
 /// All methods are no-ops when <see cref="IsConnected"/> is <c>false</c>;
-/// the operator's reconnect handler reads the local pool list and replays
+/// the operator's reconnect handler reads the local deployment site list and replays
 /// any missed Register calls once the connection comes back.
 /// </summary>
 public interface IOperatorHubInvoker
@@ -21,37 +21,37 @@ public interface IOperatorHubInvoker
     bool IsConnected { get; }
 
     /// <summary>
-    /// Invokes <c>IOperatorHub.RegisterPoolAsync</c> on the controller for
-    /// the given pool. Silently skips when the connection is down.
-    /// <paramref name="poolRtId"/> is the controller-side lookup key.
+    /// Invokes <c>IOperatorHub.RegisterDeploymentSiteAsync</c> on the controller for
+    /// the given deployment site. Silently skips when the connection is down.
+    /// <paramref name="deploymentSiteRtId"/> is the controller-side lookup key.
     /// </summary>
-    Task RegisterPoolAsync(string tenantId, string poolRtId);
+    Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId);
 
     /// <summary>
-    /// Invokes <c>IOperatorHub.UnregisterPoolAsync</c>. Silently skips when
-    /// the connection is down — the pool will be reset to <c>Offline</c>
+    /// Invokes <c>IOperatorHub.UnregisterDeploymentSiteAsync</c>. Silently skips when
+    /// the connection is down — the deployment site will be reset to <c>Offline</c>
     /// the next time the operator-hub disconnects or when the next
-    /// reconnect runs without that pool in the local list.
+    /// reconnect runs without that deployment site in the local list.
     /// </summary>
-    Task UnregisterPoolAsync(string tenantId, string poolRtId);
+    Task UnregisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Per-pool variant of the reverse-sync that <see cref="OperatorHubService"/>
     /// runs in bulk on reconnect: ships a single
-    /// <c>OperatorDeployedPoolReportDto</c> so the controller can restore
-    /// <c>DeploymentState=Deployed</c> for this one pool. Used by
-    /// <c>PoolService.RegisterPoolAsync</c> after every successful CR
-    /// reconcile — the bulk path captures only pools KubeOps has already
-    /// added to <c>PoolService._pools</c> by the time the SignalR connect
+    /// <c>OperatorDeployedDeploymentSiteReportDto</c> so the controller can restore
+    /// <c>DeploymentState=Deployed</c> for this one deployment site. Used by
+    /// <c>DeploymentSiteService.RegisterDeploymentSiteAsync</c> after every successful CR
+    /// reconcile — the bulk path captures only deployment sites KubeOps has already
+    /// added to <c>DeploymentSiteService._deploymentSites</c> by the time the SignalR connect
     /// callback fires, so any CR that the KubeOps watcher discovers after
     /// that moment would otherwise miss the reverse-sync window.
     ///
-    /// Cloud-only: silently no-ops when <c>AutoManagePools=false</c> (edge)
+    /// Cloud-only: silently no-ops when <c>AutoManageDeploymentSites=false</c> (edge)
     /// or when the connection is down. Best-effort: a failed call is
     /// logged but does not propagate, mirroring the bulk reverse-sync's
     /// self-healing contract.
     /// </summary>
-    Task ReportDeployedPoolAsync(string tenantId, string poolRtId);
+    Task ReportDeployedDeploymentSiteAsync(string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Pushes a live progress signal at the controller while a

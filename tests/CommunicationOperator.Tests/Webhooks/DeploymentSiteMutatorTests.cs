@@ -3,16 +3,16 @@ using Meshmakers.Octo.Communication.Operator.Webhooks;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Webhooks;
 
-public class CommunicationPoolMutatorTests
+public class DeploymentSiteMutatorTests
 {
-    private readonly CommunicationPoolMutator _mutator = new();
+    private readonly DeploymentSiteMutator _mutator = new();
 
     [Test]
     public async Task Create_AlwaysReturnsNoChanges()
     {
-        var entity = new V1CommunicationPoolEntity
+        var entity = new V1DeploymentSiteEntity
         {
-            Spec = new V1CommunicationPoolEntity.V1CommunicationPoolEntitySpec
+            Spec = new V1DeploymentSiteEntity.V1DeploymentSiteEntitySpec
             {
             }
         };

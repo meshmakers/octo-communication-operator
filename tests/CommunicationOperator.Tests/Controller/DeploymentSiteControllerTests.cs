@@ -10,37 +10,37 @@ using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Controller;
 
-public class CommunicationPoolControllerTests
+public class DeploymentSiteControllerTests
 {
     private const string TenantId = "acme";
-    private const string PoolName = "default";
+    private const string DeploymentSiteName = "default";
     private const string CrName = "acme-default";
 
     private readonly IKubernetesClient _client = Substitute.For<IKubernetesClient>();
-    private readonly IPoolService _poolService = Substitute.For<IPoolService>();
-    private readonly CommunicationPoolController _controller;
+    private readonly IDeploymentSiteService _deploymentSiteService = Substitute.For<IDeploymentSiteService>();
+    private readonly DeploymentSiteController _controller;
 
-    public CommunicationPoolControllerTests()
+    public DeploymentSiteControllerTests()
     {
-        _controller = new CommunicationPoolController(
-            NullLogger<CommunicationPoolController>.Instance,
+        _controller = new DeploymentSiteController(
+            NullLogger<DeploymentSiteController>.Instance,
             _client,
-            _poolService);
+            _deploymentSiteService);
     }
 
-    private static V1CommunicationPoolEntity CreateEntity() =>
+    private static V1DeploymentSiteEntity CreateEntity() =>
         new()
         {
             Metadata = new V1ObjectMeta { Name = CrName, NamespaceProperty = "octo" },
-            Spec = new V1CommunicationPoolEntity.V1CommunicationPoolEntitySpec
+            Spec = new V1DeploymentSiteEntity.V1DeploymentSiteEntitySpec
             {
                 TenantId = TenantId,
             },
-            Status = new V1CommunicationPoolEntity.V1CommunicationPoolEntityStatus()
+            Status = new V1DeploymentSiteEntity.V1DeploymentSiteEntityStatus()
         };
 
     [Test]
-    public async Task ReconcileAsync_HappyPath_UpdatesStatusAndRegistersPool()
+    public async Task ReconcileAsync_HappyPath_UpdatesStatusAndRegistersDeploymentSite()
     {
         var entity = CreateEntity();
         _client.UpdateStatusAsync(entity, Arg.Any<CancellationToken>()).Returns(entity);
@@ -48,7 +48,7 @@ public class CommunicationPoolControllerTests
         var result = await _controller.ReconcileAsync(entity, CancellationToken.None);
 
         await Assert.That(result.IsSuccess).IsTrue();
-        await _poolService.Received(1).RegisterPoolAsync(entity, Arg.Any<CancellationToken>());
+        await _deploymentSiteService.Received(1).RegisterDeploymentSiteAsync(entity, Arg.Any<CancellationToken>());
         await _client.Received(2).UpdateStatusAsync(entity, Arg.Any<CancellationToken>());
         await Assert.That(entity.Status.CommunicationStatus).IsEqualTo("Registered");
     }
@@ -58,8 +58,8 @@ public class CommunicationPoolControllerTests
     {
         var entity = CreateEntity();
         _client.UpdateStatusAsync(entity, Arg.Any<CancellationToken>()).Returns(entity);
-        _poolService
-            .RegisterPoolAsync(entity, Arg.Any<CancellationToken>())
+        _deploymentSiteService
+            .RegisterDeploymentSiteAsync(entity, Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         var result = await _controller.ReconcileAsync(entity, CancellationToken.None);
@@ -76,24 +76,24 @@ public class CommunicationPoolControllerTests
         var result = await _controller.DeletedAsync(entity, CancellationToken.None);
 
         await Assert.That(result.IsSuccess).IsTrue();
-        await _poolService.Received(1).UnRegisterPoolAsync(entity);
+        await _deploymentSiteService.Received(1).UnRegisterDeploymentSiteAsync(entity);
         await _client.DidNotReceive().UpdateStatusAsync(
-            Arg.Any<V1CommunicationPoolEntity>(), Arg.Any<CancellationToken>());
+            Arg.Any<V1DeploymentSiteEntity>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
     public async Task DeletedAsync_UnregisterFails_DoesNotTouchStatusAndReturnsFailure()
     {
         var entity = CreateEntity();
-        _poolService
-            .UnRegisterPoolAsync(entity)
+        _deploymentSiteService
+            .UnRegisterDeploymentSiteAsync(entity)
             .ThrowsAsync(new InvalidOperationException("hub gone"));
 
         var result = await _controller.DeletedAsync(entity, CancellationToken.None);
 
         await Assert.That(result.IsSuccess).IsFalse();
         await _client.DidNotReceive().UpdateStatusAsync(
-            Arg.Any<V1CommunicationPoolEntity>(), Arg.Any<CancellationToken>());
+            Arg.Any<V1DeploymentSiteEntity>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -106,13 +106,13 @@ public class CommunicationPoolControllerTests
         // contract for the delete callback.
         var entity = CreateEntity();
         _client
-            .UpdateStatusAsync(Arg.Any<V1CommunicationPoolEntity>(), Arg.Any<CancellationToken>())
+            .UpdateStatusAsync(Arg.Any<V1DeploymentSiteEntity>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new HttpOperationException("404 Not Found"));
 
         var result = await _controller.DeletedAsync(entity, CancellationToken.None);
 
         await Assert.That(result.IsSuccess).IsTrue();
         await _client.DidNotReceive().UpdateStatusAsync(
-            Arg.Any<V1CommunicationPoolEntity>(), Arg.Any<CancellationToken>());
+            Arg.Any<V1DeploymentSiteEntity>(), Arg.Any<CancellationToken>());
     }
 }

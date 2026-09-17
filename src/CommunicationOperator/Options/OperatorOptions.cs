@@ -12,14 +12,14 @@ public class OperatorOptions
     public string? ImagePullSecretName { get; set; }
 
     /// <summary>
-    /// When true, the operator automatically creates CommunicationPool CRs
+    /// When true, the operator automatically creates DeploymentSite CRs
     /// when tenants are created (via PosCreateTenant distributed event).
     /// </summary>
-    public bool AutoManagePools { get; set; }
+    public bool AutoManageDeploymentSites { get; set; }
 
     /// <summary>
     /// Restricts the operator's CR watcher to a single Kubernetes namespace.
-    /// When set, the operator only reconciles <c>CommunicationPool</c> resources
+    /// When set, the operator only reconciles <c>DeploymentSite</c> resources
     /// in that namespace; CRs in other namespaces are ignored. When null or
     /// empty (the default), the operator watches all namespaces cluster-wide.
     /// Required when running multiple operator instances on the same cluster
@@ -29,39 +29,39 @@ public class OperatorOptions
     public string? WatchNamespace { get; set; }
 
     /// <summary>
-    /// Kubernetes namespace into which auto-created CommunicationPool CRs,
+    /// Kubernetes namespace into which auto-created DeploymentSite CRs,
     /// per-tenant broker secrets, and adapter Deployments/Services are placed.
-    /// All artefacts of a managed pool live in this namespace.
+    /// All artefacts of a managed deployment site live in this namespace.
     /// </summary>
-    public string PoolNamespace { get; set; } = "octo";
+    public string DeploymentSiteNamespace { get; set; } = "octo";
 
     /// <summary>
     /// Kubernetes namespace that <b>adapter pool</b> workloads (AB#4924,
     /// <see cref="Meshmakers.Octo.Communication.Contracts.DataTransferObjects.WorkloadTypeDto.AdapterPool"/>)
     /// are deployed into. A pool member executes work on behalf of tenants that are not the
-    /// tenant owning the pool, so it deliberately does not live where that tenant's own
+    /// tenant owning the deployment site, so it deliberately does not live where that tenant's own
     /// workloads live — consumption is attributed to the tenant whose work ran, not to the
     /// lender (concept §4b, Q1).
     ///
-    /// 🔴 <b>When empty (the default) pool workloads land in <see cref="PoolNamespace"/>.</b> That is
+    /// 🔴 <b>When empty (the default) deployment site workloads land in <see cref="DeploymentSiteNamespace"/>.</b> That is
     /// not a fallback for lack of a better idea: Kubernetes forbids cross-namespace owner
     /// references, and a namespaced dependent whose owner lives in another namespace is treated
     /// as having a missing owner and is <i>deleted</i> by the garbage collector. The owner of a
-    /// pool is the lending tenant's <c>CommunicationPool</c> CR, which lives in
-    /// <see cref="PoolNamespace"/> — so owner-reference garbage collection only exists while the
-    /// two namespaces are the same one. <see cref="PoolNamespace"/> is already a platform
+    /// deployment site is the lending tenant's <c>DeploymentSite</c> CR, which lives in
+    /// <see cref="DeploymentSiteNamespace"/> — so owner-reference garbage collection only exists while the
+    /// two namespaces are the same one. <see cref="DeploymentSiteNamespace"/> is already a platform
     /// namespace rather than a tenant namespace, so the default satisfies both halves of Q1.
     ///
-    /// Setting this to a different namespace is supported and moves the pool's Helm release
+    /// Setting this to a different namespace is supported and moves the deployment site's Helm release
     /// there, but the operator then refuses to write the owner reference and says so once per
     /// deploy: an invalid cross-namespace reference would not merely fail to garbage-collect,
-    /// it would have the pool deleted out from under a live tenant.
+    /// it would have the deployment site deleted out from under a live tenant.
     /// </summary>
     public string? PlatformNamespace { get; set; }
 
     /// <summary>
     /// Cluster-internal URI of the communication controller service,
-    /// used as the communicationControllerUri in auto-created CommunicationPool CRs.
+    /// used as the communicationControllerUri in auto-created DeploymentSite CRs.
     /// </summary>
     public string CommunicationControllerUri { get; set; } = string.Empty;
 
@@ -78,14 +78,14 @@ public class OperatorOptions
     public string WorkloadCommunicationControllerUri { get; set; } = string.Empty;
 
     /// <summary>
-    /// Interval in seconds between retry attempts for pool registrations
+    /// Interval in seconds between retry attempts for deployment site registrations
     /// that the controller rejected while the hub connection stayed alive
     /// (e.g. a transient CkCache error during a parallel service startup).
     /// Values &lt;= 0 disable the retry loop, leaving only the
     /// reconnect-driven re-registration. Fractional values are allowed
     /// (used by tests to drive the loop fast).
     /// </summary>
-    public double PoolRegistrationRetrySeconds { get; set; } = 30;
+    public double DeploymentSiteRegistrationRetrySeconds { get; set; } = 30;
 
     /// <summary>
     /// Whether adapter pods should ignore certificate validation.
@@ -296,7 +296,7 @@ public class OperatorAuthenticationOptions
     /// <remarks>
     /// <para>
     /// 🔴 <b>This is a deliberate identity decision, not an address.</b> The operator is
-    /// tenant-crossing by construction: one process, one hub connection, every tenant's pools and
+    /// tenant-crossing by construction: one process, one hub connection, every tenant's deployment sites and
     /// workloads. Accordingly <c>/operatorHub</c> is <b>not</b> tenant-scoped — the controller
     /// gates it with <c>SystemCommunicationApiPolicy</c>, which is a plain
     /// <c>scope=octo_api</c> requirement and never asks which tenant the caller belongs to. So the
@@ -308,7 +308,7 @@ public class OperatorAuthenticationOptions
     /// register the operator's client there. Two reasons, both structural: the operator's
     /// authority is system-level, and pinning it to one of the tenants it manages would let a
     /// tenant delete take the credential of the entire fleet with it — including the credential
-    /// needed to tear that very tenant's pools down.
+    /// needed to tear that very tenant's deployment sites down.
     /// </para>
     /// <para>
     /// ⚠️ <b>Leaving it empty is only safe for a provably unmirrored client (AB#5058).</b> A

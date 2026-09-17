@@ -74,11 +74,11 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
     private static List<string> BuildUpgradeArgs(string release, string chart, string version, string @namespace,
         IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, bool dryRunServer)
     {
-        // Note: no `--create-namespace` — the pool namespace is owned by the
+        // Note: no `--create-namespace` — the deployment site namespace is owned by the
         // operator's namespace-scoped service account, which cannot create
-        // cluster-scoped resources. The pool's namespace is guaranteed to
-        // exist before any workload deploy: CommunicationPoolManager creates
-        // it (or asserts it) when the CommunicationPool CR is created.
+        // cluster-scoped resources. The deployment site's namespace is guaranteed to
+        // exist before any workload deploy: DeploymentSiteManager creates
+        // it (or asserts it) when the DeploymentSite CR is created.
         var args = new List<string>
         {
             "upgrade", "--install", release, chart,

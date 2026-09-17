@@ -6,20 +6,20 @@ using Meshmakers.Octo.Communication.Operator.Entities;
 
 namespace Meshmakers.Octo.Communication.Operator.Services;
 
-public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGateway
+public class DeploymentSiteKubernetesGateway : IDeploymentSiteKubernetesGateway
 {
     private const string CrdGroup = "octo-mesh.meshmakers.io";
-    private const string CrdVersion = "v1alpha1";
-    private const string CrdPlural = "communicationpools";
+    private const string CrdVersion = "v1";
+    private const string CrdPlural = "deploymentsites";
 
     private readonly IKubernetes _kubernetesClient;
 
-    public CommunicationPoolKubernetesGateway(IKubernetes kubernetesClient)
+    public DeploymentSiteKubernetesGateway(IKubernetes kubernetesClient)
     {
         _kubernetesClient = kubernetesClient;
     }
 
-    public async Task<bool> CommunicationPoolExistsAsync(string @namespace, string name, CancellationToken cancellationToken = default)
+    public async Task<bool> DeploymentSiteExistsAsync(string @namespace, string name, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -33,11 +33,11 @@ public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGa
         }
     }
 
-    public Task CreateCommunicationPoolAsync(string @namespace, object resource, CancellationToken cancellationToken = default) =>
+    public Task CreateDeploymentSiteAsync(string @namespace, object resource, CancellationToken cancellationToken = default) =>
         _kubernetesClient.CustomObjects.CreateNamespacedCustomObjectAsync(
             resource, CrdGroup, CrdVersion, @namespace, CrdPlural, cancellationToken: cancellationToken);
 
-    public Task DeleteCommunicationPoolAsync(string @namespace, string name, CancellationToken cancellationToken = default) =>
+    public Task DeleteDeploymentSiteAsync(string @namespace, string name, CancellationToken cancellationToken = default) =>
         _kubernetesClient.CustomObjects.DeleteNamespacedCustomObjectAsync(
             CrdGroup, CrdVersion, @namespace, CrdPlural, name, cancellationToken: cancellationToken);
 
@@ -78,7 +78,7 @@ public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGa
         return patched;
     }
 
-    public async Task<V1OwnerReference?> TryGetCommunicationPoolOwnerReferenceAsync(string @namespace, string name,
+    public async Task<V1OwnerReference?> TryGetDeploymentSiteOwnerReferenceAsync(string @namespace, string name,
         CancellationToken cancellationToken = default)
     {
         object raw;
@@ -94,7 +94,7 @@ public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGa
 
         // The custom-objects API is untyped; round-trip through the Kubernetes serializer rather
         // than poking at the raw JSON so the metadata shape stays owned by the client library.
-        var entity = KubernetesJson.Deserialize<V1CommunicationPoolEntity>(KubernetesJson.Serialize(raw));
+        var entity = KubernetesJson.Deserialize<V1DeploymentSiteEntity>(KubernetesJson.Serialize(raw));
         var uid = entity?.Metadata?.Uid;
         if (string.IsNullOrEmpty(uid))
         {
@@ -104,10 +104,10 @@ public class CommunicationPoolKubernetesGateway : ICommunicationPoolKubernetesGa
         return new V1OwnerReference
         {
             ApiVersion = $"{CrdGroup}/{CrdVersion}",
-            Kind = "CommunicationPool",
+            Kind = "DeploymentSite",
             Name = name,
             Uid = uid,
-            // Not a controller reference: the pool's resources are created by helm, and claiming
+            // Not a controller reference: the deployment site's resources are created by helm, and claiming
             // controller ownership would make this operator the single controlling owner of
             // objects another component manages.
             Controller = false,

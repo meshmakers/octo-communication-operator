@@ -3,7 +3,7 @@ using System.Text;
 namespace Meshmakers.Octo.Communication.Operator.Common;
 
 /// <summary>
-/// Coerces arbitrary strings (tenant ids, pool names, workload names from
+/// Coerces arbitrary strings (tenant ids, deployment site names, workload names from
 /// the CK entity store) into shapes the Kubernetes apiserver will accept.
 ///
 /// Two flavours:
@@ -13,13 +13,13 @@ namespace Meshmakers.Octo.Communication.Operator.Common;
 ///   <c>'-'</c>).</item>
 ///   <item><see cref="LabelValue"/> — label-value alphabet (allows
 ///   <c>'_'</c> and <c>'.'</c>) for the
-///   <c>octo-mesh.meshmakers.io/{tenant,pool,workload}</c> identity
+///   <c>octo-mesh.meshmakers.io/{tenant,deployment site,workload}</c> identity
 ///   labels.</item>
 /// </list>
 ///
 /// The CR/secret/release-name path used to call <c>ToLowerInvariant()</c>
 /// directly which silently produced apiserver-rejected names whenever the
-/// pool was named, e.g., <c>"Communication Pool"</c>. Both helpers are
+/// deployment site was named, e.g., <c>"Communication DeploymentSite"</c>. Both helpers are
 /// pure and side-effect-free; suitable for use from the workload
 /// reconciler, the communication-pool manager, and any future component
 /// that has to derive k8s identifiers from CK entity attributes.
@@ -90,7 +90,7 @@ internal static class K8sNaming
     /// <summary>
     /// Joins <paramref name="parts"/> with <c>'-'</c> after individually
     /// sanitising each piece. Used for compound names like
-    /// <c>{tenant}-{pool}</c> or <c>{tenant}-{workload}</c> where the
+    /// <c>{tenant}-{deployment site}</c> or <c>{tenant}-{workload}</c> where the
     /// individual segments come from user-controlled CK attributes.
     /// </summary>
     public static string DnsName(int maxLength, params string[] parts)
@@ -104,7 +104,7 @@ internal static class K8sNaming
     /// Kubernetes requires labels to match
     /// <c>[A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9]</c> with length ≤ 63 — CK
     /// entity names can contain spaces or other punctuation (e.g.
-    /// <c>"Communication Pool"</c>, <c>"meshtest Adapter"</c>) which the
+    /// <c>"Communication DeploymentSite"</c>, <c>"meshtest Adapter"</c>) which the
     /// apiserver rejects with a 422. Everything outside the allowed
     /// alphabet becomes a dash; leading and trailing punctuation are
     /// trimmed; empty results become <c>"unknown"</c> so the label is

@@ -11,10 +11,10 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 /// <summary>
 /// Background service that maintains a SignalR management connection to the Communication Controller.
 /// Connects whenever <c>CommunicationControllerUri</c> is configured — required in both
-/// central and edge modes so that pool register/unregister, workload deploys, and tenant
-/// lifecycle events flow through the hub. The <c>AutoManagePools</c> flag only gates the
-/// secondary behavior of auto-creating/auto-deleting <c>CommunicationPool</c> CRs in
-/// response to <c>PoolDeployedAsync</c> / <c>PoolUndeployedAsync</c> events — used by the
+/// central and edge modes so that deployment site register/unregister, workload deploys, and tenant
+/// lifecycle events flow through the hub. The <c>AutoManageDeploymentSites</c> flag only gates the
+/// secondary behavior of auto-creating/auto-deleting <c>DeploymentSite</c> CRs in
+/// response to <c>DeploymentSiteDeployedAsync</c> / <c>DeploymentSiteUndeployedAsync</c> events — used by the
 /// central operator, not by edge operators (which receive CRs manually).
 /// </summary>
 public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOperatorHubInvoker
@@ -22,13 +22,13 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     private readonly ILogger<OperatorHubService> _logger;
     private readonly OperatorOptions _options;
     private readonly IOperatorHubClientFactory _clientFactory;
-    private readonly ICommunicationPoolManager _poolManager;
+    private readonly IDeploymentSiteManager _deploymentSiteManager;
     private readonly IWorkloadReconciler _workloadReconciler;
     private readonly IServiceProvider _serviceProvider;
 
     // Set in ExecuteAsync once the client is constructed; consumed by the
     // workload-deploy callback to report success / failure back to the
-    // controller, and by IOperatorHubInvoker for pool register / unregister.
+    // controller, and by IOperatorHubInvoker for deployment site register / unregister.
     // Stays null when no CommunicationControllerUri is configured (the
     // service returns early without building a client).
     private IOperatorHubClient? _client;
@@ -48,18 +48,18 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         ILogger<OperatorHubService> logger,
         IOptions<OperatorOptions> options,
         IOperatorHubClientFactory clientFactory,
-        ICommunicationPoolManager poolManager,
+        IDeploymentSiteManager deploymentSiteManager,
         IWorkloadReconciler workloadReconciler,
         IServiceProvider serviceProvider)
     {
         _logger = logger;
         _options = options.Value;
         _clientFactory = clientFactory;
-        _poolManager = poolManager;
+        _deploymentSiteManager = deploymentSiteManager;
         _workloadReconciler = workloadReconciler;
-        // IPoolService is resolved lazily to break the DI cycle: PoolService
+        // IDeploymentSiteService is resolved lazily to break the DI cycle: DeploymentSiteService
         // depends on IOperatorHubInvoker (this class), and we depend on
-        // IPoolService here. Both are singletons; lazy resolution defers the
+        // IDeploymentSiteService here. Both are singletons; lazy resolution defers the
         // lookup until ExecuteAsync runs.
         _serviceProvider = serviceProvider;
     }
@@ -68,65 +68,65 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public bool IsConnected => _client?.IsAlive ?? false;
 
     /// <inheritdoc />
-    public async Task RegisterPoolAsync(string tenantId, string poolRtId)
+    public async Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         var client = _client;
         if (client == null || !client.IsAlive)
         {
             _logger.LogDebug(
-                "Operator-hub not connected; skipping RegisterPoolAsync for tenant '{TenantId}', pool rtId {PoolRtId} (will be replayed on reconnect)",
-                tenantId, poolRtId);
+                "Operator-hub not connected; skipping RegisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId} (will be replayed on reconnect)",
+                tenantId, deploymentSiteRtId);
             return;
         }
-        await client.RegisterPoolAsync(tenantId, poolRtId);
+        await client.RegisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
     }
 
     /// <inheritdoc />
-    public async Task UnregisterPoolAsync(string tenantId, string poolRtId)
+    public async Task UnregisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         var client = _client;
         if (client == null || !client.IsAlive)
         {
             _logger.LogDebug(
-                "Operator-hub not connected; skipping UnregisterPoolAsync for tenant '{TenantId}', pool rtId {PoolRtId}",
-                tenantId, poolRtId);
+                "Operator-hub not connected; skipping UnregisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                tenantId, deploymentSiteRtId);
             return;
         }
-        await client.UnregisterPoolAsync(tenantId, poolRtId);
+        await client.UnregisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
     }
 
     /// <inheritdoc />
-    public async Task ReportDeployedPoolAsync(string tenantId, string poolRtId)
+    public async Task ReportDeployedDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         // Edge operators must NOT call ReportDeployedStateAsync — the
         // controller-side handler rejects them with a HubException. Skip at
         // the source so every CR reconcile on an edge operator doesn't emit
         // an avoidable error audit event on the controller.
-        if (!_options.AutoManagePools)
+        if (!_options.AutoManageDeploymentSites)
         {
             return;
         }
         var client = _client;
         if (client == null || !client.IsAlive)
         {
-            // Same contract as RegisterPoolAsync: when the hub is down we
+            // Same contract as RegisterDeploymentSiteAsync: when the hub is down we
             // skip. The next bulk reverse-sync (fired from the reconnect
             // callback once the connection is restored) covers the gap as
-            // long as the pool is in PoolService.GetPools() at that point.
+            // long as the deployment site is in DeploymentSiteService.GetDeploymentSites() at that point.
             _logger.LogDebug(
-                "Operator-hub not connected; skipping per-pool reverse-sync for tenant '{TenantId}', pool rtId {PoolRtId}",
-                tenantId, poolRtId);
+                "Operator-hub not connected; skipping per-deployment-site reverse-sync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                tenantId, deploymentSiteRtId);
             return;
         }
         try
         {
             await client.ReportDeployedStateAsync(new[]
             {
-                new OperatorDeployedPoolReportDto
+                new OperatorDeployedDeploymentSiteReportDto
                 {
                     TenantId = tenantId,
-                    PoolRtId = poolRtId,
-                    PoolName = string.Empty,
+                    DeploymentSiteRtId = deploymentSiteRtId,
+                    DeploymentSiteName = string.Empty,
                     WorkloadRtIds = Array.Empty<string>(),
                 },
             });
@@ -137,8 +137,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             // / older controller-side contract must not break the per-CR
             // reconcile loop. Log so the drift is at least diagnosable.
             _logger.LogWarning(ex,
-                "Failed to send per-pool reverse-sync for tenant '{TenantId}', pool rtId {PoolRtId}",
-                tenantId, poolRtId);
+                "Failed to send per-deployment-site reverse-sync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                tenantId, deploymentSiteRtId);
         }
     }
 
@@ -184,13 +184,13 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         {
             _logger.LogWarning(
                 "CommunicationControllerUri is not configured, operator hub service will not start " +
-                "(pool register/unregister and workload-deploy events will be unavailable)");
+                "(deployment site register/unregister and workload-deploy events will be unavailable)");
             return;
         }
 
         _logger.LogInformation(
             "Starting operator hub service in {Mode} mode, connecting to controller at {ControllerUri}",
-            _options.AutoManagePools ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)",
+            _options.AutoManageDeploymentSites ? "central (AutoManageDeploymentSites=true)" : "edge (AutoManageDeploymentSites=false)",
             _options.CommunicationControllerUri);
 
         var clientOptions = new OperatorHubClientOptions
@@ -205,90 +205,90 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         {
             _logger.LogInformation("Registering operator with controller (reconnect: {IsReconnect})", isReconnect);
 
-            // Flip every owned pool to unregistered before replaying the
-            // registrations below. A pool that registered fine on a PREVIOUS
+            // Flip every owned deployment site to unregistered before replaying the
+            // registrations below. A deployment site that registered fine on a PREVIOUS
             // connection but fails now would otherwise keep a stale
             // IsRegistered=true and be invisible to the periodic retry loop.
-            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
-            poolService.ResetRegistrationState();
+            var deploymentSiteService = _serviceProvider.GetRequiredService<IDeploymentSiteService>();
+            deploymentSiteService.ResetRegistrationState();
 
             // Declare our mode to the controller so it can validate that we
-            // only register pools whose Environment matches it (central op
+            // only register deployment sites whose Environment matches it (central op
             // → Cloud, edge op → Edge). Without this declaration the
             // controller treats us as legacy and skips enforcement.
-            var deployedPools = (await client.RegisterOperatorAsync(_options.AutoManagePools)).ToArray();
-            _logger.LogInformation("Registered with controller, {PoolCount} deployed Cloud pools",
-                deployedPools.Length);
+            var deployedDeploymentSites = (await client.RegisterOperatorAsync(_options.AutoManageDeploymentSites)).ToArray();
+            _logger.LogInformation("Registered with controller, {DeploymentSiteCount} deployed Cloud deployment sites",
+                deployedDeploymentSites.Length);
 
-            // Same gate as PoolDeployedAsync: auto-CR-creation is the central
+            // Same gate as DeploymentSiteDeployedAsync: auto-CR-creation is the central
             // operator's job. Without this check an edge operator would
-            // materialize CRs (and broker secrets) for every Cloud pool the
+            // materialize CRs (and broker secrets) for every Cloud deployment site the
             // controller knows about on every (re)connect, then register them
             // as if it owned them — workload events would then route to the
             // edge cluster too.
-            if (_options.AutoManagePools)
+            if (_options.AutoManageDeploymentSites)
             {
-                foreach (var pool in deployedPools)
+                foreach (var deploymentSite in deployedDeploymentSites)
                 {
-                    await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId);
+                    await _deploymentSiteManager.CreateDeploymentSiteAsync(deploymentSite.TenantId, deploymentSite.DeploymentSiteRtId);
                 }
             }
-            else if (deployedPools.Length > 0)
+            else if (deployedDeploymentSites.Length > 0)
             {
                 _logger.LogDebug(
-                    "AutoManagePools=false: skipping CR creation for {PoolCount} deployed Cloud pools returned by RegisterOperatorAsync",
-                    deployedPools.Length);
+                    "AutoManageDeploymentSites=false: skipping CR creation for {DeploymentSiteCount} deployed Cloud deployment sites returned by RegisterOperatorAsync",
+                    deployedDeploymentSites.Length);
             }
 
-            // Replay pool registrations for every CommunicationPool CR the
+            // Replay deployment site registrations for every DeploymentSite CR the
             // operator currently owns. On a fresh connect this is empty (CRs
-            // arrive via PoolDeployedAsync afterwards), on a reconnect this
-            // is what flips every pool back to Online.
-            var ownedPools = poolService.GetPools().ToArray();
-            foreach (var pool in ownedPools)
+            // arrive via DeploymentSiteDeployedAsync afterwards), on a reconnect this
+            // is what flips every deployment site back to Online.
+            var ownedDeploymentSites = deploymentSiteService.GetDeploymentSites().ToArray();
+            foreach (var deploymentSite in ownedDeploymentSites)
             {
                 try
                 {
-                    await client.RegisterPoolAsync(pool.Entity.Spec.TenantId,
-                        pool.Entity.Spec.PoolRtId);
-                    pool.IsRegistered = true;
+                    await client.RegisterDeploymentSiteAsync(deploymentSite.Entity.Spec.TenantId,
+                        deploymentSite.Entity.Spec.DeploymentSiteRtId);
+                    deploymentSite.IsRegistered = true;
                 }
                 catch (Exception ex)
                 {
                     // Leave IsRegistered=false (reset above) so the periodic
-                    // retry loop picks the pool up — the controller may have
+                    // retry loop picks the deployment site up — the controller may have
                     // rejected the call transiently (e.g. CkCache still
                     // warming up during a parallel service startup, AB#4371).
                     _logger.LogWarning(ex,
-                        "Failed to re-register pool rtId {PoolRtId} for tenant '{TenantId}' on reconnect; " +
+                        "Failed to re-register deployment site rtId {DeploymentSiteRtId} for tenant '{TenantId}' on reconnect; " +
                         "the periodic registration retry will pick it up",
-                        pool.Entity.Spec.PoolRtId, pool.Entity.Spec.TenantId);
+                        deploymentSite.Entity.Spec.DeploymentSiteRtId, deploymentSite.Entity.Spec.TenantId);
                 }
             }
 
-            // Reverse-sync: tell the controller which pools we currently have
+            // Reverse-sync: tell the controller which deployment sites we currently have
             // an active CR for so it can lift any DeploymentState that drifted
             // back to Pending (e.g. operator pod was restarted while the
             // controller stayed up, the CR survived in k8s but the controller's
             // in-memory tracking was lost). Cloud-only by hub contract — edge
             // operators would be rejected with a HubException. Workload-level
             // reverse-sync is NOT yet covered: the operator has no persistent
-            // helm-release-to-workload-rtId mapping, so we report each pool
+            // helm-release-to-workload-rtId mapping, so we report each deployment site
             // with an empty WorkloadRtIds list and rely on the controller's
-            // own tracking + the existing PoolDeployedAsync fan-out for
+            // own tracking + the existing DeploymentSiteDeployedAsync fan-out for
             // workloads. Documented as a follow-up in CLAUDE.md.
-            if (_options.AutoManagePools && ownedPools.Length > 0)
+            if (_options.AutoManageDeploymentSites && ownedDeploymentSites.Length > 0)
             {
-                var reports = ownedPools
-                    .Select(p => new OperatorDeployedPoolReportDto
+                var reports = ownedDeploymentSites
+                    .Select(p => new OperatorDeployedDeploymentSiteReportDto
                     {
                         TenantId = p.Entity.Spec.TenantId,
-                        PoolRtId = p.Entity.Spec.PoolRtId,
+                        DeploymentSiteRtId = p.Entity.Spec.DeploymentSiteRtId,
                         // CR doesn't carry the human-readable name (it lives on
-                        // the controller's RtPool.Name); the controller-side
+                        // the controller's RtDeploymentSite.Name); the controller-side
                         // restore loads the name itself for log messages, so an
                         // empty value here is fine.
-                        PoolName = string.Empty,
+                        DeploymentSiteName = string.Empty,
                         WorkloadRtIds = Array.Empty<string>(),
                     })
                     .ToArray();
@@ -297,7 +297,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 {
                     await client.ReportDeployedStateAsync(reports);
                     _logger.LogInformation(
-                        "Reverse-sync sent to controller: {Count} pool(s)",
+                        "Reverse-sync sent to controller: {Count} deployment site(s)",
                         reports.Length);
                 }
                 catch (Exception ex)
@@ -307,13 +307,13 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                     // event will write the state correctly anyway. Log so the
                     // partial drift is at least diagnosable.
                     _logger.LogWarning(ex,
-                        "Failed to send reverse-sync to controller ({Count} pool(s) skipped)",
+                        "Failed to send reverse-sync to controller ({Count} deployment site(s) skipped)",
                         reports.Length);
                 }
             }
         };
 
-        var registrationRetryTask = RetryPoolRegistrationLoopAsync(client, stoppingToken);
+        var registrationRetryTask = RetryDeploymentSiteRegistrationLoopAsync(client, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -322,7 +322,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 await client.StartAsync(onReconnect, stoppingToken);
                 client.EnableReconnect(onReconnect);
 
-                _logger.LogInformation("Operator hub connected, waiting for pool events");
+                _logger.LogInformation("Operator hub connected, waiting for deployment site events");
 
                 // Keep running until cancelled
                 await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -351,31 +351,31 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     }
 
     /// <summary>
-    /// Periodic self-heal for pool registrations that failed while the hub
+    /// Periodic self-heal for deployment site registrations that failed while the hub
     /// connection stayed alive. The reconnect callback re-registers every
-    /// owned pool, but a registration the CONTROLLER rejects (e.g. a
+    /// owned deployment site, but a registration the CONTROLLER rejects (e.g. a
     /// transient CkCache error while its tenant models are still importing
     /// during a parallel service startup) used to be logged and forgotten:
-    /// the connection never drops, so no reconnect fires, and the pool
+    /// the connection never drops, so no reconnect fires, and the deployment site
     /// stays orphaned — the controller then drops every workload
-    /// deploy/undeploy for it ("No operator currently owns pool ...").
-    /// Observed on prod-1, AB#4371. This loop retries every owned pool
+    /// deploy/undeploy for it ("No operator currently owns deployment site ...").
+    /// Observed on prod-1, AB#4371. This loop retries every owned deployment site
     /// that is not flagged <c>IsRegistered</c> while the connection is
-    /// alive; a recovered pool also gets the per-pool reverse-sync so a
+    /// alive; a recovered deployment site also gets the per-deployment-site reverse-sync so a
     /// drifted <c>DeploymentState</c> is restored.
     /// </summary>
-    private async Task RetryPoolRegistrationLoopAsync(IOperatorHubClient client, CancellationToken stoppingToken)
+    private async Task RetryDeploymentSiteRegistrationLoopAsync(IOperatorHubClient client, CancellationToken stoppingToken)
     {
-        if (_options.PoolRegistrationRetrySeconds <= 0)
+        if (_options.DeploymentSiteRegistrationRetrySeconds <= 0)
         {
             _logger.LogWarning(
-                "PoolRegistrationRetrySeconds is {RetrySeconds}; pool-registration retry is disabled — " +
+                "DeploymentSiteRegistrationRetrySeconds is {RetrySeconds}; deployment site-registration retry is disabled — " +
                 "a registration rejected by the controller will not be re-attempted until the next reconnect",
-                _options.PoolRegistrationRetrySeconds);
+                _options.DeploymentSiteRegistrationRetrySeconds);
             return;
         }
 
-        var interval = TimeSpan.FromSeconds(_options.PoolRegistrationRetrySeconds);
+        var interval = TimeSpan.FromSeconds(_options.DeploymentSiteRegistrationRetrySeconds);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -394,95 +394,95 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 continue;
             }
 
-            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
-            foreach (var pool in poolService.GetPools().Where(p => !p.IsRegistered))
+            var deploymentSiteService = _serviceProvider.GetRequiredService<IDeploymentSiteService>();
+            foreach (var deploymentSite in deploymentSiteService.GetDeploymentSites().Where(p => !p.IsRegistered))
             {
-                var tenantId = pool.Entity.Spec.TenantId;
-                var poolRtId = pool.Entity.Spec.PoolRtId;
+                var tenantId = deploymentSite.Entity.Spec.TenantId;
+                var deploymentSiteRtId = deploymentSite.Entity.Spec.DeploymentSiteRtId;
                 try
                 {
-                    await client.RegisterPoolAsync(tenantId, poolRtId);
-                    pool.IsRegistered = true;
+                    await client.RegisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
+                    deploymentSite.IsRegistered = true;
                     _logger.LogInformation(
-                        "Recovered registration for pool rtId {PoolRtId} (tenant '{TenantId}') after an earlier failure",
-                        poolRtId, tenantId);
-                    // Same follow-up as PoolService.RegisterPoolAsync: restore a
-                    // DeploymentState that drifted while the pool was orphaned.
+                        "Recovered registration for deployment site rtId {DeploymentSiteRtId} (tenant '{TenantId}') after an earlier failure",
+                        deploymentSiteRtId, tenantId);
+                    // Same follow-up as DeploymentSiteService.RegisterDeploymentSiteAsync: restore a
+                    // DeploymentState that drifted while the deployment site was orphaned.
                     // Gated internally to Cloud mode; best-effort by contract.
-                    await ReportDeployedPoolAsync(tenantId, poolRtId);
+                    await ReportDeployedDeploymentSiteAsync(tenantId, deploymentSiteRtId);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        "Registration retry failed for pool rtId {PoolRtId} (tenant '{TenantId}'); " +
+                        "Registration retry failed for deployment site rtId {DeploymentSiteRtId} (tenant '{TenantId}'); " +
                         "next attempt in {RetrySeconds}s",
-                        poolRtId, tenantId, _options.PoolRegistrationRetrySeconds);
+                        deploymentSiteRtId, tenantId, _options.DeploymentSiteRegistrationRetrySeconds);
                 }
             }
         }
     }
 
-    public async Task PoolDeployedAsync(DeployedPoolDto pool)
+    public async Task DeploymentSiteDeployedAsync(DeployedDeploymentSiteDto deploymentSite)
     {
         _logger.LogInformation(
-            "Pool deployed event received: tenant '{TenantId}', pool rtId {PoolRtId}",
-            pool.TenantId, pool.PoolRtId);
+            "DeploymentSite deployed event received: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+            deploymentSite.TenantId, deploymentSite.DeploymentSiteRtId);
 
         // Auto-CR-creation is the central-operator's job. Edge operators
         // receive the same broadcast (the controller fans out to every
         // connected operator) but must ignore it — CRs there are managed
         // out-of-band (manually or by an external system).
-        if (!_options.AutoManagePools)
+        if (!_options.AutoManageDeploymentSites)
         {
             _logger.LogDebug(
-                "AutoManagePools=false: not auto-creating CR for tenant '{TenantId}', pool rtId {PoolRtId}",
-                pool.TenantId, pool.PoolRtId);
+                "AutoManageDeploymentSites=false: not auto-creating CR for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                deploymentSite.TenantId, deploymentSite.DeploymentSiteRtId);
             return;
         }
 
         try
         {
-            await _poolManager.CreatePoolAsync(pool.TenantId, pool.PoolRtId);
+            await _deploymentSiteManager.CreateDeploymentSiteAsync(deploymentSite.TenantId, deploymentSite.DeploymentSiteRtId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to create CommunicationPool CR for tenant '{TenantId}', pool rtId {PoolRtId}",
-                pool.TenantId, pool.PoolRtId);
+                "Failed to create DeploymentSite CR for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                deploymentSite.TenantId, deploymentSite.DeploymentSiteRtId);
         }
     }
 
-    public async Task PoolUndeployedAsync(string tenantId, string poolRtId)
+    public async Task DeploymentSiteUndeployedAsync(string tenantId, string deploymentSiteRtId)
     {
         _logger.LogInformation(
-            "Pool undeployed event received: tenant '{TenantId}', pool rtId {PoolRtId}",
-            tenantId, poolRtId);
+            "DeploymentSite undeployed event received: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+            tenantId, deploymentSiteRtId);
 
-        if (!_options.AutoManagePools)
+        if (!_options.AutoManageDeploymentSites)
         {
             _logger.LogDebug(
-                "AutoManagePools=false: not auto-deleting CR for tenant '{TenantId}', pool rtId {PoolRtId}",
-                tenantId, poolRtId);
+                "AutoManageDeploymentSites=false: not auto-deleting CR for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                tenantId, deploymentSiteRtId);
             return;
         }
 
         try
         {
-            await _poolManager.DeletePoolAsync(tenantId, poolRtId);
+            await _deploymentSiteManager.DeleteDeploymentSiteAsync(tenantId, deploymentSiteRtId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to delete CommunicationPool CR for tenant '{TenantId}', pool rtId {PoolRtId}",
-                tenantId, poolRtId);
+                "Failed to delete DeploymentSite CR for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                tenantId, deploymentSiteRtId);
         }
     }
 
     public async Task WorkloadDeployedAsync(WorkloadDeployedDto workload)
     {
         _logger.LogInformation(
-            "Workload deployed event received: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
-            workload.TenantId, workload.PoolRtId, workload.WorkloadName,
+            "Workload deployed event received: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}, workload '{WorkloadName}', type '{WorkloadType}', chart '{ChartName}:{ChartVersion}'",
+            workload.TenantId, workload.DeploymentSiteRtId, workload.WorkloadName,
             workload.WorkloadType, workload.ChartName, workload.ChartVersion);
 
         bool success;
@@ -497,8 +497,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         {
             // Don't let a single bad workload crash the hub connection.
             _logger.LogError(ex,
-                "Failed to deploy workload '{WorkloadName}' for tenant '{TenantId}', pool rtId {PoolRtId}",
-                workload.WorkloadName, workload.TenantId, workload.PoolRtId);
+                "Failed to deploy workload '{WorkloadName}' for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                workload.WorkloadName, workload.TenantId, workload.DeploymentSiteRtId);
             success = false;
             statusMessage = ex.Message;
         }
@@ -544,8 +544,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public async Task ScaleWorkloadAsync(ScaleWorkloadDto workload)
     {
         _logger.LogInformation(
-            "Workload scale event received: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}', replicas {Replicas}",
-            workload.TenantId, workload.PoolRtId, workload.WorkloadName, workload.Replicas);
+            "Workload scale event received: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}, workload '{WorkloadName}', replicas {Replicas}",
+            workload.TenantId, workload.DeploymentSiteRtId, workload.WorkloadName, workload.Replicas);
 
         bool success;
         string? statusMessage;
@@ -617,8 +617,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public async Task WorkloadUndeployedAsync(WorkloadUndeployedDto workload)
     {
         _logger.LogInformation(
-            "Workload undeployed event received: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}', type '{WorkloadType}'",
-            workload.TenantId, workload.PoolRtId, workload.WorkloadName, workload.WorkloadType);
+            "Workload undeployed event received: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}, workload '{WorkloadName}', type '{WorkloadType}'",
+            workload.TenantId, workload.DeploymentSiteRtId, workload.WorkloadName, workload.WorkloadType);
         try
         {
             await _workloadReconciler.UndeployAsync(workload, CancellationToken.None);
@@ -626,8 +626,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to undeploy workload '{WorkloadName}' for tenant '{TenantId}', pool rtId {PoolRtId}",
-                workload.WorkloadName, workload.TenantId, workload.PoolRtId);
+                "Failed to undeploy workload '{WorkloadName}' for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                workload.WorkloadName, workload.TenantId, workload.DeploymentSiteRtId);
         }
     }
 
@@ -636,8 +636,8 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
         _logger.LogInformation("Pre-update tenant event received: tenant '{TenantId}'", tenantId);
         try
         {
-            var poolService = _serviceProvider.GetRequiredService<IPoolService>();
-            if (poolService is IOperatorHubCallbacks_PreUpdateTenantHandler handler)
+            var deploymentSiteService = _serviceProvider.GetRequiredService<IDeploymentSiteService>();
+            if (deploymentSiteService is IOperatorHubCallbacks_PreUpdateTenantHandler handler)
             {
                 await handler.PreUpdateTenantAsync(tenantId);
             }

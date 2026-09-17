@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-The **Octo Communication Operator** is a Kubernetes operator that manages mesh adapter deployments via the [KubeOps](https://github.com/buehler/dotnet-operator-sdk) framework. It watches `CommunicationPool` custom resources and, optionally, connects to the Communication Controller via SignalR to receive tenant lifecycle events and auto-create/auto-delete `CommunicationPool` CRs.
+The **Octo Communication Operator** is a Kubernetes operator that manages mesh adapter deployments via the [KubeOps](https://github.com/buehler/dotnet-operator-sdk) framework. It watches `DeploymentSite` custom resources and, optionally, connects to the Communication Controller via SignalR to receive tenant lifecycle events and auto-create/auto-delete `DeploymentSite` CRs.
 
 It supports two deployment modes:
 
-- **Edge deployment**: the operator runs on a remote edge cluster. `CommunicationPool` CRs are managed manually (or by an external system); the operator only reconciles existing CRs into adapter deployments and services. When multiple operator instances share one edge cluster (one per target controller), each must set `OPERATOR__WATCHNAMESPACE` so they only reconcile CRs in their own namespace and don't race on each other's resources.
-- **Central deployment**: the operator runs alongside the Communication Controller in the same cluster. With `OPERATOR__AUTOMANAGEPOOLS=true` it connects to the Controller's `/operatorHub` SignalR hub and creates/deletes `CommunicationPool` CRs and broker secrets in response to `TenantCreated` / `TenantDeleted` events.
+- **Edge deployment**: the operator runs on a remote edge cluster. `DeploymentSite` CRs are managed manually (or by an external system); the operator only reconciles existing CRs into adapter deployments and services. When multiple operator instances share one edge cluster (one per target controller), each must set `OPERATOR__WATCHNAMESPACE` so they only reconcile CRs in their own namespace and don't race on each other's resources.
+- **Central deployment**: the operator runs alongside the Communication Controller in the same cluster. With `OPERATOR__AUTOMANAGEDEPLOYMENTSITES=true` it connects to the Controller's `/operatorHub` SignalR hub and creates/deletes `DeploymentSite` CRs and broker secrets in response to `TenantCreated` / `TenantDeleted` events.
 
 ## Solution Layout
 
@@ -17,14 +17,14 @@ It supports two deployment modes:
 Octo.CommunicationOperator.sln
 ├── src/CommunicationOperator/                Operator host (ASP.NET Core, Microsoft.NET.Sdk.Web)
 │   ├── Common/        DictionaryExtensions, OperatorLog (LoggerMessage source-gen)
-│   ├── Controller/    HTTP controllers (CommunicationPool, Diagnostics)
-│   ├── Entities/      V1CommunicationPoolEntity (CRD-mapped)
-│   ├── Finalizer/     CommunicationPoolFinalizer
+│   ├── Controller/    HTTP controllers (DeploymentSite, Diagnostics)
+│   ├── Entities/      V1DeploymentSiteEntity (CRD-mapped)
+│   ├── Finalizer/     DeploymentSiteFinalizer
 │   ├── Models/        Pool, K8Pool, PoolDescriptor (DTO-side models)
 │   ├── Options/       OperatorOptions (configuration binding)
 │   ├── Reconcilers/   WorkloadReconciler (Helm-based deploy for Adapters + Applications)
-│   ├── Services/      CommunicationPoolManager, OperatorHubService, PoolService, DiagnosticsService
-│   ├── Webhooks/      CommunicationPoolValidator, CommunicationPoolMutator (admission webhooks)
+│   ├── Services/      DeploymentSiteManager, OperatorHubService, DeploymentSiteService, DiagnosticsService
+│   ├── Webhooks/      DeploymentSiteValidator, DeploymentSiteMutator (admission webhooks)
 │   └── scripts/       kind cluster bootstrap scripts
 └── tests/CommunicationOperator.Tests/        Unit tests (TUnit + NSubstitute)
 ```
@@ -33,13 +33,13 @@ The CRD is shipped from the `octo-helm-core` repository (`octo-mesh-crds` chart)
 
 ## Architecture Concepts
 
-### Custom Resource: `CommunicationPool`
+### Custom Resource: `DeploymentSite`
 
-The operator's primary resource is `V1CommunicationPoolEntity` (group `octo-mesh.meshmakers.io`, version `v1alpha1`). The spec carries the tenant identity, controller endpoint, and broker connection parameters that adapter pods need.
+The operator's primary resource is `V1DeploymentSiteEntity` (group `octo-mesh.meshmakers.io`, version `v1alpha1`). The spec carries the tenant identity, controller endpoint, and broker connection parameters that adapter pods need.
 
 ### Reconciliation Flow
 
-1. A `CommunicationPool` CR is created (manually, or via `OperatorHubService` when `AutoManagePools=true`).
+1. A `DeploymentSite` CR is created (manually, or via `OperatorHubService` when `AutoManagePools=true`).
 2. The operator's pool service registers the pool with the Communication Controller via the `PoolHub` SignalR client.
 3. The Controller fans out a `WorkloadDeployedAsync` event on `/operatorHub` for each Adapter and Application managed by the pool.
 4. `WorkloadReconciler` materializes any secret-flagged values into an operator-owned `Secret`, registers the chart repository and runs `helm upgrade --install` per workload (see [Helm Workload Reconciliation](#helm-workload-reconciliation) below).
@@ -47,7 +47,7 @@ The operator's primary resource is `V1CommunicationPoolEntity` (group `octo-mesh
 
 There is no longer a raw-K8s `AdapterReconciler` path; Adapters and Applications are deployed exclusively via Helm releases.
 
-`PoolService.UnRegisterPoolAsync` (called from `CommunicationPoolController.DeletedAsync`) treats any `HubException` from the controller-side `UnregisterPoolOperatorAsync` call as a **soft failure** and only logs it. Reason: the CR is already gone when `DeletedAsync` fires, and during the tenant-delete cascade the tenant itself no longer exists at the controller — so the unregister roundtrip will respond with `TenantException`. Re-throwing would put the entity back in the KubeOps retry queue forever. The local connection is still stopped and the pool removed from `_pools` regardless.
+`DeploymentSiteService.UnRegisterPoolAsync` (called from `DeploymentSiteController.DeletedAsync`) treats any `HubException` from the controller-side `UnregisterPoolOperatorAsync` call as a **soft failure** and only logs it. Reason: the CR is already gone when `DeletedAsync` fires, and during the tenant-delete cascade the tenant itself no longer exists at the controller — so the unregister roundtrip will respond with `TenantException`. Re-throwing would put the entity back in the KubeOps retry queue forever. The local connection is still stopped and the pool removed from `_pools` regardless.
 
 ### Helm Workload Reconciliation
 
@@ -220,7 +220,7 @@ prod-1/energyiq, 2026-08-26). Before the pre-flight, `WorkloadReconciler.DeployA
    `null` when the release does not exist).
 2. Only when the newest revision `IsPending`: read the creation timestamp of the release
    secret `sh.helm.release.v1.{release}.v{rev}` via
-   `ICommunicationPoolKubernetesGateway.GetSecretCreationTimestampAsync`.
+   `IDeploymentSiteKubernetesGateway.GetSecretCreationTimestampAsync`.
 3. Only when the secret is older than `WorkloadReconciler.StaleHelmLockThreshold` (default
    10 min — comfortably above helm's 5-min atomic timeout, so a live run on the outgoing pod
    of a rolling operator upgrade is never robbed of its lock): delete the secret and log a
@@ -370,7 +370,7 @@ assembly was added so `WorkloadReconciler.ReleaseName` /
 directly.
 
 **Shared k8s-name sanitiser** (`Common/K8sNaming`): both the workload
-reconciler and the `CommunicationPoolManager` derive Kubernetes resource
+reconciler and the `DeploymentSiteManager` derive Kubernetes resource
 names / label values from CK entity attributes (tenantId, poolName,
 workloadName) that may contain whitespace, uppercase letters, or other
 characters the apiserver rejects with a 422 (e.g. a pool literally
@@ -420,14 +420,14 @@ Tests:
 
 ### OperatorHubService Lifecycle (Central + Edge)
 
-`OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` **whenever `OPERATOR__COMMUNICATIONCONTROLLERURI` is configured** — required in both central and edge modes. Without this connection the operator's `IOperatorHubInvoker.RegisterPoolAsync` no-ops, and pools registered through `CommunicationPoolController.ReconcileAsync` never reach the controller (the entity stays at `Unregistered` in the Studio UI). The previous early-return on `!AutoManagePools` was the cause of the regression where edge-cluster pools showed up as Unregistered indefinitely.
+`OperatorHubService` (a `BackgroundService`) opens a SignalR connection to the Controller's `/operatorHub` **whenever `OPERATOR__COMMUNICATIONCONTROLLERURI` is configured** — required in both central and edge modes. Without this connection the operator's `IOperatorHubInvoker.RegisterDeploymentSiteAsync` no-ops, and pools registered through `DeploymentSiteController.ReconcileAsync` never reach the controller (the entity stays at `Unregistered` in the Studio UI). The previous early-return on `!AutoManagePools` was the cause of the regression where edge-cluster pools showed up as Unregistered indefinitely.
 
-`OPERATOR__AUTOMANAGEPOOLS` is now a narrower flag — it only gates the **side effect of auto-creating / -deleting `CommunicationPool` CRs** in response to controller broadcasts:
+`OPERATOR__AUTOMANAGEDEPLOYMENTSITES` is now a narrower flag — it only gates the **side effect of auto-creating / -deleting `DeploymentSite` CRs** in response to controller broadcasts:
 
-- `AutoManagePools=true` (central): `PoolDeployedAsync` → `CommunicationPoolManager.CreateCommunicationPoolAsync` (creates the CR + broker secret, idempotent). `PoolUndeployedAsync` → `DeleteCommunicationPoolAsync`. `RegisterOperatorAsync()` on (re)connect also fans out `CreatePoolAsync` for every already-deployed pool.
-- `AutoManagePools=false` (edge): `PoolDeployedAsync` / `PoolUndeployedAsync` log + return without touching `ICommunicationPoolManager`, **and** the `RegisterOperatorAsync()` reconnect fan-out is gated by the same flag. The latter gate is load-bearing: without it, every edge-operator pod restart would materialize a CR + broker secret for every Cloud pool the controller knows about, and the operator would then `RegisterPoolAsync` them — putting workload-deploy events on a route that also lands on the edge cluster. CRs on the edge cluster are managed manually or by an external system.
+- `AutoManagePools=true` (central): `DeploymentSiteDeployedAsync` → `DeploymentSiteManager.CreateDeploymentSiteAsync` (creates the CR + broker secret, idempotent). `DeploymentSiteUndeployedAsync` → `DeleteDeploymentSiteAsync`. `RegisterOperatorAsync()` on (re)connect also fans out `CreatePoolAsync` for every already-deployed pool.
+- `AutoManagePools=false` (edge): `DeploymentSiteDeployedAsync` / `DeploymentSiteUndeployedAsync` log + return without touching `IDeploymentSiteManager`, **and** the `RegisterOperatorAsync()` reconnect fan-out is gated by the same flag. The latter gate is load-bearing: without it, every edge-operator pod restart would materialize a CR + broker secret for every Cloud pool the controller knows about, and the operator would then `RegisterDeploymentSiteAsync` them — putting workload-deploy events on a route that also lands on the edge cluster. CRs on the edge cluster are managed manually or by an external system.
 
-Either way, the workload-deploy path (`WorkloadDeployedAsync` → `WorkloadReconciler.DeployAsync`) and the pool register/unregister round-trip from `CommunicationPoolController.ReconcileAsync` go through the same SignalR client.
+Either way, the workload-deploy path (`WorkloadDeployedAsync` → `WorkloadReconciler.DeployAsync`) and the pool register/unregister round-trip from `DeploymentSiteController.ReconcileAsync` go through the same SignalR client.
 
 The connection is auto-reconnecting via `OperatorHubClient`. Failures from the pool manager and workload reconciler are logged but **not propagated** so that one bad event cannot break the hub connection.
 
@@ -438,7 +438,7 @@ stays alive** used to be logged and forgotten: the reconnect callback is the
 only re-registration trigger, and it only fires when the connection drops.
 Observed on prod-1: all pods restarted together, the operator reconnected
 while the controller's CkCache was still importing tenant models,
-`RegisterPoolAsync` threw `CommunicationRepositoryException` once — and the
+`RegisterDeploymentSiteAsync` threw `CommunicationRepositoryException` once — and the
 pool stayed orphaned until the next pod restart. The controller then dropped
 every workload deploy/undeploy for that pool ("No operator currently owns
 pool ...", queued controller-side since AB#4371).
@@ -452,7 +452,7 @@ pool ...", queued controller-side since AB#4371).
   `IsRegistered == false`, flips the flag on success, and fires the per-pool
   reverse-sync (`ReportDeployedPoolAsync`) so a drifted `DeploymentState` is
   restored. Failures are logged and retried on the next tick.
-- The reconnect callback now calls `PoolService.ResetRegistrationState()`
+- The reconnect callback now calls `DeploymentSiteService.ResetRegistrationState()`
   **before** replaying registrations — a pool registered on a previous
   connection that fails re-registration would otherwise keep a stale
   `IsRegistered=true` and be invisible to the retry loop.
@@ -473,7 +473,7 @@ changes through a dedicated hub callback instead of helm:
 
 - `IOperatorHubCallbacks.ScaleWorkloadAsync(ScaleWorkloadDto)` →
   `OperatorHubService.ScaleWorkloadAsync` → `WorkloadReconciler.ScaleAsync` →
-  `ICommunicationPoolKubernetesGateway.ScaleDeploymentsByInstanceAsync`. The gateway lists
+  `IDeploymentSiteKubernetesGateway.ScaleDeploymentsByInstanceAsync`. The gateway lists
   Deployments by the `app.kubernetes.io/instance={release}` label (never derives resource
   names — Application charts may render `{release}-{chart}`) and merge-patches
   `{"spec":{"replicas":N}}` on each. A plain Deployment patch, not the scale subresource,
@@ -514,7 +514,7 @@ stale-lock check and the diagnostics collector all use the resolved namespace.
 🔴 **`PlatformNamespace` defaults to empty, which resolves to `PoolNamespace`, and that is a
 decision rather than a gap.** Kubernetes forbids cross-namespace owner references: a namespaced
 dependent whose owner lives elsewhere is treated as having a *missing* owner and is **deleted** by
-the garbage collector. The owner of a pool is the lending tenant's `CommunicationPool` CR, which
+the garbage collector. The owner of a pool is the lending tenant's `DeploymentSite` CR, which
 lives in `PoolNamespace`. So the two namespaces have to be the same one for owner-reference garbage
 collection to exist at all — and `PoolNamespace` is already a platform namespace rather than a
 tenant namespace, so the default satisfies both halves of the requirement. Configuring a distinct
@@ -522,7 +522,7 @@ platform namespace is supported and moves the release there, but the operator th
 the owner reference and logs why, once per deploy.
 
 **2. Owner references.** For a pool, `DeployAsync` resolves an owner reference to the CR
-`{tenantId}-{poolRtId}` (`CommunicationPoolManager.GetCrName`, shared so both call sites cannot
+`{tenantId}-{poolRtId}` (`DeploymentSiteManager.GetCrName`, shared so both call sites cannot
 drift) and puts it on the operator-owned `{release}-octo-secrets` Secret and — **after** the real
 install, because helm creates them — on the release's Deployments. Deleting the tenant deletes the
 CR and Kubernetes takes the pool with it, which is the safety net behind the controller's undeploy
@@ -556,8 +556,8 @@ suite below.
 
 ### Reverse-Sync on Reconnect
 
-After the operator has re-registered every owned `CommunicationPool` CR
-with the controller (the `RegisterPoolAsync` loop in `onReconnect`), a
+After the operator has re-registered every owned `DeploymentSite` CR
+with the controller (the `RegisterDeploymentSiteAsync` loop in `onReconnect`), a
 **Cloud operator** (`AutoManagePools=true`) follows up with one call to
 `IOperatorHub.ReportDeployedStateAsync(reports)` carrying the set of
 pools it currently has CRs for. The controller restores
@@ -574,7 +574,7 @@ per-connection pool registration so undeploy fan-out keeps working.
    *controller-restart* case where the operator's KubeOps cache was
    never torn down — every CR is in `_pools` by the time the callback
    runs.
-2. **Per-pool on register** (`PoolService.RegisterPoolAsync` →
+2. **Per-pool on register** (`DeploymentSiteService.RegisterDeploymentSiteAsync` →
    `IOperatorHubInvoker.ReportDeployedPoolAsync`): every CR reconcile
    that registers a pool also fires a single-pool reverse-sync. Closes
    the *operator-restart* race where KubeOps populates `_pools`
@@ -615,16 +615,16 @@ Tests:
 
 ### Webhooks
 
-- `CommunicationPoolValidator`: requires `Spec.PoolRtId` to be a
+- `DeploymentSiteValidator`: requires `Spec.PoolRtId` to be a
   24-character lowercase hex MongoDB ObjectId (the RtId of the
   controller-side `RtPool`). `Spec.PoolName` is optional — the rtId
   is the canonical pool identity, and the human-readable display name
   lives on the controller's `RtPool.Name` attribute. Every derived
   k8s name is built from `PoolRtId` via `K8sNaming.DnsName`. An empty
   / malformed `PoolRtId` would otherwise surface only as a hub-side
-  `FormatException` from the controller's `OperatorHub.RegisterPoolAsync`
+  `FormatException` from the controller's `OperatorHub.RegisterDeploymentSiteAsync`
   and leave the CR stuck Unregistered.
-- `CommunicationPoolMutator`: currently a no-op (`NoChanges()`).
+- `DeploymentSiteMutator`: currently a no-op (`NoChanges()`).
 
 ### HTTP surface: this host has no authentication at all (AB#5059)
 
@@ -734,12 +734,12 @@ Key options:
 
 | Option | Purpose |
 |--------|---------|
-| `AutoManagePools` | Enables auto-creating / -deleting `CommunicationPool` CRs in response to `PoolDeployedAsync` / `PoolUndeployedAsync` broadcasts from the controller. Central operator only. Edge operators leave this `false` — the SignalR connection itself runs in both modes (gated by `CommunicationControllerUri`), only the CR-management side effect is toggled. |
+| `AutoManagePools` | Enables auto-creating / -deleting `DeploymentSite` CRs in response to `DeploymentSiteDeployedAsync` / `DeploymentSiteUndeployedAsync` broadcasts from the controller. Central operator only. Edge operators leave this `false` — the SignalR connection itself runs in both modes (gated by `CommunicationControllerUri`), only the CR-management side effect is toggled. |
 | `WatchNamespace` | Restricts the CR watcher to a single namespace. When null/empty (default), the operator watches all namespaces cluster-wide. Required when running multiple operator instances on the same cluster (e.g. one per target controller on an edge device) so they don't race on the same CRs. Wired via `KubeOps.Abstractions.Builder.OperatorSettingsBuilder.WithNamespace()`. |
-| `CommunicationControllerUri` | SignalR endpoint of the Controller. Required in **both** central and edge modes for `OperatorHubService` to start. When empty, the hub service logs a warning and exits, and `IOperatorHubInvoker.RegisterPoolAsync` becomes a no-op (CR-reconcile finishes locally but the controller never sees the pool). |
+| `CommunicationControllerUri` | SignalR endpoint of the Controller. Required in **both** central and edge modes for `OperatorHubService` to start. When empty, the hub service logs a warning and exits, and `IOperatorHubInvoker.RegisterDeploymentSiteAsync` becomes a no-op (CR-reconcile finishes locally but the controller never sees the pool). |
 | `WorkloadCommunicationControllerUri` | Controller URI projected into every deployed workload's Helm values. Empty (default) projects `CommunicationControllerUri` — one address serves the operator's own hub connection and the workloads, correct wherever both resolve it the same way. Set it when the operator needs an address the workloads cannot use (local kind: host-run controller reachable for the operator via a pod hostAlias only — the adapters then sat at Unregistered while the operator looked healthy, AB#4967). |
 | `PoolRegistrationRetrySeconds` | Cadence of the pool-registration retry loop (see "Pool-Registration Retry Loop" above). Default 30; fractional values allowed; `<= 0` disables the loop. |
-| `PoolNamespace` | Namespace where auto-created `CommunicationPool` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
+| `PoolNamespace` | Namespace where auto-created `DeploymentSite` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
 | `PlatformNamespace` | Namespace adapter-pool workloads (AB#4924) are deployed into. Empty (default) resolves to `PoolNamespace`, which is required for owner-reference garbage collection to work at all — Kubernetes forbids cross-namespace owner references and deletes dependents that carry one. Setting a distinct namespace moves the release there and disables the owner reference, with a warning per deploy. |
 | `DefaultPoolName` | Pool name applied to auto-created CRs |
 | `BrokerHost`, `BrokerVirtualHost`, `BrokerPort` | RabbitMQ endpoint for adapter/application pods |
@@ -771,7 +771,7 @@ dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tes
 
 # Run a specific test class
 dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build -- \
-    --treenode-filter "/*/*/CommunicationPoolValidatorTests/*"
+    --treenode-filter "/*/*/DeploymentSiteValidatorTests/*"
 ```
 
 ### .NET 10 / Microsoft.Testing.Platform notes
@@ -840,18 +840,18 @@ Two reasons for this exact shape:
 Pure-logic + callback surfaces:
 
 - `Common/DictionaryExtensionsTests` — label-selector formatting.
-- `Webhooks/CommunicationPoolValidatorTests` — pool-rtId 24-char-hex
+- `Webhooks/DeploymentSiteValidatorTests` — pool-rtId 24-char-hex
   rule (empty, too-short, uppercase, non-hex char), poolName is
   optional, same rules enforced on update.
-- `Webhooks/CommunicationPoolMutatorTests` — no-op invariant.
-- `Finalizer/CommunicationPoolFinalizerTests` — success result + entity passthrough.
-- `Controller/CommunicationPoolControllerTests` — `ReconcileAsync` happy/failure paths and `DeletedAsync` no-status-update contract. The delete callback must not call `IKubernetesClient.UpdateStatusAsync` because the CR is already gone when KubeOps invokes it; a status-update there 404s and makes KubeOps retry the delete reconcile indefinitely.
-- `Services/OperatorHubServiceTests` — `TenantCreatedAsync` / `TenantDeletedAsync` delegate to `ICommunicationPoolManager` and swallow exceptions.
+- `Webhooks/DeploymentSiteMutatorTests` — no-op invariant.
+- `Finalizer/DeploymentSiteFinalizerTests` — success result + entity passthrough.
+- `Controller/DeploymentSiteControllerTests` — `ReconcileAsync` happy/failure paths and `DeletedAsync` no-status-update contract. The delete callback must not call `IKubernetesClient.UpdateStatusAsync` because the CR is already gone when KubeOps invokes it; a status-update there 404s and makes KubeOps retry the delete reconcile indefinitely.
+- `Services/OperatorHubServiceTests` — `TenantCreatedAsync` / `TenantDeletedAsync` delegate to `IDeploymentSiteManager` and swallow exceptions.
 
 Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, not against the k8s SDK):
 
 - `Reconcilers/WorkloadReconcilerTests/` — see the [Helm Workload Reconciliation](#helm-workload-reconciliation) section above for the test layout (deploy + undeploy + override-yaml builder).
-- `Services/CommunicationPoolManagerTests/` — auto-create/delete CR + broker secret, idempotency (no-op when already present), CR/Secret content. Mocks `ICommunicationPoolKubernetesGateway` (see below).
+- `Services/DeploymentSiteManagerTests/` — auto-create/delete CR + broker secret, idempotency (no-op when already present), CR/Secret content. Mocks `IDeploymentSiteKubernetesGateway` (see below).
 - `Services/OperatorHubServiceTests/ExecuteAsyncTests` — early-return paths (AutoManagePools off, controller URI missing), client creation, on-connect registration + per-tenant pool creation, clean shutdown via `IHostedService.StopAsync`. Mocks `IOperatorHubClientFactory` to substitute the SignalR client (see below).
 
 ### `IOperatorHubClientFactory` — the seam for `OperatorHubClient`
@@ -860,18 +860,18 @@ Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, 
 
 Tests use `client.When(c => c.EnableReconnect(...)).Do(_ => tcs.TrySetResult())` as a sync point — once `EnableReconnect` has been called, the connect callback has already finished and the service is parked in `Task.Delay(Infinite, stoppingToken)`. Asserting before that yields race conditions where the assertion runs before `ExecuteAsync` reaches the verified line.
 
-### `ICommunicationPoolKubernetesGateway` — the seam for `IKubernetes`
+### `IDeploymentSiteKubernetesGateway` — the seam for `IKubernetes`
 
-`CommunicationPoolManager` originally talked directly to `IKubernetes` and used a stack of extension methods (`CustomObjects.GetNamespacedCustomObjectAsync`, `CoreV1.ReadNamespacedSecretAsync`, …). Mocking that surface is verbose because:
+`DeploymentSiteManager` originally talked directly to `IKubernetes` and used a stack of extension methods (`CustomObjects.GetNamespacedCustomObjectAsync`, `CoreV1.ReadNamespacedSecretAsync`, …). Mocking that surface is verbose because:
 - the extensions delegate to nested sub-interfaces (`ICustomObjectsOperations`, `ICoreV1Operations`),
 - the `Exists`-via-404 idiom requires throwing `HttpOperationException` with a fake `HttpResponseMessageWrapper`,
 - assertions then have to target the underlying `*WithHttpMessagesAsync` method names rather than the readable extension API.
 
-The `ICommunicationPoolKubernetesGateway` interface (in `Services/`) collapses that surface to six methods: `CommunicationPoolExistsAsync`, `CreateCommunicationPoolAsync`, `DeleteCommunicationPoolAsync`, `SecretExistsAsync`, `CreateSecretAsync`, `DeleteSecretAsync`. The implementation `CommunicationPoolKubernetesGateway` keeps every k8s-SDK quirk (404 → `false`, extension-method routing, CRD group/version/plural constants) in one place. Add new k8s calls to the interface — don't reach back into `IKubernetes` from elsewhere.
+The `IDeploymentSiteKubernetesGateway` interface (in `Services/`) collapses that surface to six methods: `DeploymentSiteExistsAsync`, `CreateDeploymentSiteAsync`, `DeleteDeploymentSiteAsync`, `SecretExistsAsync`, `CreateSecretAsync`, `DeleteSecretAsync`. The implementation `DeploymentSiteKubernetesGateway` keeps every k8s-SDK quirk (404 → `false`, extension-method routing, CRD group/version/plural constants) in one place. Add new k8s calls to the interface — don't reach back into `IKubernetes` from elsewhere.
 
 ### Not yet covered
 
-- `CommunicationPoolKubernetesGateway` itself — would need either an integration test against a real (or fake) k8s API or low-level `IKubernetes` mocking. Treated as a thin pass-through layer; covered indirectly by E2E tests.
+- `DeploymentSiteKubernetesGateway` itself — would need either an integration test against a real (or fake) k8s API or low-level `IKubernetes` mocking. Treated as a thin pass-through layer; covered indirectly by E2E tests.
 - The `AuthenticatorClient` token round trip itself (`Services/OperatorAccessTokenServiceTests` mocks `IAuthenticatorClient`). The grant, the `acr_values` injection and the discovery cache are the SDK's, tested in `octo-sdk`'s `Authentication/AuthenticatorClientTests`.
 
 ## Code Quality Standards
@@ -888,7 +888,7 @@ Manual end-to-end validation of the central-operator path lives at
 (`Install-OctoKubernetes`, `Start-Octo`) plus `start-operator.ps1` at the
 repo root to bring up the full stack (Mongo, RabbitMQ, kind, all backend
 services, operator) and triggers the lifecycle via `octo-cli`. Run it after
-non-trivial changes in `OperatorHubService` or `CommunicationPoolManager`.
+non-trivial changes in `OperatorHubService` or `DeploymentSiteManager`.
 
 `start-operator.ps1` is intentionally **not** named `octo-start.ps1` — that
 would cause `Start-Octo` to launch the operator automatically, which we want
@@ -902,11 +902,11 @@ a **real apiserver**. Six tests:
 | Test | What only a real cluster can show |
 |---|---|
 | `AdapterPool_ScalesOneToThreeAndBackToOne` | A merge patch either moves `spec.replicas` on the live object or it does not; `status.replicas` is the ReplicaSet controller agreeing. |
-| `DeletingTheLendingTenantsCommunicationPool_GarbageCollectsThePool` | The GC removes the pool when its tenant's CR goes. |
+| `DeletingTheLendingTenantsDeploymentSite_GarbageCollectsThePool` | The GC removes the pool when its tenant's CR goes. |
 | `CrossNamespaceOwner_DestroysThePoolWhileItsOwnerIsStillAlive` | 🔴 The fact §7.1a's refusal exists for: a cross-namespace owner reference destroys a live pool *without* its owner being deleted. Asserts the GC's own `OwnerRefInvalidNamespace` event, so the test cannot pass on an unrelated deletion. |
 | `DeployingAPoolIntoAPlatformNamespace_WritesNoOwnerAndThePoolSurvives` | The operator declines to write one against that same apiserver, and the pool is still there afterwards. |
 | `Scale_MovesItsOwnReleaseAndLeavesAnotherTenantsPoolWhereItWas` | 🔴 The scale and owner-stamp paths both select on `app.kubernetes.io/instance={release}`. A selector that matches too broadly does not fail to scale — it resizes *another tenant's* pool, in a namespace that by design holds many tenants' pools. Only a real apiserver evaluates the selector. |
-| `DeletingTheLendingTenantsCommunicationPool_AlsoCollectsTheReleaseSecret` | 🔴 The release Secret is the *other* dependent, reached by a different path — its owner reference is set at creation, not patched on after the install. It is also the one that matters if the net fails: a Secret outliving its tenant is credential material with nothing left to own it. |
+| `DeletingTheLendingTenantsDeploymentSite_AlsoCollectsTheReleaseSecret` | 🔴 The release Secret is the *other* dependent, reached by a different path — its owner reference is set at creation, not patched on after the install. It is also the one that matters if the net fails: a Secret outliving its tenant is credential material with nothing left to own it. |
 
 ```bash
 OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
@@ -927,9 +927,9 @@ variable. The regression the test does catch is repointing the lookup at `_optio
 
 Without `OCTO_OPERATOR_E2E_KUBECONTEXT` all six tests report as **skipped**, never as passed — a green
 run on a machine with no cluster would be a lie about what was verified. The context needs the
-`communicationpools.octo-mesh.meshmakers.io` CRD installed (the `octo-mesh-crds` chart) and
-permission to create namespaces; everything is created in and cleaned up from `octo-pool-e2e` and
-`octo-pool-e2e-platform`.
+`deploymentsites.octo-mesh.meshmakers.io` CRD installed (the `octo-mesh-crds` chart) and
+permission to create namespaces; everything is created in and cleaned up from `octo-deployment-site-e2e` and
+`octo-deployment-site-e2e-platform`.
 Helm is deliberately not in the loop — nothing in this increment changed the helm layer, and a
 directly created Deployment carrying the release's `app.kubernetes.io/instance` label is exactly
 the shape the scale path selects on.

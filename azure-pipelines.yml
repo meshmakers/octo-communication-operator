@@ -15,7 +15,7 @@
 #   - SSHKey alone (no submodules:recursive needed — operator pulls no
 #     private submodules).
 #   - No CK library, no CK catalog publish — operator owns the
-#     CommunicationPool CRD via KubeOps but the CRD schemas ship from
+#     DeploymentSite CRD via KubeOps but the CRD schemas ship from
 #     octo-helm-core (octo-mesh-crds chart), not from this repo.
 #     Therefore: no /p:OctoPublishCatalog and no
 #     /p:OctoPrivateGitHubApiKey on the build step.

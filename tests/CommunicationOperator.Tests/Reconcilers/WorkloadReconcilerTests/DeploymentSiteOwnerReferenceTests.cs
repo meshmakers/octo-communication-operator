@@ -8,30 +8,30 @@ using NSubstitute.ExceptionExtensions;
 namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers.WorkloadReconcilerTests;
 
 /// <summary>
-///     AB#4924 §7.1 — owner references so a deleted lending tenant garbage-collects its pool. The
-///     owner is the tenant's <c>CommunicationPool</c> CR, the only Kubernetes object that stands
-///     for a tenant; deleting the tenant deletes the CR and the garbage collector takes the pool's
+///     AB#4924 §7.1 — owner references so a deleted lending tenant garbage-collects its deployment site. The
+///     owner is the tenant's <c>DeploymentSite</c> CR, the only Kubernetes object that stands
+///     for a tenant; deleting the tenant deletes the CR and the garbage collector takes the deployment site's
 ///     Deployments and its operator-owned Secret with it.
 ///
 ///     🔴 The refusal cases matter as much as the happy path. Kubernetes treats a namespaced
 ///     dependent whose owner lives in another namespace as having a missing owner and deletes it,
-///     so writing a cross-namespace reference would destroy a live pool rather than fail to clean
+///     so writing a cross-namespace reference would destroy a live deployment site rather than fail to clean
 ///     up a dead one.
 /// </summary>
-internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
+internal class DeploymentSiteOwnerReferenceTests : WorkloadReconcilerTestsBase
 {
     private static readonly V1OwnerReference Owner = new()
     {
-        ApiVersion = "octo-mesh.meshmakers.io/v1alpha1",
-        Kind = "CommunicationPool",
-        Name = CommunicationPoolManager.GetCrName(TenantId, PoolRtId),
+        ApiVersion = "octo-mesh.meshmakers.io/v1",
+        Kind = "DeploymentSite",
+        Name = DeploymentSiteManager.GetCrName(TenantId, DeploymentSiteRtId),
         Uid = "5f0f2b6e-1b6a-4f55-9f0a-7c7b2f0b1234",
     };
 
     private static WorkloadDeployedDto Dto(WorkloadTypeDto workloadType, bool withSecretValue = false) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = workloadType,
@@ -43,45 +43,45 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
             : [],
     };
 
-    private void GivenTheTenantsCommunicationPoolCrExists() =>
-        Gateway.TryGetCommunicationPoolOwnerReferenceAsync(Arg.Any<string>(), Arg.Any<string>(),
+    private void GivenTheTenantsDeploymentSiteCrExists() =>
+        Gateway.TryGetDeploymentSiteOwnerReferenceAsync(Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<CancellationToken>()).Returns(Owner);
 
     private static string Release => WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
 
     [Test]
-    public async Task DeployAsync_AdapterPool_LooksUpTheOwnerByTheTenantsCommunicationPoolCrName()
+    public async Task DeployAsync_AdapterPool_LooksUpTheOwnerByTheTenantsDeploymentSiteCrName()
     {
-        GivenTheTenantsCommunicationPoolCrExists();
+        GivenTheTenantsDeploymentSiteCrExists();
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool), CancellationToken.None);
 
-        await Gateway.Received(1).TryGetCommunicationPoolOwnerReferenceAsync(
-            PoolNamespace, CommunicationPoolManager.GetCrName(TenantId, PoolRtId), Arg.Any<CancellationToken>());
+        await Gateway.Received(1).TryGetDeploymentSiteOwnerReferenceAsync(
+            DeploymentSiteNamespace, DeploymentSiteManager.GetCrName(TenantId, DeploymentSiteRtId), Arg.Any<CancellationToken>());
     }
 
     [Test]
     public async Task DeployAsync_AdapterPool_StampsTheOwnerOntoTheReleasesDeployments()
     {
-        GivenTheTenantsCommunicationPoolCrExists();
+        GivenTheTenantsDeploymentSiteCrExists();
         Gateway.SetDeploymentOwnerReferenceByInstanceAsync(Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>()).Returns(1);
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool), CancellationToken.None);
 
         await Gateway.Received(1).SetDeploymentOwnerReferenceByInstanceAsync(
-            PoolNamespace, Release, Arg.Is<V1OwnerReference>(o => o.Uid == Owner.Uid),
+            DeploymentSiteNamespace, Release, Arg.Is<V1OwnerReference>(o => o.Uid == Owner.Uid),
             Arg.Any<CancellationToken>());
     }
 
     [Test]
     public async Task DeployAsync_AdapterPool_StampsTheOwnerOntoTheOperatorOwnedSecret()
     {
-        GivenTheTenantsCommunicationPoolCrExists();
+        GivenTheTenantsDeploymentSiteCrExists();
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool, withSecretValue: true), CancellationToken.None);
 
-        await Gateway.Received(1).CreateSecretAsync(PoolNamespace,
+        await Gateway.Received(1).CreateSecretAsync(DeploymentSiteNamespace,
             Arg.Is<V1Secret>(s => s.Metadata.OwnerReferences != null
                                   && s.Metadata.OwnerReferences.Count == 1
                                   && s.Metadata.OwnerReferences[0].Uid == Owner.Uid),
@@ -93,7 +93,7 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
     {
         // Before the install there are no Deployments to own — helm creates them. Stamping earlier
         // would silently patch nothing on a first install and look like it worked.
-        GivenTheTenantsCommunicationPoolCrExists();
+        GivenTheTenantsDeploymentSiteCrExists();
         Gateway.SetDeploymentOwnerReferenceByInstanceAsync(Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>()).Returns(1);
 
@@ -101,10 +101,10 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
 
         Received.InOrder(() =>
         {
-            Helm.UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), PoolNamespace,
+            Helm.UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
                 Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
                 Arg.Any<CancellationToken>());
-            Gateway.SetDeploymentOwnerReferenceByInstanceAsync(PoolNamespace, Release,
+            Gateway.SetDeploymentOwnerReferenceByInstanceAsync(DeploymentSiteNamespace, Release,
                 Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>());
         });
     }
@@ -116,25 +116,25 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
     {
         await Reconciler.DeployAsync(Dto(workloadType, withSecretValue: true), CancellationToken.None);
 
-        await Gateway.DidNotReceiveWithAnyArgs().TryGetCommunicationPoolOwnerReferenceAsync(
+        await Gateway.DidNotReceiveWithAnyArgs().TryGetDeploymentSiteOwnerReferenceAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await Gateway.DidNotReceiveWithAnyArgs().SetDeploymentOwnerReferenceByInstanceAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>());
-        await Gateway.Received(1).CreateSecretAsync(PoolNamespace,
+        await Gateway.Received(1).CreateSecretAsync(DeploymentSiteNamespace,
             Arg.Is<V1Secret>(s => s.Metadata.OwnerReferences == null), Arg.Any<CancellationToken>());
     }
 
     [Test]
     public async Task DeployAsync_AdapterPoolInAForeignNamespace_RefusesToWriteACrossNamespaceOwner()
     {
-        // The CR lives in PoolNamespace. An owner reference from another namespace is not merely
+        // The CR lives in DeploymentSiteNamespace. An owner reference from another namespace is not merely
         // ineffective — the garbage collector deletes the dependent — so it is not written at all.
         Options.PlatformNamespace = "octo-platform";
-        GivenTheTenantsCommunicationPoolCrExists();
+        GivenTheTenantsDeploymentSiteCrExists();
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool, withSecretValue: true), CancellationToken.None);
 
-        await Gateway.DidNotReceiveWithAnyArgs().TryGetCommunicationPoolOwnerReferenceAsync(
+        await Gateway.DidNotReceiveWithAnyArgs().TryGetDeploymentSiteOwnerReferenceAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await Gateway.DidNotReceiveWithAnyArgs().SetDeploymentOwnerReferenceByInstanceAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>());
@@ -143,14 +143,14 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
-    public async Task DeployAsync_AdapterPoolWithoutACommunicationPoolCr_DeploysWithoutAnOwner()
+    public async Task DeployAsync_AdapterPoolWithoutADeploymentSiteCr_DeploysWithoutAnOwner()
     {
-        Gateway.TryGetCommunicationPoolOwnerReferenceAsync(Arg.Any<string>(), Arg.Any<string>(),
+        Gateway.TryGetDeploymentSiteOwnerReferenceAsync(Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<CancellationToken>()).Returns((V1OwnerReference?)null);
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool), CancellationToken.None);
 
-        await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), PoolNamespace,
+        await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
         await Gateway.DidNotReceiveWithAnyArgs().SetDeploymentOwnerReferenceByInstanceAsync(
@@ -161,13 +161,13 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
     public async Task DeployAsync_OwnerLookupFails_DeployStillSucceeds()
     {
         // Garbage collection is a safety net behind the controller's undeploy cascade. Losing the
-        // net is not a reason to refuse a pool that is otherwise deployable.
-        Gateway.TryGetCommunicationPoolOwnerReferenceAsync(Arg.Any<string>(), Arg.Any<string>(),
+        // net is not a reason to refuse a deployment site that is otherwise deployable.
+        Gateway.TryGetDeploymentSiteOwnerReferenceAsync(Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<CancellationToken>()).ThrowsAsync(new InvalidOperationException("apiserver down"));
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool), CancellationToken.None);
 
-        await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), PoolNamespace,
+        await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }
@@ -175,14 +175,14 @@ internal class PoolOwnerReferenceTests : WorkloadReconcilerTestsBase
     [Test]
     public async Task DeployAsync_OwnerStampFails_DeployStillSucceeds()
     {
-        GivenTheTenantsCommunicationPoolCrExists();
+        GivenTheTenantsDeploymentSiteCrExists();
         Gateway.SetDeploymentOwnerReferenceByInstanceAsync(Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("forbidden"));
 
         await Reconciler.DeployAsync(Dto(WorkloadTypeDto.AdapterPool), CancellationToken.None);
 
-        await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), PoolNamespace,
+        await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
     }

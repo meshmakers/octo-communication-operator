@@ -8,32 +8,32 @@ public static partial class OperatorLog
     [LoggerMessage(
         EventId = 1001,
         Level = LogLevel.Information,
-        Message = "Creating deployment {DeploymentName} for pool {PoolName} in namespace {NamespaceName}"
+        Message = "Creating deployment {DeploymentName} for deployment site {DeploymentSiteName} in namespace {NamespaceName}"
     )]
-    public static partial void CreatingDeployment(this ILogger logger, string deploymentName, string poolName,
+    public static partial void CreatingDeployment(this ILogger logger, string deploymentName, string deploymentSiteName,
         string namespaceName);
 
     [LoggerMessage(
         EventId = 1002,
         Level = LogLevel.Information,
-        Message = "Deleting deployment {DeploymentName} for pool {PoolName} in namespace {NamespaceName}"
+        Message = "Deleting deployment {DeploymentName} for deployment site {DeploymentSiteName} in namespace {NamespaceName}"
     )]
-    public static partial void DeletingDeployment(this ILogger logger, string deploymentName, string poolName,
+    public static partial void DeletingDeployment(this ILogger logger, string deploymentName, string deploymentSiteName,
         string namespaceName);
 
     [LoggerMessage(
         EventId = 1003,
         Level = LogLevel.Information,
-        Message = "Creating service {ServiceName} for pool {PoolName} in namespace {NamespaceName}"
+        Message = "Creating service {ServiceName} for deployment site {DeploymentSiteName} in namespace {NamespaceName}"
     )]
-    public static partial void CreatingService(this ILogger logger, string serviceName, string poolName, string namespaceName);
+    public static partial void CreatingService(this ILogger logger, string serviceName, string deploymentSiteName, string namespaceName);
 
     [LoggerMessage(
         EventId = 1004,
         Level = LogLevel.Information,
-        Message = "Deleting service {ServiceName} for pool {PoolName} in namespace {NamespaceName}"
+        Message = "Deleting service {ServiceName} for deployment site {DeploymentSiteName} in namespace {NamespaceName}"
     )]
-    public static partial void DeletingService(this ILogger logger, string serviceName, string poolName, string namespaceName);
+    public static partial void DeletingService(this ILogger logger, string serviceName, string deploymentSiteName, string namespaceName);
     
     [LoggerMessage(
         EventId = 1005,

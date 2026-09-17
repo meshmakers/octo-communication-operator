@@ -4,7 +4,7 @@ This runbook validates the central-operator code path end-to-end against a
 real local stack. Deploying a Cloud pool from the Refinery Studio triggers
 two things on the Communication Operator:
 
-1. **Pool CR + broker secret** — the operator creates a `CommunicationPool`
+1. **Pool CR + broker secret** — the operator creates a `DeploymentSite`
    custom resource and a broker-credentials `Secret` in the kind cluster
    (steps 2–6 below).
 2. **Helm-based workload deploys** — for every Adapter / Application
@@ -13,7 +13,7 @@ two things on the Communication Operator:
 Undeploying tears all of that down in reverse order.
 
 The test is **manual** — it is not part of CI. Run it after non-trivial
-changes in `OperatorHubService`, `CommunicationPoolManager`, `PoolService`
+changes in `OperatorHubService`, `DeploymentSiteManager`, `DeploymentSiteService`
 (controller), `WorkloadReconciler`, or any of the SDK / Helm plumbing they
 depend on.
 
@@ -22,21 +22,21 @@ depend on.
 ```
 [Refinery Studio → POST {tenantId}/v1/pool/deploy?poolRtId=<id>]
             ↓
-[Controller PoolService.DeployPoolAsync]
+[Controller DeploymentSiteService.DeployPoolAsync]
             ↓  (only when RtPool.Environment == Cloud)
-[Controller /operatorHub SignalR push → PoolDeployedAsync]
+[Controller /operatorHub SignalR push → DeploymentSiteDeployedAsync]
             ↓
-[OperatorHubService.PoolDeployedAsync]
+[OperatorHubService.DeploymentSiteDeployedAsync]
             ↓
-[CommunicationPoolManager.CreatePoolAsync(tenantId, poolName)]
+[DeploymentSiteManager.CreatePoolAsync(tenantId, poolName)]
             ↓
-[real k8s API call via ICommunicationPoolKubernetesGateway]
+[real k8s API call via IDeploymentSiteKubernetesGateway]
             ↓
 [CR + Secret in 'octo' namespace of the kind cluster]  ← kubectl assertion
 
        …then, for every workload managed by the pool:
 
-[Controller PoolService.DeployManagedWorkloadsAsync]
+[Controller DeploymentSiteService.DeployManagedWorkloadsAsync]
             ↓
 [Controller /operatorHub SignalR push → WorkloadDeployedAsync(WorkloadDeployedDto)]
             ↓
@@ -206,8 +206,8 @@ confirm the dialog.
 ```
 Pool deployed event received: tenant 'e2etest', pool 'default'
 Creating broker secret 'e2etest-default-octo-mesh-connection' in namespace 'octo'
-Creating CommunicationPool CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest', pool 'default'
-CommunicationPool CR 'e2etest-default' created successfully
+Creating DeploymentSite CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest', pool 'default'
+DeploymentSite CR 'e2etest-default' created successfully
 ```
 
 The pool row in the list refreshes to `DeploymentState = DEPLOYED`.
@@ -215,7 +215,7 @@ The pool row in the list refreshes to `DeploymentState = DEPLOYED`.
 ### 4. Verify the cluster state
 
 ```powershell
-kubectl get communicationpool -n octo
+kubectl get deploymentsite -n octo
 ```
 
 Expected:
@@ -233,7 +233,7 @@ kubectl get secret -n octo e2etest-default-octo-mesh-connection `
 Expected: `guest` (matches `appsettings.Development.json`).
 
 ```powershell
-kubectl get communicationpool e2etest-default -n octo -o yaml
+kubectl get deploymentsite e2etest-default -n octo -o yaml
 ```
 
 Expected `spec`:
@@ -266,9 +266,9 @@ The operator log should print:
 
 ```
 Pool undeployed event received: tenant 'e2etest', pool 'default'
-Deleting CommunicationPool CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest', pool 'default'
+Deleting DeploymentSite CR 'e2etest-default' in namespace 'octo' for tenant 'e2etest', pool 'default'
 Deleting broker secret 'e2etest-default-octo-mesh-connection' in namespace 'octo'
-CommunicationPool CR 'e2etest-default' deleted successfully
+DeploymentSite CR 'e2etest-default' deleted successfully
 ```
 
 The pool row refreshes to `DeploymentState = UNDEPLOYED`.
@@ -276,7 +276,7 @@ The pool row refreshes to `DeploymentState = UNDEPLOYED`.
 ### 6. Verify cleanup
 
 ```powershell
-kubectl get communicationpool -n octo
+kubectl get deploymentsite -n octo
 # expected: No resources found in octo namespace.
 
 kubectl get secret -n octo e2etest-default-octo-mesh-connection
@@ -403,7 +403,7 @@ Running 'helm uninstall e2etest-e2e-nginx --namespace octo --ignore-not-found'
 Helm release 'e2etest-e2e-nginx' uninstalled
 …
 Pool undeployed event received: tenant 'e2etest', pool 'default'
-Deleting CommunicationPool CR 'e2etest-default' …
+Deleting DeploymentSite CR 'e2etest-default' …
 ```
 
 The ordering matters: the operator removes the workload releases first so
@@ -427,9 +427,9 @@ kubectl --context kind-kind get secret -n octo e2etest-e2e-nginx-octo-secrets
 
 If you delete the `e2etest` tenant from the OctoSystem context while it
 still has a deployed Cloud pool, the controller's `TenantManagementConsumer`
-calls `PoolService.UndeployAllCloudPoolsAsync(tenantId)` in the
+calls `DeploymentSiteService.UndeployAllCloudPoolsAsync(tenantId)` in the
 `PreDeleteTenant` consumer. That fires a `WorkloadUndeployedAsync` event
-for every tracked workload, then a `PoolUndeployedAsync` event for every
+for every tracked workload, then a `DeploymentSiteUndeployedAsync` event for every
 Cloud pool of the tenant, so the operator cleans up its Helm releases,
 CRs, and secrets before the tenant data is gone.
 
@@ -442,8 +442,8 @@ octo-cli -c Delete -tid e2etest -y
 ```
 
 Expect the same `helm uninstall …` log lines as in step 7.6 followed by
-the `Deleting CommunicationPool CR …` lines from step 5, then an empty
-`kubectl get communicationpool -n octo` and an empty
+the `Deleting DeploymentSite CR …` lines from step 5, then an empty
+`kubectl get deploymentsite -n octo` and an empty
 `helm --kube-context kind-kind list -n octo`.
 
 ## Stopping the stack
@@ -460,13 +460,13 @@ are fast.
 | Symptom | Likely cause |
 |---|---|
 | Operator log never prints "Operator hub connected, waiting for pool events" | Controller not running, port 5015 blocked, or `appsettings.Development.json` URI mismatch. Check `logFiles/CommunicationControllerServices.log`. |
-| `Pool deployed event received` fires but no CR appears | RBAC against kind. Run `kubectl auth can-i create communicationpools.octo-mesh.meshmakers.io -n octo`. With kind's default kubeconfig you should be cluster-admin. |
-| Operator log: `Internal error occurred: failed calling webhook "mutate.communicationpool…": connect: connection refused` | A stale `dev-mutators` / `dev-validators` webhook config from a previous in-cluster operator deploy still points at a dead URL. Delete both (see [One-time setup](#one-time-setup)). |
-| `kubectl get communicationpool` returns `error: the server doesn't have a resource type "communicationpool"` | CRDs chart not installed. Re-run `Install-OctoKubernetes`. |
+| `Pool deployed event received` fires but no CR appears | RBAC against kind. Run `kubectl auth can-i create deploymentsites.octo-mesh.meshmakers.io -n octo`. With kind's default kubeconfig you should be cluster-admin. |
+| Operator log: `Internal error occurred: failed calling webhook "mutate.deploymentsite…": connect: connection refused` | A stale `dev-mutators` / `dev-validators` webhook config from a previous in-cluster operator deploy still points at a dead URL. Delete both (see [One-time setup](#one-time-setup)). |
+| `kubectl get deploymentsite` returns `error: the server doesn't have a resource type "deploymentsite"` | CRDs chart not installed. Re-run `Install-OctoKubernetes`. |
 | **Deploy Pool** does nothing — operator log silent | The pool's `Environment` is set to `Edge`. Open the form, switch to `Cloud`, save, then redeploy. |
 | Refinery Studio `Deploy Pool` action missing from the context menu | The `@meshmakers/octo-services` library was not rebuilt or `npm install` was not run in `octo-mesh-refinery-studio` after the library change. From `octo-frontend-libraries/src/frontend-libraries/`: `npm run build:octo-services`. From `octo-mesh-refinery-studio/`: `npm install`. |
 | `octo-cli` cannot find the controller | Re-run `Invoke-OctoCliLoginLocal -tenantId <tenant>` to point at `https://localhost:5015`. |
-| `CR already exists` log entry on redeploy | Previous run did not clean up. Click **Undeploy Pool** in the Studio (or `kubectl delete communicationpool e2etest-default -n octo`) and retry. |
+| `CR already exists` log entry on redeploy | Previous run did not clean up. Click **Undeploy Pool** in the Studio (or `kubectl delete deploymentsite e2etest-default -n octo`) and retry. |
 | **Workload-deploy step 7.4**: pool CR appears but no `Workload deployed event received` log entry | The Application/Adapter is not associated with the pool. Open the Application form, set **Pool** to the pool you deployed, save, then undeploy and redeploy the pool. The controller fan-out only enumerates workloads connected via the `Manages` association. |
 | `HelmException: 'helm repo add' exited with code 1`, stderr mentions `failed to fetch` | The chart repository URL is wrong, requires auth that wasn't provided, or is not reachable from the host. Test from the host: `helm repo add test <url> && helm search repo test`. For a private repo, ensure `Username` / `Password` are set on the `HelmRepositoryConfiguration` (they are stored encrypted; the controller decrypts before pushing on the wire). |
 | `HelmException: 'helm upgrade --install' exited with code 1`, stderr mentions `chart "X" matching <version>` not found | Wrong `Chart Name` / `Chart Version` on the Application. Test from the host: `helm search repo <alias>/<chart> --versions`. Leave `Chart Version` empty to grab the latest published version. |

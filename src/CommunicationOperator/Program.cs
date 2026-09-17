@@ -107,7 +107,7 @@ try
         .AddControllers();
 
     builder.Services.Configure<OperatorOptions>(builder.Configuration.GetSection("Operator"));
-    builder.Services.AddSingleton<IPoolService, PoolService>();
+    builder.Services.AddSingleton<IDeploymentSiteService, DeploymentSiteService>();
     builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
     builder.Services.AddSingleton<IKubernetes>(_ =>
     {
@@ -123,8 +123,8 @@ try
         }
         return new Kubernetes(config);
     });
-    builder.Services.AddSingleton<ICommunicationPoolKubernetesGateway, CommunicationPoolKubernetesGateway>();
-    builder.Services.AddSingleton<ICommunicationPoolManager, CommunicationPoolManager>();
+    builder.Services.AddSingleton<IDeploymentSiteKubernetesGateway, DeploymentSiteKubernetesGateway>();
+    builder.Services.AddSingleton<IDeploymentSiteManager, DeploymentSiteManager>();
     builder.Services.AddSingleton<IHelmProcessInvoker, HelmProcessInvoker>();
     builder.Services.AddSingleton<IHelmRunner, HelmRunner>();
     builder.Services.AddSingleton<IWorkloadDiagnosticsCollector, WorkloadDiagnosticsCollector>();
@@ -144,7 +144,7 @@ try
     builder.Services.AddHostedService(sp => sp.GetRequiredService<OperatorAccessTokenService>());
     builder.Services.AddSingleton<IOperatorHubClientFactory, OperatorHubClientFactory>();
     // OperatorHubService is the SignalR client lifecycle owner AND the
-    // IOperatorHubInvoker implementation that other services (PoolService)
+    // IOperatorHubInvoker implementation that other services (DeploymentSiteService)
     // call into. Register as a concrete singleton, then expose both
     // interface forwards + the hosted-service registration.
     builder.Services.AddSingleton<OperatorHubService>();

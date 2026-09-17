@@ -15,7 +15,7 @@ public class ScaleWorkloadTests : OperatorHubServiceTestsBase
     private static ScaleWorkloadDto Dto(int replicas = 0) => new()
     {
         TenantId = TenantId,
-        PoolRtId = "65d5c447b420da3fb12381a1",
+        DeploymentSiteRtId = "65d5c447b420da3fb12381a1",
         WorkloadRtId = WorkloadRtId,
         WorkloadName = "meshtest-adapter",
         WorkloadType = WorkloadTypeDto.Adapter,
@@ -39,7 +39,7 @@ public class ScaleWorkloadTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ReconcilerPatchesDeployments_ReportsSuccessBack()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -61,7 +61,7 @@ public class ScaleWorkloadTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ReconcilerPatchesNothing_ReportsFailureBack()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -86,7 +86,7 @@ public class ScaleWorkloadTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ReconcilerThrows_ReportsFailureWithMessage()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -109,7 +109,7 @@ public class ScaleWorkloadTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ScaleStatusReportRejectedWithHubException_IsSwallowed()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -148,7 +148,7 @@ public class ScaleWorkloadTests : OperatorHubServiceTestsBase
 
         client.StartAsync(Arg.Any<Func<bool, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async ci => await ci.Arg<Func<bool, Task>>()(false));
-        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedPoolDto>());
+        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedDeploymentSiteDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

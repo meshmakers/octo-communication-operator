@@ -11,33 +11,33 @@ public abstract class OperatorHubServiceTestsBase : IDisposable
 {
     protected const string TenantId = "acme";
 
-    protected readonly ICommunicationPoolManager PoolManager;
+    protected readonly IDeploymentSiteManager DeploymentSiteManager;
     protected readonly IOperatorHubClientFactory ClientFactory;
     protected readonly IWorkloadReconciler WorkloadReconciler;
-    protected readonly IPoolService PoolService;
+    protected readonly IDeploymentSiteService DeploymentSiteService;
     protected readonly OperatorOptions OperatorOptions;
     protected readonly OperatorHubService Service;
 
     protected OperatorHubServiceTestsBase()
     {
-        PoolManager = Substitute.For<ICommunicationPoolManager>();
+        DeploymentSiteManager = Substitute.For<IDeploymentSiteManager>();
         ClientFactory = Substitute.For<IOperatorHubClientFactory>();
         WorkloadReconciler = Substitute.For<IWorkloadReconciler>();
-        PoolService = Substitute.For<IPoolService>();
-        // Default: empty pool list so reconnect handler's foreach over
-        // GetPools() does nothing in the typical unit-test fixture.
-        PoolService.GetPools().Returns(Array.Empty<Meshmakers.Octo.Communication.Operator.Models.Pool>());
+        DeploymentSiteService = Substitute.For<IDeploymentSiteService>();
+        // Default: empty deployment site list so reconnect handler's foreach over
+        // GetDeploymentSites() does nothing in the typical unit-test fixture.
+        DeploymentSiteService.GetDeploymentSites().Returns(Array.Empty<Meshmakers.Octo.Communication.Operator.Models.DeploymentSite>());
         OperatorOptions = new OperatorOptions();
 
         var services = new ServiceCollection();
-        services.AddSingleton(PoolService);
+        services.AddSingleton(DeploymentSiteService);
         var serviceProvider = services.BuildServiceProvider();
 
         Service = new OperatorHubService(
             NullLogger<OperatorHubService>.Instance,
             Microsoft.Extensions.Options.Options.Create(OperatorOptions),
             ClientFactory,
-            PoolManager,
+            DeploymentSiteManager,
             WorkloadReconciler,
             serviceProvider);
     }

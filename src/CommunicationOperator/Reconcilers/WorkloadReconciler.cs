@@ -33,7 +33,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     internal static TimeSpan StaleHelmLockThreshold { get; set; } = TimeSpan.FromMinutes(10);
 
     private readonly IHelmRunner _helm;
-    private readonly ICommunicationPoolKubernetesGateway _gateway;
+    private readonly IDeploymentSiteKubernetesGateway _gateway;
     private readonly IWorkloadDiagnosticsCollector _diagnostics;
     private readonly IServiceProvider _serviceProvider;
     private readonly OperatorOptions _options;
@@ -45,7 +45,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     // block on helm's --rollback-on-failure wait timeout, typically 5 min).
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _inFlightDeploys = new();
 
-    public WorkloadReconciler(IHelmRunner helm, ICommunicationPoolKubernetesGateway gateway,
+    public WorkloadReconciler(IHelmRunner helm, IDeploymentSiteKubernetesGateway gateway,
         IWorkloadDiagnosticsCollector diagnostics,
         IServiceProvider serviceProvider,
         IOptions<OperatorOptions> options, ILogger<WorkloadReconciler> logger)
@@ -71,8 +71,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         var secretName = SecretName(release);
 
         _logger.LogInformation(
-            "Deploying workload: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}', release '{Release}' in namespace '{Namespace}'",
-            workload.TenantId, workload.PoolRtId,
+            "Deploying workload: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}', release '{Release}' in namespace '{Namespace}'",
+            workload.TenantId, workload.DeploymentSiteRtId,
             workload.WorkloadName, workload.WorkloadRtId,
             workload.ChartName, workload.ChartVersion, release, ns);
 
@@ -84,7 +84,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         var deployToken = deployCts.Token;
 
         // Refuse to start a second deploy for the same release while one is
-        // already running. The current PoolService path is serial per
+        // already running. The current DeploymentSiteService path is serial per
         // workload, so this should not happen in practice; the explicit
         // guard turns "what if" into a controlled failure that points at the
         // bug (instead of two helm processes fighting for the same release
@@ -110,11 +110,11 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                     workload.WorkloadType, _options),
             };
 
-            // AB#4924: a pool's resources belong to the tenant that lends it out, so that deleting
-            // the tenant takes the pool with it even when the controller-driven undeploy cascade
+            // AB#4924: a deployment site's resources belong to the tenant that lends it out, so that deleting
+            // the tenant takes the deployment site with it even when the controller-driven undeploy cascade
             // never runs (controller down, operator restarted, tracking lost). Resolved before the
             // secret is written so both the secret and the release's Deployments carry it.
-            var ownerReference = await TryResolvePoolOwnerReferenceAsync(workload, ns, deployToken);
+            var ownerReference = await TryResolveDeploymentSiteOwnerReferenceAsync(workload, ns, deployToken);
 
             // 1. Materialize / refresh the operator-owned secret. We replace it
             //    every deploy so a value rotation propagates without manual
@@ -223,7 +223,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                         chartVersion, ns, valuesFiles, setValues, deployToken);
                     // Only after the install: the Deployments the reference is written to are
                     // created by helm, so there is nothing to stamp before this point.
-                    await ApplyPoolOwnerReferenceAsync(release, ns, ownerReference, deployToken);
+                    await ApplyDeploymentSiteOwnerReferenceAsync(release, ns, ownerReference, deployToken);
                 }
                 catch (HelmException ex)
                 {
@@ -412,8 +412,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         var secretName = SecretName(release);
 
         _logger.LogInformation(
-            "Undeploying workload: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}'",
-            workload.TenantId, workload.PoolRtId,
+            "Undeploying workload: tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), release '{Release}'",
+            workload.TenantId, workload.DeploymentSiteRtId,
             workload.WorkloadName, workload.WorkloadRtId, release);
 
         // If a deploy is currently in flight for this release, cancel it so
@@ -512,7 +512,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 Labels = new Dictionary<string, string>
                 {
                     ["octo-mesh.meshmakers.io/tenant"] = SanitizeLabelValue(workload.TenantId),
-                    ["octo-mesh.meshmakers.io/pool-rt-id"] = workload.PoolRtId,
+                    ["octo-mesh.meshmakers.io/deployment-site-rt-id"] = workload.DeploymentSiteRtId,
                     ["octo-mesh.meshmakers.io/workload-rt-id"] = workload.WorkloadRtId,
                     ["octo-mesh.meshmakers.io/managed-by"] = "communication-operator",
                 },
@@ -520,7 +520,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 {
                     ["octo-mesh.meshmakers.io/workload-name"] = workload.WorkloadName,
                 },
-                // Null for every non-pool workload — those are undeployed through the controller
+                // Null for every non-adapter-pool workload — those are undeployed through the controller
                 // cascade and have never needed a garbage-collection safety net (AB#4924).
                 OwnerReferences = ownerReference is null ? null : [ownerReference],
             },
@@ -593,7 +593,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         // a standing credential to all of them makes that mechanism decorative. What a member does
         // get is the two unconditional tiers above (the RabbitMQ command bus and the TLS trust
         // anchor, neither of which carries tenant authority) plus its own per-release secret in
-        // the platform namespace. The controller refuses to set ReceivesClusterSecrets on a pool as
+        // the platform namespace. The controller refuses to set ReceivesClusterSecrets on a deployment site as
         // well — two gates, one on each side of the wire, because either side alone is one edit
         // away from silence.
         //
@@ -660,31 +660,31 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// <summary>
     /// Kubernetes namespace a workload is deployed into (AB#4924).
     ///
-    /// Everything except an adapter pool goes to <see cref="OperatorOptions.PoolNamespace"/>,
-    /// unchanged. A pool goes to <see cref="OperatorOptions.PlatformNamespace"/> when one is
+    /// Everything except an adapter pool goes to <see cref="OperatorOptions.DeploymentSiteNamespace"/>,
+    /// unchanged. A deployment site goes to <see cref="OperatorOptions.PlatformNamespace"/> when one is
     /// configured, because its members run work for tenants other than the one that owns it and
     /// must not sit among that tenant's own workloads (concept §4b, Q1). An unset platform
-    /// namespace resolves to the pool namespace — see the option's documentation for why that is
+    /// namespace resolves to the deployment site namespace — see the option's documentation for why that is
     /// the correct default and not a fallback.
     /// </summary>
     internal string ResolveNamespace(WorkloadTypeDto workloadType) =>
         workloadType == WorkloadTypeDto.AdapterPool && !string.IsNullOrWhiteSpace(_options.PlatformNamespace)
             ? _options.PlatformNamespace!
-            : _options.PoolNamespace;
+            : _options.DeploymentSiteNamespace;
 
     /// <summary>
-    /// Owner reference to the lending tenant's <c>CommunicationPool</c> CR for a pool workload,
-    /// or <c>null</c> for anything else — and for a pool whose namespace is not the CR's
+    /// Owner reference to the lending tenant's <c>DeploymentSite</c> CR for a deployment site workload,
+    /// or <c>null</c> for anything else — and for a deployment site whose namespace is not the CR's
     /// namespace (AB#4924).
     ///
     /// 🔴 That last case is a refusal, not a gap. Kubernetes forbids cross-namespace owner
     /// references: a namespaced dependent whose owner lives elsewhere is treated as having a
     /// <i>missing</i> owner and is deleted by the garbage collector. Writing one anyway would not
-    /// merely fail to clean up after a deleted tenant, it would delete a live tenant's pool within
+    /// merely fail to clean up after a deleted tenant, it would delete a live tenant's deployment site within
     /// seconds of the deploy. So the reference is written only where it is valid, and its absence
     /// is logged where it is not.
     /// </summary>
-    private async Task<V1OwnerReference?> TryResolvePoolOwnerReferenceAsync(WorkloadDeployedDto workload,
+    private async Task<V1OwnerReference?> TryResolveDeploymentSiteOwnerReferenceAsync(WorkloadDeployedDto workload,
         string ns, CancellationToken cancellationToken)
     {
         if (workload.WorkloadType != WorkloadTypeDto.AdapterPool)
@@ -692,23 +692,23 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             return null;
         }
 
-        if (!string.Equals(ns, _options.PoolNamespace, StringComparison.Ordinal))
+        if (!string.Equals(ns, _options.DeploymentSiteNamespace, StringComparison.Ordinal))
         {
             _logger.LogWarning(
-                "Adapter pool '{WorkloadName}' is deployed to namespace '{Namespace}' but its tenant's CommunicationPool CR lives in '{CrNamespace}'. Kubernetes rejects cross-namespace owner references, so the pool will NOT be garbage-collected when tenant '{TenantId}' is deleted; it is removed by the controller's undeploy cascade only.",
-                workload.WorkloadName, ns, _options.PoolNamespace, workload.TenantId);
+                "Adapter pool '{WorkloadName}' is deployed to namespace '{Namespace}' but its tenant's DeploymentSite CR lives in '{CrNamespace}'. Kubernetes rejects cross-namespace owner references, so the pool will NOT be garbage-collected when tenant '{TenantId}' is deleted; it is removed by the controller's undeploy cascade only.",
+                workload.WorkloadName, ns, _options.DeploymentSiteNamespace, workload.TenantId);
             return null;
         }
 
         try
         {
-            var crName = CommunicationPoolManager.GetCrName(workload.TenantId, workload.PoolRtId);
+            var crName = DeploymentSiteManager.GetCrName(workload.TenantId, workload.DeploymentSiteRtId);
             var ownerReference =
-                await _gateway.TryGetCommunicationPoolOwnerReferenceAsync(ns, crName, cancellationToken);
+                await _gateway.TryGetDeploymentSiteOwnerReferenceAsync(ns, crName, cancellationToken);
             if (ownerReference == null)
             {
                 _logger.LogWarning(
-                    "No CommunicationPool CR '{CrName}' in namespace '{Namespace}' to own adapter pool '{WorkloadName}'; deploying without an owner reference",
+                    "No DeploymentSite CR '{CrName}' in namespace '{Namespace}' to own adapter pool '{WorkloadName}'; deploying without an owner reference",
                     crName, ns, workload.WorkloadName);
             }
 
@@ -734,9 +734,9 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// Stamps the resolved owner reference onto the Deployments helm just created (AB#4924).
     /// No-op when there is no reference to write. Best effort: the release is already installed
     /// and running at this point, and failing the deploy over a missing safety net would trade a
-    /// working pool for a clean one.
+    /// working deployment site for a clean one.
     /// </summary>
-    private async Task ApplyPoolOwnerReferenceAsync(string release, string ns, V1OwnerReference? ownerReference,
+    private async Task ApplyDeploymentSiteOwnerReferenceAsync(string release, string ns, V1OwnerReference? ownerReference,
         CancellationToken cancellationToken)
     {
         if (ownerReference == null)
@@ -757,7 +757,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             }
 
             _logger.LogInformation(
-                "Adapter pool release '{Release}': {Count} Deployment(s) now owned by CommunicationPool '{Owner}'",
+                "Adapter pool release '{Release}': {Count} Deployment(s) now owned by DeploymentSite '{Owner}'",
                 release, patched, ownerReference.Name);
         }
         catch (OperationCanceledException)
@@ -778,7 +778,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// RFC 1123 valid, so renaming the user-facing WorkloadName in the
     /// Studio does not orphan the helm release. Delegates to
     /// <see cref="K8sNaming.DnsName(int,string[])"/> so the reconciler
-    /// and the CommunicationPoolManager produce identical names for
+    /// and the DeploymentSiteManager produce identical names for
     /// matching CK identifiers.
     /// </summary>
     internal static string ReleaseName(string tenantId, string workloadRtId) =>

@@ -5,13 +5,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Finalizer;
 
-public class CommunicationPoolFinalizerTests
+public class DeploymentSiteFinalizerTests
 {
     [Test]
     public async Task FinalizeAsync_ReturnsSuccessWithSameEntity()
     {
-        var finalizer = new CommunicationPoolFinalizer(NullLogger<CommunicationPoolFinalizer>.Instance);
-        var entity = new V1CommunicationPoolEntity
+        var finalizer = new DeploymentSiteFinalizer(NullLogger<DeploymentSiteFinalizer>.Instance);
+        var entity = new V1DeploymentSiteEntity
         {
             Metadata = new V1ObjectMeta { Name = "test-pool" }
         };

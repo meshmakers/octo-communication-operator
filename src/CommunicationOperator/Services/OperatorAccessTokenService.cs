@@ -26,7 +26,7 @@ namespace Meshmakers.Octo.Communication.Operator.Services;
 ///         down when the bearer expires. The exposure is the <b>re</b>connect — and an operator
 ///         reconnects routinely (controller rollout, node drain, network blip, the SDK watchdog). An
 ///         operator that acquired one token at startup would reconnect days later with a long-expired
-///         one and, under <c>Enforce</c>, be refused permanently: pools unregistered, no workload
+///         one and, under <c>Enforce</c>, be refused permanently: deployment sites unregistered, no workload
 ///         deploys, and no self-healing path short of a pod restart. The loop closes that.
 ///     </para>
 ///     <para>

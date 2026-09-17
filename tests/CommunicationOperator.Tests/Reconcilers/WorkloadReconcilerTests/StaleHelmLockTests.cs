@@ -17,7 +17,7 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
     private static WorkloadDeployedDto BaseDto() => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
         RepositoryUrl = "https://meshmakers.github.io/charts",
@@ -35,9 +35,9 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
     public async Task StalePendingLock_IsClearedBeforePreFlight()
     {
         // Arrange — pending revision whose release secret is far older than the threshold.
-        Helm.GetLatestReleaseRevisionAsync(Release, PoolNamespace, Arg.Any<CancellationToken>())
+        Helm.GetLatestReleaseRevisionAsync(Release, DeploymentSiteNamespace, Arg.Any<CancellationToken>())
             .Returns(new HelmReleaseRevision(11, "pending-upgrade"));
-        Gateway.GetSecretCreationTimestampAsync(PoolNamespace, LockSecret(11), Arg.Any<CancellationToken>())
+        Gateway.GetSecretCreationTimestampAsync(DeploymentSiteNamespace, LockSecret(11), Arg.Any<CancellationToken>())
             .Returns(DateTime.UtcNow - TimeSpan.FromHours(2));
 
         // Act
@@ -46,9 +46,9 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
         // Assert — the lock secret is deleted BEFORE the pre-flight dry-run runs.
         Received.InOrder(() =>
         {
-            Gateway.DeleteSecretAsync(PoolNamespace, LockSecret(11), Arg.Any<CancellationToken>());
+            Gateway.DeleteSecretAsync(DeploymentSiteNamespace, LockSecret(11), Arg.Any<CancellationToken>());
             Helm.UpgradeInstallDryRunAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
-                PoolNamespace, Arg.Any<IReadOnlyList<string>>(),
+                DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(),
                 Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
         });
     }
@@ -58,9 +58,9 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
     {
         // Arrange — pending revision younger than the threshold: could be a live helm run on
         // the outgoing pod of a rolling operator upgrade. Never rob a live run of its lock.
-        Helm.GetLatestReleaseRevisionAsync(Release, PoolNamespace, Arg.Any<CancellationToken>())
+        Helm.GetLatestReleaseRevisionAsync(Release, DeploymentSiteNamespace, Arg.Any<CancellationToken>())
             .Returns(new HelmReleaseRevision(4, "pending-install"));
-        Gateway.GetSecretCreationTimestampAsync(PoolNamespace, LockSecret(4), Arg.Any<CancellationToken>())
+        Gateway.GetSecretCreationTimestampAsync(DeploymentSiteNamespace, LockSecret(4), Arg.Any<CancellationToken>())
             .Returns(DateTime.UtcNow - TimeSpan.FromMinutes(1));
 
         // Act
@@ -68,14 +68,14 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
 
         // Assert
         await Gateway.DidNotReceive()
-            .DeleteSecretAsync(PoolNamespace, LockSecret(4), Arg.Any<CancellationToken>());
+            .DeleteSecretAsync(DeploymentSiteNamespace, LockSecret(4), Arg.Any<CancellationToken>());
     }
 
     [Test]
     public async Task HealthyRelease_NeverInspectsLockSecret()
     {
         // Arrange — newest revision deployed: nothing to recover.
-        Helm.GetLatestReleaseRevisionAsync(Release, PoolNamespace, Arg.Any<CancellationToken>())
+        Helm.GetLatestReleaseRevisionAsync(Release, DeploymentSiteNamespace, Arg.Any<CancellationToken>())
             .Returns(new HelmReleaseRevision(3, "deployed"));
 
         // Act
@@ -90,7 +90,7 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
     public async Task HistoryLookupFails_DeployStillRuns()
     {
         // Arrange — the stale-lock check is best effort and must never block a deploy.
-        Helm.GetLatestReleaseRevisionAsync(Release, PoolNamespace, Arg.Any<CancellationToken>())
+        Helm.GetLatestReleaseRevisionAsync(Release, DeploymentSiteNamespace, Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("helm binary exploded"));
 
         // Act
@@ -98,7 +98,7 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
 
         // Assert — the real install still ran.
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
-            PoolNamespace, Arg.Any<IReadOnlyList<string>>(),
+            DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(),
             Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
     }
 }

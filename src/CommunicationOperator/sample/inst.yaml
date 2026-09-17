@@ -1,10 +1,17 @@
-apiVersion: octo-mesh.meshmakers.io/v1alpha1
-kind: CommunicationPool
+# Sample DeploymentSite CR (AB#4924 renamed this kind from CommunicationPool,
+# and the API version left alpha at the same time).
+#
+# The spec is an intent record and nothing more: "manage deployment site
+# {deploymentSiteRtId} for tenant {tenantId}". Controller URI, broker host /
+# port / virtualHost, instancePrefix and the cert-validation toggles are owned
+# by the operator instance and read from OperatorOptions (OPERATOR__* env
+# vars); they are deliberately not duplicated here.
+apiVersion: octo-mesh.meshmakers.io/v1
+kind: DeploymentSite
 metadata:
-  name: first-pool
+  name: meshtest-65d5c447b420da3fb12381a1
+  namespace: octo
 spec:
-  communicationControllerUri: "https://communication.rke2-local.srv.mm.local"
-  poolName: "k8sfirmianstrasse"
   tenantId: "meshtest"
-  brokerHost: "mq.rke2-local.srv.mm.local"
-  
+  # 24-character lowercase hex ObjectId of the controller-side RtDeploymentSite.
+  deploymentSiteRtId: "65d5c447b420da3fb12381a1"

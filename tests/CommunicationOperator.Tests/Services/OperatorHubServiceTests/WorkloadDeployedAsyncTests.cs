@@ -33,7 +33,7 @@ public class WorkloadDeployedAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ReconcilerSucceeds_ReportsSuccessBack()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -52,7 +52,7 @@ public class WorkloadDeployedAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ReconcilerThrows_ReportsFailureWithMessage()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -73,7 +73,7 @@ public class WorkloadDeployedAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task StatusReportThrows_DoesNotPropagate()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = await StartConnectedAsync();
 
@@ -104,7 +104,7 @@ public class WorkloadDeployedAsyncTests : OperatorHubServiceTestsBase
 
         client.StartAsync(Arg.Any<Func<bool, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async ci => await ci.Arg<Func<bool, Task>>()(false));
-        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedPoolDto>());
+        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedDeploymentSiteDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

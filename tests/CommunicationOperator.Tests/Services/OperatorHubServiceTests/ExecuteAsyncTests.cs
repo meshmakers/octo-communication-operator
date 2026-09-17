@@ -10,13 +10,13 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Services.OperatorHubServi
 public class ExecuteAsyncTests : OperatorHubServiceTestsBase
 {
     [Test]
-    public async Task ExecuteAsync_AutoManagePoolsDisabledButControllerUriSet_StillCreatesClient()
+    public async Task ExecuteAsync_AutoManageDeploymentSitesDisabledButControllerUriSet_StillCreatesClient()
     {
-        // Regression: previously the service short-circuited when AutoManagePools=false,
-        // which meant the edge operator never opened a SignalR connection and pools
-        // claimed by edge-cluster CRs stayed Unregistered forever. AutoManagePools only
+        // Regression: previously the service short-circuited when AutoManageDeploymentSites=false,
+        // which meant the edge operator never opened a SignalR connection and deployment sites
+        // claimed by edge-cluster CRs stayed Unregistered forever. AutoManageDeploymentSites only
         // gates auto-CR-creation; the hub connection itself is required in both modes.
-        OperatorOptions.AutoManagePools = false;
+        OperatorOptions.AutoManageDeploymentSites = false;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = SetupClient();
 
@@ -34,7 +34,7 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ExecuteAsync_ControllerUriMissing_DoesNotCreateClient()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "";
 
         await StartAndStopAsync();
@@ -46,7 +46,7 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ExecuteAsync_AutoManaged_CreatesClientWithControllerUriAndService()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = SetupClient();
 
@@ -64,16 +64,16 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     }
 
     [Test]
-    public async Task ExecuteAsync_OnConnect_RegistersOperatorAndCreatesEachDeployedPool()
+    public async Task ExecuteAsync_OnConnect_RegistersOperatorAndCreatesEachDeployedDeploymentSite()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
         setup.Client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(new[]
         {
-            new DeployedPoolDto { TenantId = "tenant-a", PoolRtId = "65d5c447b420da3fb12381a1" },
-            new DeployedPoolDto { TenantId = "tenant-b", PoolRtId = "65d5c447b420da3fb12381a2" }
+            new DeployedDeploymentSiteDto { TenantId = "tenant-a", DeploymentSiteRtId = "65d5c447b420da3fb12381a1" },
+            new DeployedDeploymentSiteDto { TenantId = "tenant-b", DeploymentSiteRtId = "65d5c447b420da3fb12381a2" }
         });
 
         var hosted = (IHostedService)Service;
@@ -81,24 +81,24 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         await setup.Client.Received(1).RegisterOperatorAsync(Arg.Any<bool?>());
-        await PoolManager.Received(1).CreatePoolAsync("tenant-a", "65d5c447b420da3fb12381a1");
-        await PoolManager.Received(1).CreatePoolAsync("tenant-b", "65d5c447b420da3fb12381a2");
+        await DeploymentSiteManager.Received(1).CreateDeploymentSiteAsync("tenant-a", "65d5c447b420da3fb12381a1");
+        await DeploymentSiteManager.Received(1).CreateDeploymentSiteAsync("tenant-b", "65d5c447b420da3fb12381a2");
 
         await hosted.StopAsync(CancellationToken.None);
     }
 
     [Test]
-    public async Task ExecuteAsync_OnConnect_DeclaresAutoManagePoolsToController()
+    public async Task ExecuteAsync_OnConnect_DeclaresAutoManageDeploymentSitesToController()
     {
         // The controller now uses this declaration to validate that the operator
-        // does not claim pools whose Environment doesn't match its mode. We must
-        // forward _options.AutoManagePools verbatim on every (re)connect.
-        OperatorOptions.AutoManagePools = false;
+        // does not claim deployment sites whose Environment doesn't match its mode. We must
+        // forward _options.AutoManageDeploymentSites verbatim on every (re)connect.
+        OperatorOptions.AutoManageDeploymentSites = false;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
         setup.Client.RegisterOperatorAsync(Arg.Any<bool?>())
-            .Returns(Array.Empty<DeployedPoolDto>());
+            .Returns(Array.Empty<DeployedDeploymentSiteDto>());
 
         var hosted = (IHostedService)Service;
         await hosted.StartAsync(CancellationToken.None);
@@ -112,12 +112,12 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ExecuteAsync_OnConnect_CentralMode_DeclaresTrueToController()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
         setup.Client.RegisterOperatorAsync(Arg.Any<bool?>())
-            .Returns(Array.Empty<DeployedPoolDto>());
+            .Returns(Array.Empty<DeployedDeploymentSiteDto>());
 
         var hosted = (IHostedService)Service;
         await hosted.StartAsync(CancellationToken.None);
@@ -129,24 +129,24 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     }
 
     [Test]
-    public async Task ExecuteAsync_OnConnect_EdgeMode_DoesNotCreateCrsForDeployedCloudPools()
+    public async Task ExecuteAsync_OnConnect_EdgeMode_DoesNotCreateCrsForDeployedCloudDeploymentSites()
     {
         // Regression: a reboot of an edge device used to materialize a
-        // CommunicationPool CR (and broker secret) for every Cloud pool the
+        // DeploymentSite CR (and broker secret) for every Cloud deployment site the
         // controller's RegisterOperatorAsync returned, even though
-        // AutoManagePools=false. Once the KubeOps reconciler picked up that
-        // CR the edge operator also registered itself as the pool owner,
+        // AutoManageDeploymentSites=false. Once the KubeOps reconciler picked up that
+        // CR the edge operator also registered itself as the deployment site owner,
         // and workload-deploy events started routing to the edge cluster
         // alongside the central one. The reconnect path must apply the same
-        // gate that PoolDeployedAsync already does.
-        OperatorOptions.AutoManagePools = false;
+        // gate that DeploymentSiteDeployedAsync already does.
+        OperatorOptions.AutoManageDeploymentSites = false;
         OperatorOptions.CommunicationControllerUri = "https://controller";
 
         var setup = SetupClient();
         setup.Client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(new[]
         {
-            new DeployedPoolDto { TenantId = "tenant-a", PoolRtId = "65d5c447b420da3fb12381a1" },
-            new DeployedPoolDto { TenantId = "tenant-b", PoolRtId = "65d5c447b420da3fb12381a2" }
+            new DeployedDeploymentSiteDto { TenantId = "tenant-a", DeploymentSiteRtId = "65d5c447b420da3fb12381a1" },
+            new DeployedDeploymentSiteDto { TenantId = "tenant-b", DeploymentSiteRtId = "65d5c447b420da3fb12381a2" }
         });
 
         var hosted = (IHostedService)Service;
@@ -154,7 +154,7 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
         await setup.ConnectedAndReconnectEnabled.Task;
 
         await setup.Client.Received(1).RegisterOperatorAsync(Arg.Any<bool?>());
-        await PoolManager.DidNotReceiveWithAnyArgs().CreatePoolAsync(default!, default!);
+        await DeploymentSiteManager.DidNotReceiveWithAnyArgs().CreateDeploymentSiteAsync(default!, default!);
 
         await hosted.StopAsync(CancellationToken.None);
     }
@@ -162,7 +162,7 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
     [Test]
     public async Task ExecuteAsync_StopsClientOnShutdown()
     {
-        OperatorOptions.AutoManagePools = true;
+        OperatorOptions.AutoManageDeploymentSites = true;
         OperatorOptions.CommunicationControllerUri = "https://controller";
         var setup = SetupClient();
 
@@ -185,8 +185,8 @@ public class ExecuteAsyncTests : OperatorHubServiceTestsBase
 
         // RegisterOperatorAsync default is empty so the foreach doesn't NRE.
         // Arg.Any<bool?>() matches both the explicit-mode (true/false) and the
-        // legacy (null) overload — production code passes _options.AutoManagePools.
-        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedPoolDto>());
+        // legacy (null) overload — production code passes _options.AutoManageDeploymentSites.
+        client.RegisterOperatorAsync(Arg.Any<bool?>()).Returns(Array.Empty<DeployedDeploymentSiteDto>());
 
         var connectedAndReconnectEnabled = new TaskCompletionSource();
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>()))

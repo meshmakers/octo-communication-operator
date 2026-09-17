@@ -3,27 +3,27 @@ using Meshmakers.Octo.Communication.Operator.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Communication.Operator.Tests.Services.CommunicationPoolManagerTests;
+namespace Meshmakers.Octo.Communication.Operator.Tests.Services.DeploymentSiteManagerTests;
 
-public abstract class CommunicationPoolManagerTestsBase
+public abstract class DeploymentSiteManagerTestsBase
 {
     protected const string TenantId = "acme";
-    protected const string PoolName = "default";
-    protected const string PoolRtId = "65d5c447b420da3fb12381bc";
-    protected const string PoolNamespace = "octo";
+    protected const string DeploymentSiteName = "default";
+    protected const string DeploymentSiteRtId = "65d5c447b420da3fb12381bc";
+    protected const string DeploymentSiteNamespace = "octo";
     protected const string ExpectedCrName = "acme-65d5c447b420da3fb12381bc";
     protected const string ExpectedSecretName = "acme-65d5c447b420da3fb12381bc-octo-mesh-connection";
 
-    protected readonly ICommunicationPoolKubernetesGateway Gateway;
+    protected readonly IDeploymentSiteKubernetesGateway Gateway;
     protected readonly OperatorOptions OperatorOptions;
-    protected readonly CommunicationPoolManager Manager;
+    protected readonly DeploymentSiteManager Manager;
 
-    protected CommunicationPoolManagerTestsBase()
+    protected DeploymentSiteManagerTestsBase()
     {
-        Gateway = Substitute.For<ICommunicationPoolKubernetesGateway>();
+        Gateway = Substitute.For<IDeploymentSiteKubernetesGateway>();
         OperatorOptions = new OperatorOptions
         {
-            PoolNamespace = PoolNamespace,
+            DeploymentSiteNamespace = DeploymentSiteNamespace,
             CommunicationControllerUri = "https://controller",
             InstancePrefix = "instance",
             AdapterIgnoreCertificateValidation = false,
@@ -34,8 +34,8 @@ public abstract class CommunicationPoolManagerTestsBase
             BrokerPassword = "secret"
         };
 
-        Manager = new CommunicationPoolManager(
-            NullLogger<CommunicationPoolManager>.Instance,
+        Manager = new DeploymentSiteManager(
+            NullLogger<DeploymentSiteManager>.Instance,
             Microsoft.Extensions.Options.Options.Create(OperatorOptions),
             Gateway);
     }

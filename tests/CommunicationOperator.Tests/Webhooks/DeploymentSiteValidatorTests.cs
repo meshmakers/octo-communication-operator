@@ -3,20 +3,20 @@ using Meshmakers.Octo.Communication.Operator.Webhooks;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Webhooks;
 
-public class CommunicationPoolValidatorTests
+public class DeploymentSiteValidatorTests
 {
     private const string ValidRtId = "6ad562f3ff7c40ff80275b84";
 
-    private readonly CommunicationPoolValidator _validator = new();
+    private readonly DeploymentSiteValidator _validator = new();
 
     [Test]
     public async Task Create_ValidRtId_ReturnsValid()
     {
-        // PoolRtId is the canonical pool identity. The validator does not
+        // DeploymentSiteRtId is the canonical deployment site identity. The validator does not
         // require any other field — TenantId is just a routing key on the
         // wire and the controller rejects unknown tenants with its own
         // typed exception.
-        var entity = NewEntity(poolRtId: ValidRtId);
+        var entity = NewEntity(deploymentSiteRtId: ValidRtId);
 
         var result = _validator.Create(entity, dryRun: false);
 
@@ -24,9 +24,9 @@ public class CommunicationPoolValidatorTests
     }
 
     [Test]
-    public async Task Create_EmptyPoolRtId_ReturnsInvalidWithBadRequest()
+    public async Task Create_EmptyDeploymentSiteRtId_ReturnsInvalidWithBadRequest()
     {
-        var entity = NewEntity(poolRtId: string.Empty);
+        var entity = NewEntity(deploymentSiteRtId: string.Empty);
 
         var result = _validator.Create(entity, dryRun: false);
 
@@ -35,9 +35,9 @@ public class CommunicationPoolValidatorTests
     }
 
     [Test]
-    public async Task Create_PoolRtIdTooShort_ReturnsInvalidWithBadRequest()
+    public async Task Create_DeploymentSiteRtIdTooShort_ReturnsInvalidWithBadRequest()
     {
-        var entity = NewEntity(poolRtId: "deadbeef");
+        var entity = NewEntity(deploymentSiteRtId: "deadbeef");
 
         var result = _validator.Create(entity, dryRun: false);
 
@@ -46,12 +46,12 @@ public class CommunicationPoolValidatorTests
     }
 
     [Test]
-    public async Task Create_PoolRtIdWithUppercase_ReturnsInvalidWithBadRequest()
+    public async Task Create_DeploymentSiteRtIdWithUppercase_ReturnsInvalidWithBadRequest()
     {
         // ObjectIds are case-sensitive on the wire and the controller
         // expects lowercase hex; uppercase digits would slip past a
         // case-insensitive regex but break downstream comparisons.
-        var entity = NewEntity(poolRtId: "6AD562F3FF7C40FF80275B84");
+        var entity = NewEntity(deploymentSiteRtId: "6AD562F3FF7C40FF80275B84");
 
         var result = _validator.Create(entity, dryRun: false);
 
@@ -60,9 +60,9 @@ public class CommunicationPoolValidatorTests
     }
 
     [Test]
-    public async Task Create_PoolRtIdWithNonHexChar_ReturnsInvalidWithBadRequest()
+    public async Task Create_DeploymentSiteRtIdWithNonHexChar_ReturnsInvalidWithBadRequest()
     {
-        var entity = NewEntity(poolRtId: "6ad562f3ff7c40ff80275b8z");
+        var entity = NewEntity(deploymentSiteRtId: "6ad562f3ff7c40ff80275b8z");
 
         var result = _validator.Create(entity, dryRun: false);
 
@@ -73,8 +73,8 @@ public class CommunicationPoolValidatorTests
     [Test]
     public async Task Update_ValidRtId_ReturnsValid()
     {
-        var oldEntity = NewEntity(poolRtId: ValidRtId);
-        var newEntity = NewEntity(poolRtId: ValidRtId);
+        var oldEntity = NewEntity(deploymentSiteRtId: ValidRtId);
+        var newEntity = NewEntity(deploymentSiteRtId: ValidRtId);
 
         var result = _validator.Update(oldEntity, newEntity, dryRun: false);
 
@@ -82,12 +82,12 @@ public class CommunicationPoolValidatorTests
     }
 
     [Test]
-    public async Task Update_NewSpecHasEmptyPoolRtId_ReturnsInvalidWithBadRequest()
+    public async Task Update_NewSpecHasEmptyDeploymentSiteRtId_ReturnsInvalidWithBadRequest()
     {
         // Same rule on update as on create — a kubectl edit that wipes
-        // poolRtId is just as broken as a fresh CR with poolRtId empty.
-        var oldEntity = NewEntity(poolRtId: ValidRtId);
-        var newEntity = NewEntity(poolRtId: string.Empty);
+        // deploymentSiteRtId is just as broken as a fresh CR with deploymentSiteRtId empty.
+        var oldEntity = NewEntity(deploymentSiteRtId: ValidRtId);
+        var newEntity = NewEntity(deploymentSiteRtId: string.Empty);
 
         var result = _validator.Update(oldEntity, newEntity, dryRun: false);
 
@@ -95,12 +95,12 @@ public class CommunicationPoolValidatorTests
         await Assert.That(result.Status?.Code).IsEqualTo(400);
     }
 
-    private static V1CommunicationPoolEntity NewEntity(string poolRtId) =>
+    private static V1DeploymentSiteEntity NewEntity(string deploymentSiteRtId) =>
         new()
         {
-            Spec = new V1CommunicationPoolEntity.V1CommunicationPoolEntitySpec
+            Spec = new V1DeploymentSiteEntity.V1DeploymentSiteEntitySpec
             {
-                PoolRtId = poolRtId
+                DeploymentSiteRtId = deploymentSiteRtId
             }
         };
 }

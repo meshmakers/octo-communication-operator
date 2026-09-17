@@ -9,7 +9,7 @@ internal class ScaleAsyncTests : WorkloadReconcilerTestsBase
     private static ScaleWorkloadDto Dto(int replicas) => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId,
         WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Adapter,
@@ -17,7 +17,7 @@ internal class ScaleAsyncTests : WorkloadReconcilerTestsBase
     };
 
     [Test]
-    public async Task ScaleAsync_PatchesDeploymentsInPoolNamespaceWithReleaseNameAndReplicas()
+    public async Task ScaleAsync_PatchesDeploymentsInDeploymentSiteNamespaceWithReleaseNameAndReplicas()
     {
         Gateway.ScaleDeploymentsByInstanceAsync(
                 Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
@@ -27,7 +27,7 @@ internal class ScaleAsyncTests : WorkloadReconcilerTestsBase
 
         var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
         await Gateway.Received(1).ScaleDeploymentsByInstanceAsync(
-            PoolNamespace, expectedRelease, 0, Arg.Any<CancellationToken>());
+            DeploymentSiteNamespace, expectedRelease, 0, Arg.Any<CancellationToken>());
     }
 
     [Test]

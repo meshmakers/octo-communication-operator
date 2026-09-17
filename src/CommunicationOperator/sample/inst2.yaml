@@ -1,10 +1,10 @@
-apiVersion: octo-mesh.meshmakers.io/v1alpha1
-kind: CommunicationPool
+# Second sample DeploymentSite CR — a different tenant in the same namespace,
+# to exercise the operator watching more than one site at a time.
+apiVersion: octo-mesh.meshmakers.io/v1
+kind: DeploymentSite
 metadata:
-  name: second-pool
+  name: energytest-65d5c447b420da3fb12381b2
+  namespace: octo
 spec:
-  communicationControllerUri: "http://192.168.13.125:5014/"
-  poolName: "second-pool"
-  tenantId: "meshtest"
-  brokerHost: "mq.staging.meshmakers.cloud"
-  
+  tenantId: "energytest"
+  deploymentSiteRtId: "65d5c447b420da3fb12381b2"

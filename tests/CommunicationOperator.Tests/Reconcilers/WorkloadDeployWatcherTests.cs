@@ -16,7 +16,7 @@ internal class WorkloadDeployWatcherTests
     private static WorkloadDeployedDto Dto() => new()
     {
         TenantId = "acme",
-        PoolRtId = "65d5c447b420da3fb12381a1",
+        DeploymentSiteRtId = "65d5c447b420da3fb12381a1",
         WorkloadRtId = "65d5c447b420da3fb12381b1",
         WorkloadName = "voest-app",
         WorkloadType = WorkloadTypeDto.Application,

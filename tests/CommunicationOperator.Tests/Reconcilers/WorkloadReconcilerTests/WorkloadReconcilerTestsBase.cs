@@ -12,14 +12,14 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Reconcilers.WorkloadRecon
 internal abstract class WorkloadReconcilerTestsBase
 {
     protected const string TenantId = "acme";
-    protected const string PoolName = "default";
-    protected const string PoolRtId = "65d5c447b420da3fb12381a1";
+    protected const string DeploymentSiteName = "default";
+    protected const string DeploymentSiteRtId = "65d5c447b420da3fb12381a1";
     protected const string WorkloadName = "voest-app";
     protected const string WorkloadRtId = "65d5c447b420da3fb12381b1";
-    protected const string PoolNamespace = "octo";
+    protected const string DeploymentSiteNamespace = "octo";
 
     protected readonly IHelmRunner Helm;
-    protected readonly ICommunicationPoolKubernetesGateway Gateway;
+    protected readonly IDeploymentSiteKubernetesGateway Gateway;
     protected readonly IWorkloadDiagnosticsCollector Diagnostics;
     protected readonly IOperatorHubInvoker Hub;
     protected readonly IServiceProvider ServiceProvider;
@@ -29,7 +29,7 @@ internal abstract class WorkloadReconcilerTestsBase
     protected WorkloadReconcilerTestsBase()
     {
         Helm = Substitute.For<IHelmRunner>();
-        Gateway = Substitute.For<ICommunicationPoolKubernetesGateway>();
+        Gateway = Substitute.For<IDeploymentSiteKubernetesGateway>();
         Diagnostics = Substitute.For<IWorkloadDiagnosticsCollector>();
         // Default: collector returns nothing, so a HelmException from the
         // real install propagates verbatim without enrichment. Individual
@@ -44,7 +44,7 @@ internal abstract class WorkloadReconcilerTestsBase
         ServiceProvider = new ServiceCollection()
             .AddSingleton(Hub)
             .BuildServiceProvider();
-        Options = new OperatorOptions { PoolNamespace = PoolNamespace };
+        Options = new OperatorOptions { DeploymentSiteNamespace = DeploymentSiteNamespace };
         Reconciler = new WorkloadReconciler(
             Helm,
             Gateway,

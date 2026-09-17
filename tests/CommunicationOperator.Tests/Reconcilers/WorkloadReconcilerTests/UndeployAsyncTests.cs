@@ -10,7 +10,7 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
     private static WorkloadUndeployedDto BaseDto() => new()
     {
         TenantId = TenantId,
-        PoolRtId = PoolRtId,
+        DeploymentSiteRtId = DeploymentSiteRtId,
         WorkloadRtId = WorkloadRtId, WorkloadName = WorkloadName,
         WorkloadType = WorkloadTypeDto.Application,
     };
@@ -24,7 +24,7 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UninstallAsync(
             Arg.Is<string>(r => r == expectedRelease),
-            Arg.Is<string>(n => n == PoolNamespace),
+            Arg.Is<string>(n => n == DeploymentSiteNamespace),
             Arg.Any<CancellationToken>());
     }
 
@@ -63,7 +63,7 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
         var deployDto = new WorkloadDeployedDto
         {
             TenantId = TenantId,
-            PoolRtId = PoolRtId,
+            DeploymentSiteRtId = DeploymentSiteRtId,
             WorkloadRtId = WorkloadRtId,
             WorkloadName = WorkloadName,
             WorkloadType = WorkloadTypeDto.Application,
@@ -107,7 +107,7 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UninstallAsync(
             Arg.Is<string>(r => r == WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId)),
-            Arg.Is<string>(n => n == PoolNamespace),
+            Arg.Is<string>(n => n == DeploymentSiteNamespace),
             Arg.Any<CancellationToken>());
 
         // The CTS captured by helm must have been cancelled — that's the
