@@ -87,6 +87,8 @@ internal class AdapterPoolKindE2ETests
 
     private static string CrName => CommunicationPoolManager.GetCrName(TenantId, PoolRtId);
 
+    private static string SecretName => WorkloadReconciler.SecretName(Release);
+
     private static async Task<(IKubernetes Client, WorkloadReconciler Reconciler,
         CommunicationPoolKubernetesGateway Gateway, OperatorOptions Options)> ArrangeAsync(
         string? platformNamespace = null)
@@ -117,6 +119,7 @@ internal class AdapterPoolKindE2ETests
 
         await EnsureNamespaceAsync(client, Namespace);
         await DeleteDeploymentIfPresentAsync(client, Namespace);
+        await DeleteSecretIfPresentAsync(client);
         await DeleteCommunicationPoolIfPresentAsync(client);
 
         if (platformNamespace != null)
@@ -271,6 +274,31 @@ internal class AdapterPoolKindE2ETests
         catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return false;
+        }
+    }
+
+    private static async Task<bool> SecretExistsAsync(IKubernetes client)
+    {
+        try
+        {
+            await client.CoreV1.ReadNamespacedSecretAsync(SecretName, Namespace);
+            return true;
+        }
+        catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+    }
+
+    private static async Task DeleteSecretIfPresentAsync(IKubernetes client)
+    {
+        try
+        {
+            await client.CoreV1.DeleteNamespacedSecretAsync(SecretName, Namespace);
+        }
+        catch (HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // Nothing to clean up.
         }
     }
 
@@ -506,7 +534,53 @@ internal class AdapterPoolKindE2ETests
         }
     }
 
-    private static WorkloadDeployedDto DeployDto() => new()
+    /// <summary>
+    ///     AB#4924 §7.3 — the release's Secret is the <i>other</i> dependent the owner reference is
+    ///     written to, and it is reached by a different path than the Deployments: its reference is
+    ///     set when the Secret is created, not patched on after the install. A test that only
+    ///     covers Deployments leaves that path unverified against a real garbage collector.
+    ///
+    ///     <para>
+    ///     🔴 This is the dependent that matters most if the net fails. The Secret holds the
+    ///     release's secret-flagged values; one that outlives the tenant it belonged to is
+    ///     credential material sitting in a namespace with nothing left to own it. The Deployment
+    ///     merely goes on running.
+    ///     </para>
+    /// </summary>
+    [Test]
+    [NotInParallel(nameof(AdapterPoolKindE2ETests))]
+    public async Task DeletingTheLendingTenantsCommunicationPool_AlsoCollectsTheReleaseSecret()
+    {
+        var (client, reconciler, gateway, _) = await ArrangeAsync();
+
+        try
+        {
+            await CreateCommunicationPoolAsync(gateway);
+
+            // The real ReconcileSecretAsync, against the real apiserver — helm is substituted, but
+            // nothing about the Secret goes through helm.
+            await reconciler.DeployAsync(DeployDto(withSecretValue: true), CancellationToken.None);
+
+            var owner = await gateway.TryGetCommunicationPoolOwnerReferenceAsync(Namespace, CrName);
+            await Assert.That(owner).IsNotNull();
+
+            var secret = await client.CoreV1.ReadNamespacedSecretAsync(SecretName, Namespace);
+            await Assert.That(secret.Metadata.OwnerReferences).IsNotNull();
+            await Assert.That(secret.Metadata.OwnerReferences.Single().Uid).IsEqualTo(owner!.Uid);
+
+            await DeleteCommunicationPoolIfPresentAsync(client);
+
+            await WaitUntilAsync(async () => !await SecretExistsAsync(client),
+                "the release secret to be garbage-collected with its tenant");
+        }
+        finally
+        {
+            await DeleteSecretIfPresentAsync(client);
+            await DeleteCommunicationPoolIfPresentAsync(client);
+        }
+    }
+
+    private static WorkloadDeployedDto DeployDto(bool withSecretValue = false) => new()
     {
         TenantId = TenantId,
         PoolRtId = PoolRtId,
@@ -516,7 +590,11 @@ internal class AdapterPoolKindE2ETests
         RepositoryUrl = "https://meshmakers.github.io/charts",
         ChartName = "octo-mesh-adapter",
         ChartVersion = "1.2.3",
-        Values = [],
+        // A secret-flagged override is the only thing that makes the operator materialize the
+        // per-release Secret; without one ReconcileSecretAsync just clears a stale leftover.
+        Values = withSecretValue
+            ? [new ValueOverrideDto { Path = "oauth.clientSecret", Value = "s3cr3t", IsSecret = true }]
+            : [],
     };
 
     private static ScaleWorkloadDto ScaleDto(int replicas) => new()
