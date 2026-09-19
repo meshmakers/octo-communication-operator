@@ -214,6 +214,10 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 // is automatically torn down when the deploy ends (success,
                 // failure or external cancel).
                 var hub = _serviceProvider.GetRequiredService<IOperatorHubInvoker>();
+                // Shared cutoff for both diagnostics consumers below — the live watcher and the
+                // post-failure snapshot. Captured before helm starts so nothing this deploy
+                // produces is missed, and nothing the previous hour produced is re-reported.
+                var deployStartedUtc = DateTime.UtcNow;
                 watcherTask = WorkloadDeployWatcher.RunAsync(
                     _diagnostics, hub, ns, release, workload, _logger, deployToken);
 
@@ -233,14 +237,16 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                     // cluster but vanishes when helm rolls the release
                     // back. Events outlive the pods that produced them
                     // (default TTL 1h), so a post-failure snapshot still
-                    // catches ImagePull / scheduling / mount errors. Use a
+                    // catches ImagePull / scheduling / mount errors — bounded
+                    // to THIS deploy, or that same TTL would hand back the
+                    // previous hour's failures as if they were current. Use a
                     // bounded token so a stuck apiserver doesn't make the
                     // failure path hang forever.
                     using var diagCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     string diagnostics;
                     try
                     {
-                        diagnostics = await _diagnostics.CollectAsync(ns, release, diagCts.Token);
+                        diagnostics = await _diagnostics.CollectAsync(ns, release, deployStartedUtc, diagCts.Token);
                     }
                     catch (Exception diagEx)
                     {

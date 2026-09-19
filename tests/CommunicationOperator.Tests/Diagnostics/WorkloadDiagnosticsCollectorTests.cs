@@ -131,11 +131,77 @@ internal class WorkloadDiagnosticsCollectorTests
             Warning($"{Release}-app-abc-xyz", "Pod", "Failed", "pull access denied"),
         };
 
-        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release);
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release, Since);
 
         var result = sb.ToString();
         await Assert.That(result).Contains("Failed");
         await Assert.That(result).Contains("pull access denied");
+    }
+
+    /// <summary>
+    ///     🔴 An event from a PREVIOUS rollout of the same release must not be reported.
+    /// </summary>
+    /// <remarks>
+    ///     Events are matched to a release by name prefix, and Kubernetes keeps them for about an
+    ///     hour — so every pod of every past attempt carries the same prefix and was still on
+    ///     record. Without the cutoff a healthy deploy arrived in the UI as a page of
+    ///     ImagePullBackOff and readiness failures from pods deleted 40 minutes earlier, which is
+    ///     the exact opposite of what this collector is for: it exists to surface a live failure
+    ///     within seconds, and it was making a live failure indistinguishable from the last hour's
+    ///     noise. Observed on a local kind cluster.
+    /// </remarks>
+    [Test]
+    public async Task FormatWarningEvents_EventFromAnEarlierRolloutOfTheSameRelease_IsExcluded()
+    {
+        var sb = new StringBuilder();
+        var deployStarted = DateTime.UtcNow;
+        var events = new[]
+        {
+            Warning($"{Release}-old-rs-deadpod", "Pod", "Failed", "ImagePullBackOff",
+                lastTimestamp: deployStarted.AddMinutes(-40)),
+            Warning($"{Release}-new-rs-livepod", "Pod", "Failed", "still broken",
+                lastTimestamp: deployStarted.AddSeconds(5)),
+        };
+
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release, deployStarted);
+
+        var result = sb.ToString();
+        await Assert.That(result).DoesNotContain("ImagePullBackOff");
+        await Assert.That(result).Contains("still broken");
+    }
+
+    /// <summary>
+    ///     A repeating failure that STARTED before this deploy and is still going must be reported:
+    ///     the cutoff reads the last occurrence, never the first.
+    /// </summary>
+    [Test]
+    public async Task FormatWarningEvents_OngoingFailureThatStartedEarlier_IsIncluded()
+    {
+        var sb = new StringBuilder();
+        var deployStarted = DateTime.UtcNow;
+        var evt = Warning($"{Release}-pod", "Pod", "BackOff", "crash looping",
+            lastTimestamp: deployStarted.AddSeconds(10));
+        evt.FirstTimestamp = deployStarted.AddMinutes(-30);
+
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, new[] { evt }, Release, deployStarted);
+
+        await Assert.That(sb.ToString()).Contains("crash looping");
+    }
+
+    /// <summary>
+    ///     An event with no timestamp at all is kept. It cannot be proven old, and dropping it
+    ///     would hide a live failure — the more expensive of the two mistakes here.
+    /// </summary>
+    [Test]
+    public async Task FormatWarningEvents_EventWithoutAnyTimestamp_IsIncluded()
+    {
+        var sb = new StringBuilder();
+        var evt = Warning($"{Release}-pod", "Pod", "Failed", "no timestamp");
+        evt.LastTimestamp = null;
+
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, new[] { evt }, Release, DateTime.UtcNow);
+
+        await Assert.That(sb.ToString()).Contains("no timestamp");
     }
 
     [Test]
@@ -147,7 +213,7 @@ internal class WorkloadDiagnosticsCollectorTests
             Warning("other-release-pod-1", "Pod", "Failed", "not our problem"),
         };
 
-        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release);
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release, Since);
 
         await Assert.That(sb.ToString()).IsEmpty();
     }
@@ -159,7 +225,7 @@ internal class WorkloadDiagnosticsCollectorTests
         var dup = Warning($"{Release}-pod-1", "Pod", "Failed", "image pull error");
         var events = new[] { dup, dup, dup };
 
-        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release);
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release, Since);
 
         var occurrences = sb.ToString().Split('\n').Count(l => l.Contains("image pull error"));
         await Assert.That(occurrences).IsEqualTo(1);
@@ -181,7 +247,7 @@ internal class WorkloadDiagnosticsCollectorTests
             },
         };
 
-        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release);
+        WorkloadDiagnosticsCollector.FormatWarningEvents(sb, events, Release, Since);
 
         await Assert.That(sb.ToString()).IsEmpty();
     }
@@ -222,12 +288,18 @@ internal class WorkloadDiagnosticsCollectorTests
         };
     }
 
-    private static Corev1Event Warning(string objectName, string kind, string reason, string message) => new()
+    private static Corev1Event Warning(string objectName, string kind, string reason, string message,
+        DateTime? lastTimestamp = null) => new()
     {
         Metadata = new V1ObjectMeta { Name = $"{objectName}.evt" },
         InvolvedObject = new V1ObjectReference { Name = objectName, Kind = kind },
         Type = "Warning",
         Reason = reason,
         Message = message,
+        // Default: happened now, i.e. inside any cutoff a test passes. The age cases set it.
+        LastTimestamp = lastTimestamp ?? DateTime.UtcNow,
     };
+
+    /// <summary>A cutoff comfortably before every "now" event the factory produces.</summary>
+    private static DateTime Since => DateTime.UtcNow.AddMinutes(-1);
 }

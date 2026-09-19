@@ -176,7 +176,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
 
         var expectedRelease = WorkloadReconciler.ReleaseName(TenantId, WorkloadRtId);
         await Diagnostics.Received(1).CollectAsync(
-            DeploymentSiteNamespace, expectedRelease, Arg.Any<CancellationToken>());
+            DeploymentSiteNamespace, expectedRelease, Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -188,7 +188,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
                 Arg.Any<CancellationToken>())
             .ThrowsAsync(new HelmException("upgrade --install rel",
                 1, string.Empty, "Error: context deadline exceeded"));
-        Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns("Pod x container 'app' waiting: ImagePullBackOff — pull access denied");
 
         var ex = await Assert.That(async () => await Reconciler.DeployAsync(BaseDto(), CancellationToken.None))

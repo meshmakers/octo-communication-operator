@@ -36,7 +36,8 @@ public sealed class WorkloadDiagnosticsCollector : IWorkloadDiagnosticsCollector
         _logger = logger;
     }
 
-    public async Task<string> CollectAsync(string @namespace, string release, CancellationToken cancellationToken)
+    public async Task<string> CollectAsync(string @namespace, string release, DateTime sinceUtc,
+        CancellationToken cancellationToken)
     {
         var sb = new StringBuilder();
 
@@ -49,7 +50,7 @@ public sealed class WorkloadDiagnosticsCollector : IWorkloadDiagnosticsCollector
         var events = await ListWarningEventsAsync(@namespace, cancellationToken);
         if (events != null)
         {
-            FormatWarningEvents(sb, events, release);
+            FormatWarningEvents(sb, events, release, sinceUtc);
         }
 
         return sb.ToString().TrimEnd();
@@ -72,16 +73,28 @@ public sealed class WorkloadDiagnosticsCollector : IWorkloadDiagnosticsCollector
     /// <summary>
     /// Pure formatter for warning events whose involvedObject name starts
     /// with the release name (covers Deployment, ReplicaSet, Pod, Service,
-    /// Ingress that helm names from the release). Internal so tests can
-    /// drive it without mocking IKubernetes.
+    /// Ingress that helm names from the release) AND whose last occurrence is
+    /// at or after <paramref name="sinceUtc"/>. Internal so tests can drive it
+    /// without mocking IKubernetes.
     /// </summary>
-    internal static void FormatWarningEvents(StringBuilder sb, IEnumerable<Corev1Event> events, string release)
+    /// <remarks>
+    /// 🔴 The name prefix alone is not enough, and relying on it was a defect: events outlive the
+    /// pods that produced them by about an hour, and every pod of every past rollout of this
+    /// release carries the same prefix. See <see cref="IWorkloadDiagnosticsCollector.CollectAsync"/>.
+    /// </remarks>
+    internal static void FormatWarningEvents(StringBuilder sb, IEnumerable<Corev1Event> events, string release,
+        DateTime sinceUtc)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var evt in events)
         {
             var objName = evt.InvolvedObject?.Name;
             if (objName == null || !objName.StartsWith(release, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (LastOccurrence(evt) is { } occurredAt && occurredAt < sinceUtc)
             {
                 continue;
             }
@@ -131,6 +144,24 @@ public sealed class WorkloadDiagnosticsCollector : IWorkloadDiagnosticsCollector
                 sb.AppendLine();
             }
         }
+    }
+
+    /// <summary>
+    /// When the event last happened, or null when the API server reported no timestamp at all.
+    /// </summary>
+    /// <remarks>
+    /// A repeating event (image pull retries, a crash loop) updates <c>LastTimestamp</c> or the
+    /// series' <c>LastObservedTime</c> rather than creating a new one, so those are read first —
+    /// <c>FirstTimestamp</c> would hide a failure that started before this deploy and is still
+    /// going. An event with NO timestamp is kept: it cannot be proven old, and silently dropping
+    /// it would hide a live failure, which is the more expensive mistake here.
+    /// </remarks>
+    internal static DateTime? LastOccurrence(Corev1Event evt)
+    {
+        return evt.LastTimestamp
+               ?? evt.Series?.LastObservedTime
+               ?? evt.EventTime
+               ?? evt.FirstTimestamp;
     }
 
     private static string FormatEvent(Corev1Event evt)

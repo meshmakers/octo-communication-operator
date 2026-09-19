@@ -47,6 +47,9 @@ public static class WorkloadDeployWatcher
         TimeSpan? pollInterval = null)
     {
         var interval = pollInterval ?? DefaultPollInterval;
+        // The cutoff for warning events: anything older belongs to a previous rollout of this
+        // release and must not be reported as this deploy's progress.
+        var startedUtc = DateTime.UtcNow;
         string? lastSent = null;
         try
         {
@@ -67,7 +70,7 @@ public static class WorkloadDeployWatcher
                     collectCts.CancelAfter(CollectTimeout);
                     try
                     {
-                        snapshot = await collector.CollectAsync(@namespace, release, collectCts.Token);
+                        snapshot = await collector.CollectAsync(@namespace, release, startedUtc, collectCts.Token);
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {

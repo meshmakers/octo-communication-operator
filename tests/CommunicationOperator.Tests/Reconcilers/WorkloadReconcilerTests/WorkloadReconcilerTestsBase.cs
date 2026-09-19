@@ -34,7 +34,7 @@ internal abstract class WorkloadReconcilerTestsBase
         // Default: collector returns nothing, so a HelmException from the
         // real install propagates verbatim without enrichment. Individual
         // tests override this to assert the enrichment path.
-        Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns(string.Empty);
         Hub = Substitute.For<IOperatorHubInvoker>();
         // Lazy hub resolution mirrors the production wiring (Program.cs uses

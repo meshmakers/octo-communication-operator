@@ -30,7 +30,7 @@ internal class WorkloadDeployWatcherTests
     private static (IWorkloadDiagnosticsCollector collector, IOperatorHubInvoker hub) BuildMocks(string returns)
     {
         var collector = Substitute.For<IWorkloadDiagnosticsCollector>();
-        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns(returns);
         var hub = Substitute.For<IOperatorHubInvoker>();
         return (collector, hub);
@@ -71,7 +71,7 @@ internal class WorkloadDeployWatcherTests
         var collector = Substitute.For<IWorkloadDiagnosticsCollector>();
         var collectedEnough = new TaskCompletionSource();
         var collectCount = 0;
-        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns(_ =>
             {
                 // Feed the SAME snapshot several times so the dedup path is
@@ -109,7 +109,7 @@ internal class WorkloadDeployWatcherTests
     {
         var collector = Substitute.For<IWorkloadDiagnosticsCollector>();
         var snapshots = new Queue<string>(new[] { "first", "first", "second", "second", "third" });
-        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns(_ => snapshots.Count > 0 ? snapshots.Dequeue() : "third");
         var hub = Substitute.For<IOperatorHubInvoker>();
         var publishedThree = new TaskCompletionSource();
@@ -146,7 +146,7 @@ internal class WorkloadDeployWatcherTests
     public async Task RunAsync_CollectorThrows_KeepsRunningAndPublishesNextSuccessfulSnapshot()
     {
         var collector = Substitute.For<IWorkloadDiagnosticsCollector>();
-        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        collector.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns(
                 _ => throw new InvalidOperationException("apiserver glitch"),
                 _ => "Pod foo waiting: ImagePullBackOff");
@@ -212,7 +212,7 @@ internal class WorkloadDeployWatcherTests
             NullLogger.Instance, cts.Token, pollInterval: TickInterval);
 
         await collector.DidNotReceiveWithAnyArgs()
-            .CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+            .CollectAsync(default!, default!, default, default);
         await hub.DidNotReceiveWithAnyArgs()
             .ReportWorkloadDeploymentProgressAsync(Arg.Any<WorkloadDeploymentProgressDto>());
     }
