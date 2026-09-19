@@ -23,7 +23,7 @@ if (!(Test-Path $assemblyPath)) {
 $kestrelUrls = "http://*:5022;https://*:5023"
 
 # appsettings.Development.json carries the central-mode defaults
-# (AutoManagePools=true, controller URI, broker host, broker creds).
+# (AutoManageDeploymentSites=true, controller URI, broker host, broker creds).
 $env:ASPNETCORE_ENVIRONMENT = "Development"
 
 Push-Location $binPath
