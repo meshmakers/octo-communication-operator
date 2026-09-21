@@ -1,3 +1,8 @@
+---
+description: Manual end-to-end runbook for central operator mode, plus the automated kind tests. Run after changes to OperatorHubService or CommunicationPoolManager.
+applies_to: tests/CommunicationOperator.Tests/E2E/**, start-operator.ps1
+---
+
 # E2E Smoke Test — Central Operator Mode
 
 This runbook validates the central-operator code path end-to-end against a
@@ -131,6 +136,10 @@ In a second terminal — the operator (NOT auto-started by `Start-Octo`):
 cd $rootPath/octo-communication-operator
 ./start-operator.ps1 -configuration DebugL
 ```
+
+(`start-operator.ps1` is deliberately **not** named `octo-start.ps1` — that
+name would make `Start-Octo` launch the operator automatically, and we want
+it to stay opt-in for now.)
 
 The operator binds to `http://localhost:5022` and `https://localhost:5023`,
 loads `appsettings.Development.json`, and connects to the Communication
@@ -476,3 +485,26 @@ are fast.
 Operator log: stdout of the `start-operator.ps1` terminal. Other services
 log to `$rootPath/logFiles/<ServiceName>.log` (managed by `Start-Octo`).
 Studio log: stdout of the `npm start` terminal plus the browser dev tools.
+
+## Automated Kubernetes End-to-End Tests (AB#4924)
+
+Separate from the manual runbook above, `tests/CommunicationOperator.Tests/E2E/AdapterPoolKindE2ETests`
+runs the adapter-pool paths against a **real apiserver**: a pool scaled 1 → 3 → 1 through
+`WorkloadReconciler.ScaleAsync`, and a pool garbage-collected when its tenant's `CommunicationPool`
+CR is deleted. Both prove things a substitute cannot — Kubernetes' garbage collector is a real
+controller with real rules, and a merge patch either moves `spec.replicas` on the live object or it
+does not.
+
+```bash
+OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
+  dotnet test --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj \
+  -c DebugL --filter "/*/*/AdapterPoolKindE2ETests/*"
+```
+
+Without `OCTO_OPERATOR_E2E_KUBECONTEXT` both tests report as **skipped**, never as passed — a green
+run on a machine with no cluster would be a lie about what was verified. The context needs the
+`communicationpools.octo-mesh.meshmakers.io` CRD installed (the `octo-mesh-crds` chart) and
+permission to create a namespace; everything is created in and cleaned up from `octo-pool-e2e`.
+Helm is deliberately not in the loop — nothing in this increment changed the helm layer, and a
+directly created Deployment carrying the release's `app.kubernetes.io/instance` label is exactly
+the shape the scale path selects on.

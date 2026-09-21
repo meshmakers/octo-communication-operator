@@ -13,7 +13,7 @@ The operator can be configured via environment variables:
 | `OPERATOR__AUTOMANAGEDEPLOYMENTSITES` | Auto-create DeploymentSite CRs on tenant creation | `false` |
 | `OPERATOR__WATCHNAMESPACE` | Restricts the CR watcher to a single namespace. Required when multiple operator instances share one cluster (e.g. edge devices running one operator per target controller) so they don't race on each other's CRs. Leave empty to watch all namespaces. | _(empty — watch all)_ |
 | `OPERATOR__DEPLOYMENTSITENAMESPACE` | Namespace where auto-created CRs and per-tenant broker secrets live. Helm releases default to the same namespace unless the chart overrides it. | `octo` |
-| `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
+| `OPERATOR__COMMUNICATIONCONTROLLERURI` | SignalR endpoint of the Communication Controller. **Required in both central and edge mode** — the `/operatorHub` connection is not gated on `AUTOMANAGEDEPLOYMENTSITES`. When empty the hub service logs a warning and exits, and pools reconciled from CRs are never registered with the controller (they stay `Unregistered` in the Studio). | _(required)_ |
 | `OPERATOR__DEFAULTDEPLOYMENTSITENAME` | Pool name for auto-created CRs | `default` |
 | `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to workload pods via the Helm chart values | _(none)_ |
 | `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Forwarded to workload pods via the Helm chart values (dev only) | `false` |
@@ -165,7 +165,7 @@ kubectl -n pool1 apply -f ./src/scripts/test-cluster-pool-local.yaml
 ## During development
 
 
-# Generate CRD and deployment files
+### Generate CRD and deployment files
 ```bash
 dotnet kubeops g op meshmakers-octo-communication-operator ./CommunicationOperator.csproj --out config --clear-out
 ```

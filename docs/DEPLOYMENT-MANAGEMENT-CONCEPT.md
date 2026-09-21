@@ -1,8 +1,14 @@
+---
+description: Design record for the CK model and the controller-to-operator deploy contract. Background reading; current behaviour lives in reconcilers.md.
+---
+
 # Helm-Based Workload Deployment
 
 ## Status
 
-**Implemented.** The Helm-based deploy flow is the only deploy path for Adapters and Applications; the previous raw-K8s `AdapterReconciler` was removed in System.Communication CK 3.16.0. The Phase-3 E2E smoke test on a real cluster is the remaining validation step.
+**Implemented.** The Helm-based deploy flow is the only deploy path for Adapters and Applications; the previous raw-K8s `AdapterReconciler` was removed in System.Communication CK 3.16.0. Validated by `docs/E2E-SMOKE-TEST.md` (manual runbook) and the automated kind tests in the same file.
+
+This document is the **design record**: the CK model, the controller→operator contract and the decisions behind them. For how the operator behaves *today* — values layering, chart-version pinning, stale-lock recovery, pre-flight, the deploy watcher, cancellation, the scale verb and adapter pools — read `docs/reconcilers.md`, which wins wherever the two disagree.
 
 ## Goals
 
@@ -146,16 +152,17 @@ Why:
 - Operator already runs as a single container — adding `helm` to the image is trivial.
 - Easy to debug: same commands an SRE would type by hand.
 
-Operator wraps `helm` with a thin abstraction (`IHelmRunner`) so tests can substitute it. The runner invokes:
+The operator wraps `helm` behind `IHelmRunner` so tests can substitute it. The current set of
+invocations and their exact arguments live in `docs/reconcilers.md` → "Helm Workload
+Reconciliation" — that is the authoritative list; do not restate it here.
 
-- `helm repo add {alias} {repositoryUrl} [--username --password]` (once per `HelmRepositoryConfiguration`; alias derived from the configuration's RtId)
-- `helm repo update {alias}` (before every deploy, to pick up new chart versions)
-- `helm upgrade --install {release} {alias}/{chartName} --version {v} -f values.yaml --namespace {ns}`
-- `helm uninstall {release} --namespace {ns}`
-
-For private GitHub Pages, `Username` + `Password` flow into `--username` / `--password`. GitHub Pages basic-auth typically wants a username + a PAT with `repo` scope.
+For private GitHub Pages, `Username` + `Password` flow into `--username` / `--password`. GitHub
+Pages basic-auth typically wants a username + a PAT with `repo` scope.
 
 ## Operator Flow
+
+The controller→operator contract. What the operator then does with the event is in
+`docs/reconcilers.md`.
 
 ### Workload Deploy (Adapter or Application)
 
@@ -163,11 +170,11 @@ For private GitHub Pages, `Username` + `Password` flow into `--username` / `--pa
 1. User creates / updates an Adapter or Application entity in OctoMesh (Studio GraphQL).
    The entity belongs to a Pool. The Pool has Environment = Cloud.
 
-2. User clicks "Deploy Pool" (existing flow) OR explicitly deploys a single workload
-   (new: "Deploy Workload" context menu action).
+2. User clicks "Deploy Pool" OR explicitly deploys a single workload
+   ("Deploy Workload" context menu action).
 
 3. Controller PoolService.DeployPoolAsync:
-   - Sets DeploymentState=Deployed on the Pool (existing).
+   - Sets DeploymentState=Deployed on the Pool.
    - Enumerates managed workloads of the Pool.
    - For each Cloud workload, sends WorkloadDeployedAsync(tenantId, workloadDto)
      to connected operators via OperatorConnectionManager. The DTO carries:
@@ -175,28 +182,22 @@ For private GitHub Pages, `Username` + `Password` flow into `--username` / `--pa
        * chartName, chartVersion, registryUri (resolved from HelmRepositoryConfiguration)
        * valuesYaml, valueOverrides (with secrets already decrypted server-side)
 
-4. Operator receives WorkloadDeployedAsync:
-   - Logs in to the OCI registry if credentials are present.
-   - Writes effective values to a temp file (Yaml merged with overrides, secrets
-     swapped for secretKeyRef placeholders).
-   - Creates the {release}-octo-secrets K8s Secret if any IsSecret values exist.
-   - helm upgrade --install {tenant}-{workloadName} {chart} --version {v} -f values.yaml
-       --namespace {poolNamespace}.
-   - Reports back via PoolHub.UpdateWorkloadDeploymentStateAsync(workloadRtId, state).
+4. Operator receives WorkloadDeployedAsync and reconciles the release
+   (see docs/reconcilers.md), then reports back via
+   PoolHub.UpdateWorkloadDeploymentStateAsync(workloadRtId, state).
 
 5. Studio refetches the pool, the workload shows DeploymentState = Deployed.
 ```
 
 ### Workload Undeploy
 
-Mirror of deploy. Operator runs `helm uninstall {release}` and `kubectl delete secret {release}-octo-secrets` (if it existed).
+Mirror of deploy: `WorkloadUndeployedAsync` → the operator uninstalls the release and removes the
+operator-owned `{release}-octo-secrets` Secret.
 
 ### Tenant Delete Cascade
 
-Already in place from the previous fix — the controller's
-`UndeployAllCloudPoolsAsync` notifies the operator. New: when the pool is
-torn down, the operator additionally enumerates all managed workloads of
-the pool and `helm uninstall`s each.
+The controller's `UndeployAllCloudPoolsAsync` notifies the operator; when the pool is torn down the
+operator enumerates all managed workloads of the pool and uninstalls each.
 
 ## Implementation Phases
 
@@ -264,14 +265,14 @@ Five phases. Each phase is committable on its own and leaves the system in a wor
 
 ### Phase 5 — Documentation + Smoke Test
 
-1. Update `octo-communication-operator/docs/E2E-SMOKE-TEST.md` to cover the Helm deploy flow.
+1. ~~Update `octo-communication-operator/docs/E2E-SMOKE-TEST.md` to cover the Helm deploy flow.~~ Done.
 2. Update per-repo CLAUDE.md files (CK model section, Operator reconciler section, Studio form patterns).
 3. Add a runbook: "How to publish a new Helm chart version and roll it out."
 
 ## Open Questions / TODOs
 
 - **HelmRepositoryConfiguration scoping** is tenant-scoped per the decision above. When the Variables feature lands, we'll add a system-scope config that tenants can opt into instead of providing their own.
-- **Chart contract for secrets**: every chart we deploy must support `secretKeyRef` for secret-flagged values. Captured separately in `project-helm-chart-secret-contract.md` (memory) — TODO before the Phase-3 E2E test.
+- **Chart contract for secrets**: every chart we deploy must support `secretKeyRef` for secret-flagged values. Captured separately in `project-helm-chart-secret-contract.md` (memory). The chart-side requirement is stated in `docs/reconcilers.md`.
 - **Multiple replicas of the operator**: tracking of `OperatorConnectionManager.GetDeployedPools()` is process-local. Pre-existing TODO; not introduced by this refactor.
 
 ## References
