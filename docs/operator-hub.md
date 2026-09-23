@@ -28,7 +28,8 @@ The connection is auto-reconnecting via `OperatorHubClient`. Failures from the p
 only logs it. Reason: the CR is already gone when `DeletedAsync` fires, and during the tenant-delete
 cascade the tenant itself no longer exists at the controller — so the unregister roundtrip will
 respond with `TenantException`. Re-throwing would put the entity back in the KubeOps retry queue
-forever. The local connection is still stopped and the pool removed from `_deploymentSites` regardless.
+forever. Locally the site is removed from `_deploymentSites` and its `IsRegistered` flag cleared
+regardless; the SignalR connection is shared by every site and is not touched.
 
 ## Pool-Registration Retry Loop (AB#4371)
 

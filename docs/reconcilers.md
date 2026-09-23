@@ -180,12 +180,16 @@ the actual reason:
 
 1. **Pre-flight via `--dry-run=server`** (`UpgradeInstallDryRunAsync`,
    called before the real install in `WorkloadReconciler.DeployAsync`).
-   Helm renders the manifests and submits them to the apiserver with
-   `dryRun=All` — admission webhooks, OpenAPI schema validation and
-   RBAC all run, but no resources are created. Catches schema errors,
-   Gatekeeper/Kyverno rejections, RBAC issues and invalid
-   annotations in &lt;2s instead of letting the real install burn the
-   full atomic timeout. Throws `HelmException` with operation tag
+   Helm renders the chart with cluster access (`lookup` works),
+   validates the rendered manifests against the cluster's OpenAPI
+   schema and checks that no resource already belongs to another
+   release, then returns without applying anything. It does **not**
+   submit the objects with `dryRun=All`, so admission webhooks
+   (Gatekeeper/Kyverno) and write RBAC are not exercised and can still
+   fail the real install. What it does catch — template errors, missing
+   required values, schema violations, ownership conflicts — it catches
+   in seconds instead of letting the real install burn the full
+   rollback-on-failure timeout. Throws `HelmException` with operation tag
    `upgrade --install --dry-run=server {release}` on failure; the real
    install is then skipped entirely.
 

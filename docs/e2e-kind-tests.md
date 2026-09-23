@@ -14,7 +14,7 @@ does not.
 ```bash
 OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
   dotnet test --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj \
-  -c DebugL --filter "/*/*/AdapterPoolKindE2ETests/*"
+  -c DebugL -- --treenode-filter "/*/*/AdapterPoolKindE2ETests/*"
 ```
 
 Without `OCTO_OPERATOR_E2E_KUBECONTEXT` both tests report as **skipped**, never as passed — a green

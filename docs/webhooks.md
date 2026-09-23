@@ -11,5 +11,7 @@ applies_to: src/CommunicationOperator/Webhooks/**, src/CommunicationOperator/Ent
 - `DeploymentSiteMutator` is a no-op (`NoChanges()`).
 
 An empty or malformed `DeploymentSiteRtId` would otherwise surface only as a hub-side `FormatException` from
-the controller's `OperatorHub.RegisterDeploymentSiteAsync`, leaving the CR stuck at `Unregistered` with no
-local signal. Validating at admission turns a confusing remote failure into a clear local one.
+the controller's `OperatorHub.RegisterDeploymentSiteAsync`. `DeploymentSiteController.ReconcileAsync` catches
+it, writes `CommunicationStatus = "Failed: <message>"` on the CR and requeues the reconcile every minute, so
+the failure is visible but remote and retried forever. Validating at admission rejects the CR up front and
+turns a confusing remote failure into a clear local one.
