@@ -13,15 +13,17 @@ The operator can be configured via environment variables:
 | `OPERATOR__AUTOMANAGEDEPLOYMENTSITES` | Auto-create DeploymentSite CRs on tenant creation | `false` |
 | `OPERATOR__WATCHNAMESPACE` | Restricts the CR watcher to a single namespace. Required when multiple operator instances share one cluster (e.g. edge devices running one operator per target controller) so they don't race on each other's CRs. Leave empty to watch all namespaces. | _(empty — watch all)_ |
 | `OPERATOR__DEPLOYMENTSITENAMESPACE` | Namespace where auto-created CRs and per-tenant broker secrets live. Helm releases default to the same namespace unless the chart overrides it. | `octo` |
-| `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
+| `OPERATOR__PLATFORMNAMESPACE` | Namespace the deployment-site Helm releases land in. Empty resolves to `OPERATOR__DEPLOYMENTSITENAMESPACE`, which owner-reference garbage collection requires (Kubernetes forbids cross-namespace owner references). A different namespace is supported but disables the owner reference, and the operator says so once per deploy. | _(empty — same as DeploymentSiteNamespace)_ |
+| `OPERATOR__COMMUNICATIONCONTROLLERURI` | SignalR endpoint of the Communication Controller. **Required in both central and edge mode** — the `/operatorHub` connection is not gated on `AUTOMANAGEDEPLOYMENTSITES`. When empty the hub service logs a warning and exits, and pools reconciled from CRs are never registered with the controller (they stay `Unregistered` in the Studio). | _(required)_ |
+| `OPERATOR__WORKLOADCOMMUNICATIONCONTROLLERURI` | Controller URI projected into every deployed workload's Helm values. Empty projects `OPERATOR__COMMUNICATIONCONTROLLERURI`. Set it only when workloads cannot use the operator's own address, e.g. on local kind where the operator reaches a host-run controller through a pod hostAlias the adapters do not have (AB#4967). | _(empty — same as CommunicationControllerUri)_ |
 | `OPERATOR__DEFAULTDEPLOYMENTSITENAME` | Pool name for auto-created CRs | `default` |
 | `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to workload pods via the Helm chart values | _(none)_ |
 | `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Forwarded to workload pods via the Helm chart values (dev only) | `false` |
-| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManageDeploymentSites=true)_ |
 | `OPERATOR__BROKERVIRTUALHOST` | RabbitMQ virtual host | `/` |
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
-| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |
-| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManageDeploymentSites=true)_ |
+| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManageDeploymentSites=true)_ |
 | `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see AB#4417 below. | _(none)_ |
 | `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
 | `OPERATOR__AUTHURI` | Public URI of the identity service issuing the access tokens secured trigger nodes accept. Projected into each workload's Helm values as `authUri`. Must be the public issuer address, not a cluster-internal service name — the adapter compares it against the token's `iss` claim. | _(none)_ |
@@ -36,6 +38,8 @@ The operator can be configured via environment variables:
 | `OPERATOR__CLUSTERDEPENDENCIES__RABBITMQUSER` | RabbitMQ user projected into workload `clusterDependencies.rabbitMqUser`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATAHOST` | CrateDB host projected into workload `clusterDependencies.streamDataHost`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATAUSER` | CrateDB user projected into workload `clusterDependencies.streamDataUser`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__SYSTEMDATABASENAME` | MongoDB system database holding the tenant registry, projected into workload `clusterDependencies.systemDatabaseName`. Must match the core services' `serviceDefaults.systemDatabaseName` of the same instance, or every CK-model load fails with "Tenant does not exist" (AB#4944). Empty keeps the workload default `OctoSystem`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATASCHEMAINSTANCEPREFIX` | CrateDB schema instance prefix projected into workload `clusterDependencies.streamDataSchemaInstancePrefix`. Must match the core services' setting of the same instance, or a second instance's workloads read and write the unprefixed schemas of the first (AB#4946). Empty keeps the unprefixed schema names. | _(none)_ |
 | `OPERATOR__INGRESS__CLASSNAME` | Ingress class projected into workload `ingress.className`. | _(none)_ |
 | `OPERATOR__INGRESS__CLUSTERISSUER` | cert-manager ClusterIssuer projected into workload `ingress.annotations["cert-manager.io/cluster-issuer"]`. | _(none)_ |
 | `OPERATOR__INGRESS__TLS` | TLS flag projected into workload `ingress.tls`. Leave unset to keep the chart default. | _(unset)_ |
@@ -165,7 +169,7 @@ kubectl -n pool1 apply -f ./src/scripts/test-cluster-pool-local.yaml
 ## During development
 
 
-# Generate CRD and deployment files
+### Generate CRD and deployment files
 ```bash
 dotnet kubeops g op meshmakers-octo-communication-operator ./CommunicationOperator.csproj --out config --clear-out
 ```
@@ -185,5 +189,5 @@ dotnet build Octo.CommunicationOperator.sln -c DebugL
 dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build
 ```
 
-The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `CLAUDE.md` for details about the .NET 10 / MTP arguments.
+The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `AGENTS.md` → "Build & test" for the .NET 10 / MTP arguments.
 
