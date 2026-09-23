@@ -1,5 +1,6 @@
 ---
 description: Design record for the CK model and the controller-to-operator deploy contract. Background reading; current behaviour lives in reconcilers.md.
+background: true
 ---
 
 # Helm-Based Workload Deployment
@@ -173,7 +174,7 @@ The controller→operator contract. What the operator then does with the event i
 2. User clicks "Deploy Pool" OR explicitly deploys a single workload
    ("Deploy Workload" context menu action).
 
-3. Controller PoolService.DeployPoolAsync:
+3. Controller DeploymentSiteService.DeployPoolAsync:
    - Sets DeploymentState=Deployed on the Pool.
    - Enumerates managed workloads of the Pool.
    - For each Cloud workload, sends WorkloadDeployedAsync(tenantId, workloadDto)
@@ -229,7 +230,7 @@ Five phases. Each phase is committable on its own and leaves the system in a wor
 1. `HelmRepositoryService` (CRUD over GraphQL/REST).
 2. `WorkloadEncryptionService` — AES-256-GCM, master key from `OCTO_HELM_SECRET_KEY`.
 3. `ApplicationService` (CRUD over GraphQL).
-4. Extend `PoolService.DeployPoolAsync` to walk managed workloads, build per-workload DTOs, decrypt secrets, fire `WorkloadDeployedAsync`.
+4. Extend `DeploymentSiteService.DeployPoolAsync` to walk managed workloads, build per-workload DTOs, decrypt secrets, fire `WorkloadDeployedAsync`.
 5. Tests: encryption round-trip, workload DTO assembly.
 
 **Exit criteria:** Operator receives `WorkloadDeployedAsync` calls with fully-resolved values; operator still stubs the actual helm work.

@@ -1,14 +1,11 @@
 ---
-description: Helm workload reconciliation: values layering, secret tiers, chart-version pinning, stale-lock recovery, pre-flight, deploy watcher, cancellation, scale verb, adapter pools.
+description: Helm workload reconciliation: values layering, secret tiers, chart-version pinning, stale-lock recovery, the deploy watcher, cancellation and the scale verb.
 applies_to: src/CommunicationOperator/Reconcilers/**, src/CommunicationOperator/Helm/**
 ---
 
 # Workload Reconciliation — Design Notes
 
-Design notes for `src/CommunicationOperator/Reconcilers` and `Helm/`: how Adapter and
-Application workloads are deployed through helm and why each safeguard exists. Split out of
-this repo's `CLAUDE.md` so the always-loaded instructions stay short. Keep this file in sync when
-the behaviour changes (see "Mandatory before commit" in `CLAUDE.md`).
+How Adapter and Application workloads are deployed through helm, and why each safeguard exists.
 
 ## Helm Workload Reconciliation
 
@@ -41,40 +38,6 @@ the `WorkloadReconciler` over the `helm` CLI.
     does not match. `helm list` rather than `helm history` on purpose: the
     newest history entry may be a failed or still-pending attempt, and the
     question here is what is *running*.
-
-## Reconciliation Keeps the Installed Chart Version (AB#4955)
-
-An empty `ChartVersion` means "newest in the repository", resolved by helm at
-`helm upgrade` time. On a deploy a human triggered that is the request. But the
-controller also re-dispatches stranded `Pending` workloads on every pool
-re-registration (AB#4894) — which happens on operator restarts, blueprint
-re-applies, CK-model updates and `EnableCommunication`. Resolving anew there
-moved six prod-1 accounting workloads from chart 1.0.71 to 1.0.72 with nobody
-deploying them, and the new version happened to carry a defect (AB#4951), which
-is the only reason it was noticed.
-
-`WorkloadDeployedDto.IsReconciliation` (SDK contract) marks a dispatch as
-"restore what was supposed to be running" rather than a release decision.
-`WorkloadReconciler.ResolveChartVersionAsync` decides accordingly:
-
-| `IsReconciliation` | `ChartVersion` | Version used |
-|---|---|---|
-| false (user deploy) | empty | newest in the repository — unchanged, this is what `System.Communication.MainLatest` depends on |
-| false | pinned | the pin |
-| true | pinned | the pin (helm is not even asked) |
-| true | empty | the version of the **installed release**, read back via `GetInstalledChartVersionAsync` |
-| true | empty, nothing installed | newest — a reconcile for a release that was never installed is a first install |
-
-The resolved version feeds both the `--dry-run=server` pre-flight and the real
-install, so the pre-flight validates the chart that actually gets applied. The
-lookup is best effort: a helm failure is logged and the deploy proceeds with the
-workload's own (empty) version, because recovering the stranded workload matters
-more than pinning it.
-
-The flag is additive and defaults to false, so an operator that pre-dates it
-behaves exactly as before, and a controller that pre-dates it never sets it.
-That mixed-fleet window is why the controller still writes a warning event on
-every unpinned re-dispatch.
 
 - `Reconcilers/WorkloadContextValuesBuilder` — turns the operator's own
   `OperatorOptions` (cluster-internal Mongo/RabbitMQ/CrateDB hosts,
@@ -116,11 +79,9 @@ every unpinned re-dispatch.
 
   1. **`secrets.rabbitmq`** (from `BrokerPassword`) — injected
      **unconditionally** whenever `BrokerPassword` is set. RabbitMQ is
-     the controller↔adapter command bus; every adapter needs it
-     regardless of whether it also touches data stores. Lumping this
-     into the cluster-secrets gate previously made pure edge adapters
-     (Modbus / Loxone) fail the chart's mandatory `secrets.rabbitmq`
-     check even though they have no business with Mongo or CrateDB.
+     the controller↔adapter command bus and every adapter needs it; behind
+     the data-store gate, pure edge adapters (Modbus / Loxone) fail the
+     chart's mandatory `secrets.rabbitmq` check.
 
   2. **`secrets.rootCa`** (from `RootCaCertificate`, AB#4417) — injected
      **unconditionally** whenever `RootCaCertificate` is set, same gate
@@ -131,18 +92,11 @@ every unpinned re-dispatch.
      `ReceivesClusterSecrets=false` (e.g. the simulation adapter) still
      opens a TLS connection to the Communication Controller and needs
      the same trust anchor or the handshake fails and the workload never
-     registers. Unlike every other entry here, this one is **not**
-     secret-flagged (`IsSecret = false`) — the workload chart's own
-     `secrets.rootCa` handling (`templates/secret.yaml` +
-     `templates/deployment.yaml`, mirroring the operator chart's own
-     trust-splice init container) `b64enc`s `.Values.secrets.rootCa`
-     directly and requires a plain string; a `valueFrom.secretKeyRef` map
-     there would break chart rendering. `RootCaCertificate` itself
-     reaches the operator process the same way `BrokerPassword` does — a
-     `secretKeyRef`-backed environment variable (`OPERATOR__ROOTCACERTIFICATE`)
-     sourced from the operator chart's own `{fullname}-ca` Secret (the
-     same Secret that already backs the operator's own trust-splice init
-     container).
+     registers. Unlike every other entry here it is **not** secret-flagged
+     (`IsSecret = false`): the workload chart `b64enc`s
+     `.Values.secrets.rootCa` directly and requires a plain string, so a
+     `valueFrom.secretKeyRef` map there would break rendering. How `RootCaCertificate` reaches the operator
+     process: `README.md` → `OPERATOR__ROOTCACERTIFICATE`.
 
   3. **Data-store secrets** (`secrets.databaseUser`,
      `secrets.databaseAdmin`, `secrets.streamDataPassword` from
@@ -155,30 +109,58 @@ every unpinned re-dispatch.
      blocks entirely (see `octo-plug-modbus`, `octo-adapter-loxone`).
 
   Injected entries are prepended so any entity-supplied override on the
-  same path still wins. Secret-flagged values then flow through the
-  normal secret-flagged pipeline: materialised into
-  `{release}-octo-secrets`, referenced from the chart via
-  `valueFrom.secretKeyRef`. Each adapter chart's `secrets.*` block must
+  same path still wins. Each adapter chart's `secrets.*` block must
   accept both plaintext strings (legacy) and `valueFrom` maps for this
   contract to work; see `octo-mesh-adapter` / `octo-eda-adapter` chart
   `templates/_helpers.tpl` (`octo-mesh.secretEnv`). `secrets.rootCa` is
   the one exception: it is never secret-flagged, so it always renders as
   a plain literal in `values-overrides.yaml`.
 
+## Reconciliation Keeps the Installed Chart Version (AB#4955)
+
+An empty `ChartVersion` means "newest in the repository", resolved by helm at
+`helm upgrade` time. On a deploy a human triggered that is the request. But the
+controller also re-dispatches stranded `Pending` workloads on every pool
+re-registration (AB#4894) — which happens on operator restarts, blueprint
+re-applies, CK-model updates and `EnableCommunication`. Resolving anew there
+silently upgrades workloads nobody deployed (seen on prod-1, where the new chart carried AB#4951).
+
+`WorkloadDeployedDto.IsReconciliation` (SDK contract) marks a dispatch as
+"restore what was supposed to be running" rather than a release decision.
+`WorkloadReconciler.ResolveChartVersionAsync` decides accordingly:
+
+| `IsReconciliation` | `ChartVersion` | Version used |
+|---|---|---|
+| false (user deploy) | empty | newest in the repository — unchanged, this is what `System.Communication.MainLatest` depends on |
+| false | pinned | the pin |
+| true | pinned | the pin (helm is not even asked) |
+| true | empty | the version of the **installed release**, read back via `GetInstalledChartVersionAsync` |
+| true | empty, nothing installed | newest — a reconcile for a release that was never installed is a first install |
+
+The resolved version feeds both the `--dry-run=server` pre-flight and the real
+install, so the pre-flight validates the chart that actually gets applied. The
+lookup is best effort: a helm failure is logged and the deploy proceeds with the
+workload's own (empty) version, because recovering the stranded workload matters
+more than pinning it.
+
+The flag is additive and defaults to false, so an operator that pre-dates it
+behaves exactly as before, and a controller that pre-dates it never sets it.
+That mixed-fleet window is why the controller still writes a warning event on
+every unpinned re-dispatch.
+
 ## Stale Helm-Lock Recovery (AB#4894)
 
 A helm process killed mid-upgrade — e.g. the operator pod replaced by a rollout while a deploy
 was in flight — leaves the release's newest revision in a `pending-*` status. That lock blocks
 every later install/upgrade/rollback with "another operation is in progress" and never clears
-itself; the only remedy used to be a manual Undeploy→Deploy cycle (observed live on
-prod-1/energyiq, 2026-08-26). Before the pre-flight, `WorkloadReconciler.DeployAsync` calls
+itself short of a manual Undeploy→Deploy cycle. Before the pre-flight, `WorkloadReconciler.DeployAsync` calls
 `TryClearStaleHelmLockAsync`:
 
 1. `IHelmRunner.GetLatestReleaseRevisionAsync` (`helm history {release} -o json --max 1`;
    `null` when the release does not exist).
 2. Only when the newest revision `IsPending`: read the creation timestamp of the release
    secret `sh.helm.release.v1.{release}.v{rev}` via
-   `ICommunicationPoolKubernetesGateway.GetSecretCreationTimestampAsync`.
+   `IDeploymentSiteKubernetesGateway.GetSecretCreationTimestampAsync`.
 3. Only when the secret is older than `WorkloadReconciler.StaleHelmLockThreshold` (default
    10 min — comfortably above helm's 5-min atomic timeout, so a live run on the outgoing pod
    of a rolling operator upgrade is never robbed of its lock): delete the secret and log a
@@ -309,37 +291,28 @@ The controller's pool-service path is serial per workload so this
 should not happen in practice; the explicit guard turns "what if" into
 a controlled failure with an actionable message.
 
-**Docker image** (`src/CommunicationOperator/Dockerfile`) downloads the
-official `helm` binary tarball from `get.helm.sh` (CNAME for the helm
-GitHub Releases) — the previous baltocdn.com apt-repo path was blocked
-on the `meshmakers-ci-agents` pool. Version is pinned via the
-`HELM_VERSION` build-arg (default `v4.2.4`; Helm 4 — the reconciler passes `--rollback-on-failure`, the Helm 4 replacement for `--atomic`); multi-arch builds work
-because `TARGETARCH` is forwarded by Buildx. `HELM_CONFIG_HOME` /
-`HELM_CACHE_HOME` / `HELM_DATA_HOME` are set under `/operator/` so the
-non-root `operator-user` can write the repo cache.
+## Docker Image
 
-**Internals visible to tests:** `InternalsVisibleTo` for the test
-assembly was added so `WorkloadReconciler.ReleaseName` /
-`SecretName` / `RepoAlias` (the deterministic helpers) can be asserted
-directly.
+`src/CommunicationOperator/Dockerfile` downloads the official `helm` tarball from `get.helm.sh`;
+the baltocdn.com apt repo is blocked on the `meshmakers-ci-agents` pool, so do not switch back.
+`HELM_VERSION` pins it (default `v4.2.4`; Helm 4, hence `--rollback-on-failure` rather than
+`--atomic`), and Buildx forwards `TARGETARCH` for multi-arch builds. `HELM_CONFIG_HOME` /
+`HELM_CACHE_HOME` / `HELM_DATA_HOME` sit under `/operator/` so the non-root `operator-user` can
+write the repo cache.
 
-**Shared k8s-name sanitiser** (`Common/K8sNaming`): both the workload
-reconciler and the `CommunicationPoolManager` derive Kubernetes resource
-names / label values from CK entity attributes (tenantId, poolName,
-workloadName) that may contain whitespace, uppercase letters, or other
-characters the apiserver rejects with a 422 (e.g. a pool literally
-named `"Communication Pool"` produced
-`sbeg-communication pool-octo-mesh-connection`, which fails RFC 1123).
-`K8sNaming.DnsName` returns a strict subdomain segment (lowercase,
-`[a-z0-9-]`, dashes collapsed, capped at 53 chars by default for
-parity with Helm's release-name limit). `K8sNaming.LabelValue` keeps
-the laxer label alphabet (also allows `_` and `.`, returns `"unknown"`
-for empty input, capped at 63). `WorkloadReconciler.ReleaseName` /
-`SanitizeLabelValue` are now thin delegates so both call sites stay in
-lockstep; the original CK pool/workload name is preserved on every
-generated resource as the
-`octo-mesh.meshmakers.io/pool-name` /
-`octo-mesh.meshmakers.io/workload-name` annotation.
+## Resource Naming (`Common/K8sNaming`)
+
+Kubernetes names are built from CK values such as `tenantId` and `workloadName`, which may contain
+whitespace or uppercase letters the apiserver rejects with a 422. The workload reconciler and
+`DeploymentSiteManager` both sanitise through `K8sNaming`: `DnsName` returns a strict RFC 1123
+segment (lowercase `[a-z0-9-]`, dashes collapsed, 53 chars by default for parity with Helm's
+release-name limit); `LabelValue` keeps the laxer label alphabet (`_` and `.` allowed, `"unknown"`
+for empty input, 63 chars). `WorkloadReconciler.ReleaseName` / `SanitizeLabelValue` delegate to it
+so both call sites stay in lockstep, and every generated resource keeps the original workload name
+in the `octo-mesh.meshmakers.io/workload-name` annotation.
+
+The test assembly has `InternalsVisibleTo`, so `WorkloadReconciler.ReleaseName` / `SecretName` /
+`RepoAlias` can be asserted directly.
 
 ## Workload Scale Verb (AB#4917 — On-Demand Lifecycle AB#4914)
 
@@ -348,7 +321,7 @@ changes through a dedicated hub callback instead of helm:
 
 - `IOperatorHubCallbacks.ScaleWorkloadAsync(ScaleWorkloadDto)` →
   `OperatorHubService.ScaleWorkloadAsync` → `WorkloadReconciler.ScaleAsync` →
-  `ICommunicationPoolKubernetesGateway.ScaleDeploymentsByInstanceAsync`. The gateway lists
+  `IDeploymentSiteKubernetesGateway.ScaleDeploymentsByInstanceAsync`. The gateway lists
   Deployments by the `app.kubernetes.io/instance={release}` label (never derives resource
   names — Application charts may render `{release}-{chart}`) and merge-patches
   `{"spec":{"replicas":N}}` on each. A plain Deployment patch, not the scale subresource,
@@ -378,23 +351,23 @@ through the same `DeployAsync` / `UndeployAsync` / `ScaleAsync` path as every ot
 one release, and the AB#4917 scale verb is the scaling mechanism. Three things are different.
 
 **1. Namespace.** `WorkloadReconciler.ResolveNamespace` sends a pool to `PlatformNamespace` and
-everything else to `PoolNamespace`. A pool member runs work for tenants other than the one that owns
+everything else to `DeploymentSiteNamespace`. A pool member runs work for tenants other than the one that owns
 it, so it deliberately does not sit among that tenant's own workloads — consumption is attributed to
 the tenant whose work ran, not to the lender. Deploy, undeploy, scale, the per-release secret, the
 stale-lock check and the diagnostics collector all use the resolved namespace.
 
-🔴 **`PlatformNamespace` defaults to empty, which resolves to `PoolNamespace`, and that is a
+🔴 **`PlatformNamespace` defaults to empty, which resolves to `DeploymentSiteNamespace`, and that is a
 decision rather than a gap.** Kubernetes forbids cross-namespace owner references: a namespaced
 dependent whose owner lives elsewhere is treated as having a *missing* owner and is **deleted** by
-the garbage collector. The owner of a pool is the lending tenant's `CommunicationPool` CR, which
-lives in `PoolNamespace`. So the two namespaces have to be the same one for owner-reference garbage
-collection to exist at all — and `PoolNamespace` is already a platform namespace rather than a
+the garbage collector. The owner of a pool is the lending tenant's `DeploymentSite` CR, which
+lives in `DeploymentSiteNamespace`. So the two namespaces have to be the same one for owner-reference garbage
+collection to exist at all — and `DeploymentSiteNamespace` is already a platform namespace rather than a
 tenant namespace, so the default satisfies both halves of the requirement. Configuring a distinct
 platform namespace is supported and moves the release there, but the operator then refuses to write
 the owner reference and logs why, once per deploy.
 
 **2. Owner references.** For a pool, `DeployAsync` resolves an owner reference to the CR
-`{tenantId}-{poolRtId}` (`CommunicationPoolManager.GetCrName`, shared so both call sites cannot
+`{tenantId}-{deploymentSiteRtId}` (`DeploymentSiteManager.GetCrName`, shared so both call sites cannot
 drift) and puts it on the operator-owned `{release}-octo-secrets` Secret and — **after** the real
 install, because helm creates them — on the release's Deployments. Deleting the tenant deletes the
 CR and Kubernetes takes the pool with it, which is the safety net behind the controller's undeploy

@@ -17,11 +17,11 @@ The operator can be configured via environment variables:
 | `OPERATOR__DEFAULTDEPLOYMENTSITENAME` | Pool name for auto-created CRs | `default` |
 | `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to workload pods via the Helm chart values | _(none)_ |
 | `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Forwarded to workload pods via the Helm chart values (dev only) | `false` |
-| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManageDeploymentSites=true)_ |
 | `OPERATOR__BROKERVIRTUALHOST` | RabbitMQ virtual host | `/` |
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
-| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |
-| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManageDeploymentSites=true)_ |
+| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManageDeploymentSites=true)_ |
 | `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see AB#4417 below. | _(none)_ |
 | `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
 | `OPERATOR__AUTHURI` | Public URI of the identity service issuing the access tokens secured trigger nodes accept. Projected into each workload's Helm values as `authUri`. Must be the public issuer address, not a cluster-internal service name — the adapter compares it against the token's `iss` claim. | _(none)_ |
@@ -185,5 +185,5 @@ dotnet build Octo.CommunicationOperator.sln -c DebugL
 dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build
 ```
 
-The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `CLAUDE.md` for details about the .NET 10 / MTP arguments.
+The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `AGENTS.md` → "Build & test" for the .NET 10 / MTP arguments.
 
