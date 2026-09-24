@@ -229,6 +229,22 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                     // created by helm, so there is nothing to stamp before this point.
                     await ApplyDeploymentSiteOwnerReferenceAsync(release, ns, ownerReference, deployToken);
                 }
+                catch (HelmException ex) when (HelmFieldOwnershipConflict.IsFieldOwnershipConflict(ex.StdErr))
+                {
+                    // 🔴 AB#5325 — a field-ownership conflict, handled before the diagnostics path
+                    // below, because that path has nothing to contribute here: no pod was ever
+                    // created, so there are no events to collect and the ten-second budget would be
+                    // spent proving that. What the operator needs is the cause and the way out.
+                    var explanation = HelmFieldOwnershipConflict.Explain(release, ns, ex.StdErr);
+                    _logger.LogError(ex, "Workload '{Release}' deploy refused by server-side apply. {Explanation}",
+                        release, explanation);
+
+                    // The explanation REPLACES helm's stderr rather than being appended to it: this
+                    // text lands on the workload's LastDeploymentError, and helm's own account is a
+                    // wall of rollback noise that repeats the conflict three times and names no
+                    // remedy. The original is on the log line above, with its stack.
+                    throw new HelmException(ex.Operation, ex.ExitCode, ex.StdOut, explanation);
+                }
                 catch (HelmException ex)
                 {
                     // --rollback-on-failure leaves only an opaque helm-side error

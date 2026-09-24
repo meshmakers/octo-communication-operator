@@ -207,6 +207,56 @@ rows of the table above plus the pre-flight pinning) and the
   the one exception: it is never secret-flagged, so it always renders as
   a plain literal in `values-overrides.yaml`.
 
+### A Hand-Patched Workload Locks the Operator Out (AB#5325)
+
+Helm 4 applies **server-side** by default (`--server-side auto`), so a field another manager owns is
+not merged — the apply is refused. The only way a foreign manager appears on a workload this operator
+deploys is a person writing to the object directly: `kubectl set image`, `kubectl set env` and
+`kubectl patch` all leave a manager called `kubectl-set` / `kubectl-patch` behind.
+
+🔴 **It is not transient, and a retry makes it worse.** The ownership lives in the object's
+`managedFields`, so it is there on every later deploy — and helm's own rollback applies the same way
+and fails for the same reason, which leaves the release in `failed` state. Observed twice on
+2026-09-23 on the local kind cluster, on the operator's own Deployment (`kubectl set image`, 16.9.)
+and on an adapter pool member (`kubectl set env`, 20.9.), both legitimate stop-gaps at the time:
+
+```
+UPGRADE FAILED: conflict occurred while applying object octo/accounting-…aa01 apps/v1,
+Kind=Deployment: Apply failed with 1 conflict: conflict with "kubectl-set" using apps/v1:
+.spec.template.spec.containers[name="mesh-adapter"].env[name="OCTO_SYSTEM__DATABASEHOST"].value
+```
+
+Two pieces:
+
+- **`Helm/HelmFieldOwnershipConflict`** recognises the shape and answers with the cause and both ways
+  out. `WorkloadReconciler.DeployAsync` catches it in an exception filter **before** the diagnostics
+  path, because that path has nothing to contribute here — no pod was ever created, so there are no
+  events to collect and the ten-second budget would be spent proving it. The explanation **replaces**
+  helm's stderr on the way to the workload's `LastDeploymentError` (helm's own account repeats the
+  conflict three times and names no remedy); the original is on the log line above it, with its stack.
+- **`OperatorOptions.Helm.ForceConflicts`** (`OPERATOR__HELM__FORCECONFLICTS`, default **false**) adds
+  `--force-conflicts` so a later deploy takes ownership instead of refusing. Off by default on
+  purpose: it silently overwrites whatever a person set by hand, on every deploy from then on — an
+  operator may well want that, but it has to be their call. **Never** applied to the `--dry-run=server`
+  pre-flight, which asks "would this apply"; forcing its way past a conflict there answers a question
+  nobody asked. There is no chart value for it — the env var is the surface, deliberately, because
+  this is a lever someone reaches for during an incident and not a deployment-time setting.
+
+The other remedy needs no option and is usually the right one: delete the Deployment and let the
+chart own it again. Both are named in the error.
+
+⚠️ **A conflict with helm's own manager is not a hand patch** and is deliberately not reported as one
+— it would send an operator looking for a person who was never there.
+
+Tests: `Helm/HelmFieldOwnershipConflictTests` — 🔴 driven by **verbatim** helm stderr captured from
+both incidents, which is what caught the parser bug the invented sample could not: helm embeds the
+failure in a quoted `error="…"` field, so the field paths arrive with their quotes **escaped**, and a
+character class without the backslash cut every path off at `containers[name=` — after
+de-duplication they all collapsed into one and the message named no field at all. Also the plural
+`conflicts with` / bulleted shape the rollback produces, several managers on one object, and that
+every unrelated helm failure still falls through to the diagnostics path. Flag wiring in
+`Helm/HelmRunnerTests` (default off, on when set, never on the dry run).
+
 ### Stale Helm-Lock Recovery (AB#4894)
 
 A helm process killed mid-upgrade — e.g. the operator pod replaced by a rollout while a deploy
@@ -738,6 +788,7 @@ Key options:
 | `WatchNamespace` | Restricts the CR watcher to a single namespace. When null/empty (default), the operator watches all namespaces cluster-wide. Required when running multiple operator instances on the same cluster (e.g. one per target controller on an edge device) so they don't race on the same CRs. Wired via `KubeOps.Abstractions.Builder.OperatorSettingsBuilder.WithNamespace()`. |
 | `CommunicationControllerUri` | SignalR endpoint of the Controller. Required in **both** central and edge modes for `OperatorHubService` to start. When empty, the hub service logs a warning and exits, and `IOperatorHubInvoker.RegisterDeploymentSiteAsync` becomes a no-op (CR-reconcile finishes locally but the controller never sees the pool). |
 | `WorkloadCommunicationControllerUri` | Controller URI projected into every deployed workload's Helm values. Empty (default) projects `CommunicationControllerUri` — one address serves the operator's own hub connection and the workloads, correct wherever both resolve it the same way. Set it when the operator needs an address the workloads cannot use (local kind: host-run controller reachable for the operator via a pod hostAlias only — the adapters then sat at Unregistered while the operator looked healthy, AB#4967). |
+| `Helm.ForceConflicts` | Adds `--force-conflicts` to `helm upgrade`, so a server-side apply takes ownership of fields another field manager holds instead of refusing (AB#5325). Default **false** — the only source of a foreign manager is a person patching the object by hand, and forcing past that overwrites what they set, silently, on every deploy from then on. Never applied to the `--dry-run=server` pre-flight. Env only (`OPERATOR__HELM__FORCECONFLICTS`); no chart value, because this is an incident lever rather than a deployment setting. The alternative remedy needs no option: delete the Deployment so the chart owns it again. |
 | `PoolRegistrationRetrySeconds` | Cadence of the pool-registration retry loop (see "Pool-Registration Retry Loop" above). Default 30; fractional values allowed; `<= 0` disables the loop. |
 | `PoolNamespace` | Namespace where auto-created `DeploymentSite` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
 | `PlatformNamespace` | Namespace adapter-pool workloads (AB#4924) are deployed into. Empty (default) resolves to `PoolNamespace`, which is required for owner-reference garbage collection to work at all — Kubernetes forbids cross-namespace owner references and deletes dependents that carry one. Setting a distinct namespace moves the release there and disables the owner reference, with a warning per deploy. |
