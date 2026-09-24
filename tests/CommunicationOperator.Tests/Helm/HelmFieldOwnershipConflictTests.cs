@@ -34,6 +34,70 @@ internal class HelmFieldOwnershipConflictTests
         Error: UPGRADE FAILED: an error occurred while rolling back the release. original upgrade error: conflict occurred while applying object octo/accounting-49240000000000000000aa01 apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with "kubectl-set" using apps/v1: .spec.template.spec.containers[name="mesh-adapter"].env[name="OCTO_SYSTEM__DATABASEHOST"].value
         """;
 
+    /// <summary>
+    ///     🔴 Captured from the first LIVE run of this code, 2026-09-24 — and it found three defects the
+    ///     two samples above did not. Helm's <c>error="…"</c> field carries its line breaks as the two
+    ///     characters <c>\n</c>, so stripping every backslash glued the next word onto the path
+    ///     (<c>…DATABASEHOST"].valuenconflicts</c>); trailing <c>"</c> and <c>:</c> made one field look
+    ///     like three; and the manager here is <c>unknown</c> — the operator's OWN scale patch, which
+    ///     named no field manager, not a person with kubectl.
+    /// </summary>
+    private const string LiveTwoManagerStdErr =
+        """
+        level=WARN msg="upgrade failed" name=accounting-49240000000000000000aa01 error="conflict occurred while applying object octo/accounting-49240000000000000000aa01 apps/v1, Kind=Deployment: Apply failed with 2 conflicts: conflicts with \"kubectl-set\" using apps/v1:\n- .spec.template.spec.containers[name=\"mesh-adapter\"].env[name=\"OCTO_SYSTEM__DATABASEHOST\"].value\nconflicts with \"unknown\" using apps/v1:\n- .spec.replicas"
+        Error: UPGRADE FAILED: an error occurred while rolling back the release. original upgrade error: conflict occurred while applying object octo/accounting-49240000000000000000aa01 apps/v1, Kind=Deployment: Apply failed with 2 conflicts: conflicts with "kubectl-set" using apps/v1:
+        - .spec.template.spec.containers[name="mesh-adapter"].env[name="OCTO_SYSTEM__DATABASEHOST"].value
+        """;
+
+    [Test]
+    public async Task TheLiveShape_NamesBothManagersAndNoGluedWords()
+    {
+        var message = HelmFieldOwnershipConflict.Explain("accounting-49240000000000000000aa01", "octo",
+            LiveTwoManagerStdErr);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(HelmFieldOwnershipConflict.ForeignManagers(LiveTwoManagerStdErr).Count).IsEqualTo(2);
+        // The defect: the escaped line break was stripped and glued the next word on.
+        await Assert.That(message).DoesNotContain("valuenconflicts");
+        await Assert.That(message).Contains("OCTO_SYSTEM__DATABASEHOST");
+        await Assert.That(message).Contains(".spec.replicas");
+        // …and only once, not as .spec.replicas / .spec.replicas" / .spec.replicas:
+        await Assert.That(message).DoesNotContain(".spec.replicas\"");
+        await Assert.That(message).DoesNotContain(".spec.replicas:");
+    }
+
+    /// <summary>
+    ///     🔴 The attribution has to be right or the message is worse than none: the first live run told
+    ///     an operator that a person had patched a field the operator itself had written.
+    /// </summary>
+    [Test]
+    public async Task AnUnnamedManager_IsExplainedAsSuchAndNotBlamedOnAPerson()
+    {
+        var message = HelmFieldOwnershipConflict.Explain("rel", "octo", LiveTwoManagerStdErr);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(message).Contains("the name Kubernetes records when a writer sets no");
+        await Assert.That(message).Contains("most likely a past scale rather than a person");
+        // The kubectl half is still called what it is, because this stderr has both.
+        await Assert.That(message).Contains("hand-written change");
+    }
+
+    [Test]
+    public async Task TheOperatorsOwnManager_IsNamedAsItsOwnOutOfBandWrite()
+    {
+        const string stdErr =
+            """
+            Error: UPGRADE FAILED: Apply failed with 1 conflict: conflict with "octo-communication-operator" using apps/v1: .spec.replicas
+            """;
+
+        var message = HelmFieldOwnershipConflict.Explain("rel", "octo", stdErr);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(message).Contains("this operator's own out-of-band write");
+        await Assert.That(message).Contains("AB#5350");
+        await Assert.That(message).DoesNotContain("hand-written change");
+    }
+
     [Test]
     public async Task ASingleConflict_IsRecognisedAndNamesItsManager()
     {

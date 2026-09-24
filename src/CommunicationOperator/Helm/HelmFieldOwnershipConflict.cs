@@ -39,7 +39,21 @@ public static partial class HelmFieldOwnershipConflict
     /// </summary>
     private static readonly string[] HelmOwnManagers = ["helm", "helm-controller"];
 
-    [GeneratedRegex("""conflicts?\s+with\s+"(?<manager>[^"]+)"\s+using""",
+    /// <summary>The name this operator writes under when it patches outside helm (AB#5325).</summary>
+    private const string OperatorFieldManager = "octo-communication-operator";
+
+    /// <summary>What Kubernetes records when the writer set no field manager at all.</summary>
+    private const string UnnamedManager = "unknown";
+
+    /// <remarks>
+    ///     🔴 The optional backslashes are load-bearing, for the same reason they are in
+    ///     <see cref="FieldPathPattern" />: helm reports the failure twice, once inside a quoted
+    ///     <c>error="…"</c> field where every quote is <c>\"</c>, and once unquoted on its final
+    ///     <c>Error:</c> line. A pattern that only accepts bare quotes therefore sees whatever the
+    ///     unquoted line happens to repeat — measured live on 2026-09-24, where it reported one
+    ///     manager of two, because the second conflict appeared only in the escaped form.
+    /// </remarks>
+    [GeneratedRegex("""conflicts?\s+with\s+\\?"(?<manager>[^"\\]+)\\?"\s+using""",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ManagerPattern();
 
@@ -102,9 +116,34 @@ public static partial class HelmFieldOwnershipConflict
             ? $"the field manager '{managers[0]}' owns fields of the object"
             : $"the field managers {string.Join(", ", managers.Select(m => $"'{m}'"))} own fields of the object");
         message.Append(" and server-side apply refuses to overwrite them. ");
-        message.Append(
-            "That manager is not helm, so the object was written to directly — kubectl set image / set env / patch " +
-            "leave exactly this behind. ");
+        message.Append(managers.Count == 1
+            ? "It is not helm, so something wrote to the object outside the chart. "
+            : "None of them is helm, so something wrote to the object outside the chart. ");
+
+        // 🔴 Naming the writer correctly matters more than naming it at all: the first live run of
+        // this code blamed "a person with kubectl" for a field the operator's OWN scale path had
+        // written (recorded as "unknown" because that patch named no field manager — AB#5325).
+        if (managers.Contains(OperatorFieldManager, StringComparer.Ordinal))
+        {
+            message.Append(
+                $"'{OperatorFieldManager}' is this operator's own out-of-band write — the workload scale " +
+                "path patches spec.replicas directly, and helm contests that field (AB#5350). ");
+        }
+
+        if (managers.Contains(UnnamedManager, StringComparer.Ordinal))
+        {
+            message.Append(
+                "'unknown' is not a missing diagnosis: it is the name Kubernetes records when a writer sets no " +
+                "field manager at all. Operator builds before AB#5325 scaled workloads that way, so on an existing " +
+                "workload this is most likely a past scale rather than a person. ");
+        }
+
+        if (managers.Any(m => m.StartsWith("kubectl", StringComparison.OrdinalIgnoreCase)))
+        {
+            message.Append(
+                "A 'kubectl-*' manager is a hand-written change — kubectl set image / set env / patch leave exactly " +
+                "this behind. ");
+        }
 
         if (fields.Count > 0)
         {
@@ -130,10 +169,29 @@ public static partial class HelmFieldOwnershipConflict
         }
 
         return FieldPathPattern().Matches(helmStdErr)
-            // The escaping belongs to helm's own quoting of the error, not to the field path.
-            .Select(match => match.Groups["path"].Value.Replace("\\", string.Empty).TrimEnd('.', ',', ';'))
+            .Select(match => CleanPath(match.Groups["path"].Value))
+            .Where(path => path.Length > 1)
             .Distinct(StringComparer.Ordinal)
             .Take(10)
             .ToList();
+    }
+
+    /// <summary>
+    ///     Strips helm's own quoting from one captured path.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 Only the QUOTE escapes are removed, not every backslash. Helm's <c>error="…"</c> field also
+    ///     carries its line breaks as the two characters <c>\n</c>, and removing the backslash there
+    ///     glued the next word onto the path — the first live run produced
+    ///     <c>…DATABASEHOST"].valuenconflicts</c>. Trailing punctuation goes too, or
+    ///     <c>.spec.replicas</c>, <c>.spec.replicas"</c> and <c>.spec.replicas:</c> survive
+    ///     de-duplication as three different fields.
+    /// </remarks>
+    private static string CleanPath(string captured)
+    {
+        var atLineBreak = captured.IndexOf("\\n", StringComparison.Ordinal);
+        var path = atLineBreak >= 0 ? captured[..atLineBreak] : captured;
+
+        return path.Replace("\\\"", "\"").TrimEnd('.', ',', ';', ':', '"', '\\', '-');
     }
 }

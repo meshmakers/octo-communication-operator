@@ -60,6 +60,15 @@ public class DeploymentSiteKubernetesGateway : IDeploymentSiteKubernetesGateway
     public Task DeleteSecretAsync(string @namespace, string name, CancellationToken cancellationToken = default) =>
         _kubernetesClient.CoreV1.DeleteNamespacedSecretAsync(name, @namespace, cancellationToken: cancellationToken);
 
+    /// <summary>
+    ///     Field manager this operator writes under when it patches an object outside helm (AB#5325).
+    /// </summary>
+    /// <remarks>
+    ///     Naming it is not cosmetic: an unnamed write is recorded as the manager <c>unknown</c>, which
+    ///     is both unattributable and indistinguishable from a person's <c>kubectl patch</c>.
+    /// </remarks>
+    public const string FieldManagerName = "octo-communication-operator";
+
     public async Task<int> ScaleDeploymentsByInstanceAsync(string @namespace, string instance, int replicas,
         CancellationToken cancellationToken = default)
     {
@@ -70,8 +79,16 @@ public class DeploymentSiteKubernetesGateway : IDeploymentSiteKubernetesGateway
         var patched = 0;
         foreach (var deployment in deployments.Items)
         {
+            // 🔴 AB#5325: name the field manager. Without one the apiserver records this write under
+            // the manager "unknown", and Helm 4's server-side apply then reports a conflict with
+            // "unknown" on .spec.replicas on the NEXT deploy of the same workload — measured on
+            // 2026-09-23, where a pool scale-up at 08:58 made the following deploy fail. An
+            // anonymous manager also makes the conflict unattributable: the operator's own scale
+            // path is indistinguishable from a person's kubectl patch, and the diagnosis then
+            // blames a human who never touched it. The conflict itself is AB#5350.
             await _kubernetesClient.AppsV1.PatchNamespacedDeploymentAsync(patch,
-                deployment.Metadata.Name, @namespace, cancellationToken: cancellationToken);
+                deployment.Metadata.Name, @namespace, fieldManager: FieldManagerName,
+                cancellationToken: cancellationToken);
             patched++;
         }
 

@@ -248,14 +248,43 @@ chart own it again. Both are named in the error.
 ⚠️ **A conflict with helm's own manager is not a hand patch** and is deliberately not reported as one
 — it would send an operator looking for a person who was never there.
 
-Tests: `Helm/HelmFieldOwnershipConflictTests` — 🔴 driven by **verbatim** helm stderr captured from
-both incidents, which is what caught the parser bug the invented sample could not: helm embeds the
+🔴 **Neither is a conflict with `unknown` or with the operator itself — and the first live run of this
+code got that wrong.** It told an operator that someone had patched a field by hand that the
+**operator's own scale verb** had written: `ScaleDeploymentsByInstanceAsync` merge-patched
+`spec.replicas` without a `fieldManager`, so Kubernetes recorded the writer as `unknown`. Two
+consequences, both handled:
+
+- The patch now writes as `octo-communication-operator`
+  (`DeploymentSiteKubernetesGateway.FieldManagerName`), so the write is attributable at all.
+- The explanation distinguishes three writers: the operator's own out-of-band write, a bare `unknown`
+  (which it spells out as "the name Kubernetes records when a writer sets no field manager" and
+  attributes to a past scale rather than to a person), and a `kubectl-*` manager, which is the only
+  one it calls a hand-written change.
+
+The **conflict** that scale causes is a separate defect and is **not** fixed here — `spec.replicas` is
+rendered by the chart, so helm wants the field the scale verb owns, and every scaled pool fails its
+next deploy. See **AB#5350**; the remedy there is to pin `--set replicaCount=<live>` so the values
+agree (server-side apply only conflicts when the applier would *change* a foreign-owned field), which
+generalises the hibernation pin that already exists.
+
+Tests: `Helm/HelmFieldOwnershipConflictTests` — 🔴 driven by **verbatim** helm stderr, captured from
+both incidents *and from the first live run of this code*, which is what caught four separate parser
+and wording bugs no invented sample did: helm embeds the
 failure in a quoted `error="…"` field, so the field paths arrive with their quotes **escaped**, and a
 character class without the backslash cut every path off at `containers[name=` — after
-de-duplication they all collapsed into one and the message named no field at all. Also the plural
-`conflicts with` / bulleted shape the rollback produces, several managers on one object, and that
-every unrelated helm failure still falls through to the diagnostics path. Flag wiring in
-`Helm/HelmRunnerTests` (default off, on when set, never on the dry run).
+de-duplication they all collapsed into one and the message named no field at all. The live run then
+added three more: stripping *every* backslash glued the following word onto a path (helm carries its
+line breaks as the two characters `\n`, giving `…DATABASEHOST"].valuenconflicts`); trailing `"` and
+`:` made one field look like three; and the **manager** pattern accepted only bare quotes, so it
+reported one manager of two — the second conflict existed only in the escaped copy. Plus the plural
+`conflicts with` / bulleted shape the rollback produces, several managers on one object, the three
+writer kinds above, and that every unrelated helm failure still falls through to the diagnostics
+path. Flag wiring in `Helm/HelmRunnerTests` (default off, on when set, never on the dry run).
+
+⚠️ **The lesson is not "use real stderr" but "use real stderr from the path you changed".** The two
+incident samples were real and still missed everything above, because helm reports the same failure
+twice — once inside a quoted `error="…"` field and once unquoted — and which copy carries which
+conflict depends on the run.
 
 ### Stale Helm-Lock Recovery (AB#4894)
 
