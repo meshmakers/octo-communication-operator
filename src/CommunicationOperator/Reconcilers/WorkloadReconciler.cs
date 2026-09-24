@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using k8s.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -162,18 +163,14 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 var chartRef = $"{alias}/{workload.ChartName}";
                 var setValues = new Dictionary<string, string>();
 
-                // AB#4917: a redeploy of a hibernated workload must not resurrect
-                // it. --set beats every -f values layer, so this pins the release
-                // at 0 replicas regardless of what the chart or the entity's
-                // values declare. A deploy that is supposed to wake the workload
-                // goes through the controller's wake gate first, which clears
-                // the hibernated state before the deploy event is sent.
-                if (workload.Hibernated)
+                // AB#4917 + AB#5350: one decision, one --set. The replica count a deploy runs with
+                // is either the hibernation pin or the live count of what is already running; two
+                // --set replicaCount= values on one command line would be resolved by argument
+                // order, which is not a rule anybody could read off the code.
+                var replicaCount = await ResolveReplicaCountPinAsync(workload, release, ns, deployToken);
+                if (replicaCount.HasValue)
                 {
-                    setValues["replicaCount"] = "0";
-                    _logger.LogInformation(
-                        "Workload '{WorkloadName}' (release '{Release}') is hibernated; deploying with replicaCount=0",
-                        workload.WorkloadName, release);
+                    setValues["replicaCount"] = replicaCount.Value.ToString(CultureInfo.InvariantCulture);
                 }
 
                 // AB#4894: a helm process killed mid-upgrade (e.g. the operator
@@ -319,6 +316,171 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
             _inFlightDeploys.TryRemove(release, out _);
         }
+    }
+
+    /// <summary>
+    /// Replica count this deploy pins via <c>--set replicaCount=</c>, or <c>null</c> for "let the
+    /// chart and the values layers decide" (AB#5350, generalising the AB#4917 hibernation pin).
+    ///
+    /// <para>
+    /// 🔴 <b>Why a pin is needed at all.</b> Helm 4 applies <b>server-side</b>, and the AB#4917
+    /// scale verb merge-patches <c>spec.replicas</c> outside helm — as field manager
+    /// <c>octo-communication-operator</c> since AB#5325. The chart renders <c>spec.replicas</c>
+    /// from <c>replicaCount</c>, so helm wants a field another manager owns and the apply is
+    /// refused; helm's rollback applies the same way and fails identically, which leaves the
+    /// release <c>failed</c>. Measured on the kind cluster on 2026-09-24:
+    /// <c>Apply failed with 1 conflict: conflict with "octo-communication-operator" using
+    /// apps/v1: .spec.replicas</c>, and the same line again for the rollback.
+    /// </para>
+    ///
+    /// <para>
+    /// The remedy is agreement rather than force: server-side apply reports a conflict only for a
+    /// foreign-owned field the applier would <i>change</i>, so applying the value that is already
+    /// there is accepted and makes helm a co-owner. Measured: with the live count pinned, the same
+    /// upgrade succeeds and the release stays at its scaled size. The pin is needed on <i>every</i>
+    /// deploy, not once — co-ownership does not survive the next scale, which is an Update and
+    /// takes the field back.
+    /// </para>
+    ///
+    /// <para>
+    /// This also delivers what the controller's pool projection already claims: it sends
+    /// <c>replicaCount = MinReplicas</c> as a value override on the grounds that "everything above
+    /// that is a scaling decision … so a scaled-up pool is not reverted by the next unrelated
+    /// reconcile". Without this method the next deploy did revert it — or, since Helm 4, failed
+    /// outright.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>Consequence, deliberately accepted:</b> once a workload is running, a helm deploy no
+    /// longer decides its replica count — the live value does. A raised <c>MinReplicas</c>
+    /// therefore takes effect through the controller's scale path (which clamps every request into
+    /// <c>MinReplicas..MaxReplicas</c>), not through a redeploy. That is the same reasoning as
+    /// AB#4955 for the chart version and AB#5301 for <c>LifecycleMode</c>: a replica count is
+    /// runtime state, and a deploy that silently resets runtime state is the defect, not the fix.
+    /// </para>
+    ///
+    /// <para>
+    /// The three cases with no single obvious answer:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>No Deployments (first install, or an undeployed release).</b> No pin. There is no
+    ///     live value to preserve and nothing owns <c>spec.replicas</c> yet, so the chart and the
+    ///     values layers are the only opinion in existence — which is exactly what a first install
+    ///     should honour.
+    ///   </item>
+    ///   <item>
+    ///     <b>Several Deployments reporting different counts.</b> Pin the largest, and log that
+    ///     they disagreed. <c>replicaCount</c> is one value for the whole release, so a single
+    ///     number has to be chosen; the smallest would scale the busiest Deployment down as a side
+    ///     effect of an unrelated deploy, which is the class of accident this method exists to
+    ///     stop. A release with several Deployments rendered from one <c>replicaCount</c> is not
+    ///     the shape the scale verb was built for, hence the warning rather than a silent choice.
+    ///   </item>
+    ///   <item>
+    ///     <b>An <c>AdapterPool</c> with <c>MinReplicas</c>/<c>MaxReplicas</c>.</b> The live count
+    ///     wins, and the entity's range is not consulted here at all. What is running is what the
+    ///     lease scheduler scaled it to, which is somewhere in that range and almost never the
+    ///     floor; pinning <c>MinReplicas</c> would hand every member above the floor back on the
+    ///     next deploy — losing warm capacity the scheduler asked for, and doing it as a side
+    ///     effect of a deploy nobody connected to scaling. The floor is enforced where scale
+    ///     requests are (controller-side <c>WorkloadLifecycleService</c>), which is one place
+    ///     rather than two that can disagree.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Hibernation is the first branch and beats everything: <see cref="WorkloadDeployedDto.Hibernated"/>
+    /// means the controller's lifecycle state machine has the workload down, and a deploy must not
+    /// resurrect it even if a stray replica is currently running.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ That last sentence names the one case agreement cannot fix, by construction: a deploy with
+    /// the flag set while replicas are still above 0 — one landing inside the
+    /// <c>Draining → scale 0 → Hibernated</c> window — genuinely has to change a field another
+    /// manager owns, and it conflicts (measured 2026-09-24). It is transient and self-correcting: the
+    /// drain finishes in seconds and the next deploy lands on a release already at 0, which applies
+    /// cleanly. Forcing it would need <c>--force-conflicts</c>, and that flag is a standing decision
+    /// an operator makes (AB#5325), not one this path takes.
+    /// </para>
+    ///
+    /// <para>
+    /// A live count of <b>0</b> on a workload the controller does <i>not</i> consider hibernated is
+    /// the one case where the live value is not honoured: pinning 0 would make every future deploy
+    /// the thing that keeps the workload down, with no deploy able to undo it. Not pinning leaves
+    /// the conflict in place for that case — visible, explained by AB#5325's message, and
+    /// recoverable — which is the cheaper failure. It is also rare: hibernation is how a workload
+    /// legitimately reaches 0, and the wake path scales rather than deploys.
+    /// </para>
+    ///
+    /// <para>
+    /// Everything but the hibernation branch is best effort: a failed read logs and returns no pin,
+    /// so the deploy proceeds with the pre-AB#5350 behaviour. Recovering the workload matters more
+    /// than pinning it.
+    /// </para>
+    /// </summary>
+    private async Task<int?> ResolveReplicaCountPinAsync(WorkloadDeployedDto workload, string release, string ns,
+        CancellationToken cancellationToken)
+    {
+        // AB#4917: a redeploy of a hibernated workload must not resurrect it. --set beats every -f
+        // values layer, so this pins the release at 0 replicas regardless of what the chart or the
+        // entity's values declare. A deploy that is supposed to wake the workload goes through the
+        // controller's wake gate first, which clears the hibernated state (and wakes by scaling,
+        // not by deploying) before the deploy event is sent.
+        if (workload.Hibernated)
+        {
+            _logger.LogInformation(
+                "Workload '{WorkloadName}' (release '{Release}') is hibernated; deploying with replicaCount=0",
+                workload.WorkloadName, release);
+            return 0;
+        }
+
+        IReadOnlyList<int> live;
+        try
+        {
+            live = await _gateway.GetDeploymentReplicasByInstanceAsync(ns, release, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e,
+                "Could not read the live replica count of release '{Release}' — deploying without a replicaCount pin, which fails if the workload was scaled outside helm (AB#5350)",
+                release);
+            return null;
+        }
+
+        if (live.Count == 0)
+        {
+            _logger.LogDebug(
+                "Release '{Release}' has no Deployments in namespace '{Namespace}' — first install, deploying with the chart's own replica count",
+                release, ns);
+            return null;
+        }
+
+        var pin = live.Max();
+        if (live.Distinct().Count() > 1)
+        {
+            _logger.LogWarning(
+                "Release '{Release}' has Deployments with differing replica counts ({LiveCounts}) in namespace '{Namespace}'; pinning the largest ({Replicas}) so the deploy cannot scale one of them down",
+                release, string.Join(", ", live), ns, pin);
+        }
+
+        if (pin == 0)
+        {
+            _logger.LogInformation(
+                "Release '{Release}' is running 0 replicas but workload '{WorkloadName}' is not hibernated; not pinning replicaCount=0, so this deploy can bring it back",
+                release, workload.WorkloadName);
+            return null;
+        }
+
+        _logger.LogInformation(
+            "Release '{Release}' is running {Replicas} replica(s); pinning replicaCount to that value so server-side apply sees the value it already has (AB#5350)",
+            release, pin);
+        return pin;
     }
 
     /// <summary>

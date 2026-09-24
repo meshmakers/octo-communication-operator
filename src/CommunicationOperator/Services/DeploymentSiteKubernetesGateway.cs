@@ -95,6 +95,25 @@ public class DeploymentSiteKubernetesGateway : IDeploymentSiteKubernetesGateway
         return patched;
     }
 
+    public async Task<IReadOnlyList<int>> GetDeploymentReplicasByInstanceAsync(string @namespace, string instance,
+        CancellationToken cancellationToken = default)
+    {
+        // Same label selector as the scale patch above, on purpose: the question this answers is
+        // "what did the scale verb leave behind", and deriving the Deployment name from the release
+        // would be wrong for Application charts that render {release}-{chart}.
+        var deployments = await _kubernetesClient.AppsV1.ListNamespacedDeploymentAsync(@namespace,
+            labelSelector: $"app.kubernetes.io/instance={instance}", cancellationToken: cancellationToken);
+
+        // Spec.Replicas is nullable in the generated model but defaulted by the apiserver on write,
+        // so a null here means the object could not be read as expected — skip it rather than
+        // reporting the API default as if it had been observed.
+        return deployments.Items
+            .Select(d => d.Spec?.Replicas)
+            .Where(r => r.HasValue)
+            .Select(r => r!.Value)
+            .ToArray();
+    }
+
     public async Task<V1OwnerReference?> TryGetDeploymentSiteOwnerReferenceAsync(string @namespace, string name,
         CancellationToken cancellationToken = default)
     {
