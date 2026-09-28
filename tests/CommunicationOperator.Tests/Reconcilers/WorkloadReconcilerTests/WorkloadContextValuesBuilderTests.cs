@@ -34,6 +34,36 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).DoesNotContain("ingress");
     }
 
+    // 🔴 AB#5303 item 2. The projection existed in AdapterReconciler, was deleted with the move to
+    // Helm, and OperatorOptions.AdapterIgnoreCertificateValidation was read by nothing for four
+    // months while still being bound from OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION and
+    // documented in appsettings.Development.json. These two tests are the reason it cannot be lost
+    // again silently: one asserts it arrives, the other that false emits nothing at all.
+    [Test]
+    public async Task Build_AdapterIgnoreCertificateValidation_ReachesTheChart()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            AdapterIgnoreCertificateValidation = true,
+        });
+
+        // Unquoted: the chart branches on it with `if`, and a quoted "true" would still be truthy
+        // while a quoted "false" would be too - see the note at the top of this file.
+        await Assert.That(yaml!).Contains("\"ignoreCertificateValidation\": true");
+    }
+
+    [Test]
+    public async Task Build_AdapterIgnoreCertificateValidationFalse_EmitsNothing()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            InstancePrefix = "test-2",
+            AdapterIgnoreCertificateValidation = false,
+        });
+
+        await Assert.That(yaml!).DoesNotContain("ignoreCertificateValidation");
+    }
+
     [Test]
     public async Task Build_WorkloadControllerUri_OverridesTheSharedUriForWorkloads()
     {

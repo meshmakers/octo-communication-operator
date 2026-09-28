@@ -77,6 +77,19 @@ public static class WorkloadContextValuesBuilder
             root["reportingServiceUri"] = options.ReportingServiceUri!;
         }
 
+        // 🔴 AB#5303 item 2 — the projection that was lost. AdapterReconciler emitted
+        // OCTO_ADAPTER__IGNORECERTIFICATEVALIDATION into the pod's environment until it was deleted
+        // with the move to Helm (028739e, 2026-05-13); the chart never grew an equivalent, and a
+        // week later the field was dropped from the CR spec on the grounds that "operator code only
+        // ever stored them into PoolDescriptor and never read them again" — true, but only because
+        // the single reader had been deleted seven days earlier. OperatorOptions kept the option and
+        // nothing read it since. Projected only when true: the chart renders no variable for false,
+        // so an absent value cannot be read as a deliberate one.
+        if (options.AdapterIgnoreCertificateValidation)
+        {
+            root["ignoreCertificateValidation"] = true;
+        }
+
         if (!string.IsNullOrWhiteSpace(options.AuthUri))
         {
             root["authUri"] = options.AuthUri!;
