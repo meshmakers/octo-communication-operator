@@ -337,6 +337,8 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
         // AB#4917: a redeploy of a hibernated workload must not resurrect it.
         // --set beats every -f values layer, so the pin has to travel via
         // setValues — both on the pre-flight dry-run and the real install.
+        // Hibernation is now the first branch of the AB#5350 replica rule; the
+        // branches themselves are covered in ReplicaCountPinTests.
         var dto = BaseDto() with { Hibernated = true };
 
         await Reconciler.DeployAsync(dto, CancellationToken.None);
@@ -358,8 +360,10 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     [Test]
     public async Task DeployAsync_NotHibernated_DoesNotSetReplicaCount()
     {
-        // Default DTO has Hibernated = false — the chart / values layers own
-        // the replica count; no --set pin must be emitted.
+        // Default DTO has Hibernated = false and the base class leaves the
+        // release with no Deployments, i.e. a first install (AB#5350) — nothing
+        // is running to preserve, so the chart / values layers own the replica
+        // count and no --set pin must be emitted.
         await Reconciler.DeployAsync(BaseDto(), CancellationToken.None);
 
         await Helm.Received(1).UpgradeInstallDryRunAsync(

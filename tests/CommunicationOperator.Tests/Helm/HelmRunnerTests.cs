@@ -1,5 +1,7 @@
 using Meshmakers.Octo.Communication.Operator.Helm;
+using Meshmakers.Octo.Communication.Operator.Options;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Communication.Operator.Tests.Helm;
@@ -7,14 +9,57 @@ namespace Meshmakers.Octo.Communication.Operator.Tests.Helm;
 internal class HelmRunnerTests
 {
     private readonly IHelmProcessInvoker _invoker = Substitute.For<IHelmProcessInvoker>();
+    private readonly OperatorOptions _options = new();
     private readonly HelmRunner _runner;
 
     public HelmRunnerTests()
     {
-        _runner = new HelmRunner(_invoker, NullLogger<HelmRunner>.Instance);
+        _runner = new HelmRunner(_invoker, NullLogger<HelmRunner>.Instance, new OptionsWrapper<OperatorOptions>(_options));
         // Default: success.
         _invoker.InvokeAsync(Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
             .Returns(new HelmProcessResult(0, string.Empty, string.Empty));
+    }
+
+    /// <summary>
+    ///     🔴 AB#5325 — <c>--force-conflicts</c> is opt-in. It overwrites whatever a person set on the
+    ///     object by hand, on every deploy from then on, so the default must not carry it.
+    /// </summary>
+    [Test]
+    public async Task UpgradeInstallAsync_ByDefault_DoesNotForceConflicts()
+    {
+        await _runner.UpgradeInstallAsync("rel", "repo/chart", "1.0.0", "octo", [],
+            new Dictionary<string, string>(), CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a => !a.Contains("--force-conflicts")), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task UpgradeInstallAsync_WithTheOptionOn_ForcesConflicts()
+    {
+        _options.Helm.ForceConflicts = true;
+
+        await _runner.UpgradeInstallAsync("rel", "repo/chart", "1.0.0", "octo", [],
+            new Dictionary<string, string>(), CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a => a.Contains("--force-conflicts")), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    ///     The pre-flight answers "would this apply". Forcing its way past an ownership conflict would
+    ///     answer a question nobody asked, so the flag never reaches the dry run — even when it is on.
+    /// </summary>
+    [Test]
+    public async Task UpgradeInstallDryRunAsync_NeverForcesConflicts()
+    {
+        _options.Helm.ForceConflicts = true;
+
+        await _runner.UpgradeInstallDryRunAsync("rel", "repo/chart", "1.0.0", "octo", [],
+            new Dictionary<string, string>(), CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a => !a.Contains("--force-conflicts")), Arg.Any<CancellationToken>());
     }
 
     [Test]

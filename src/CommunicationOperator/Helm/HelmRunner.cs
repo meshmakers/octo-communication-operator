@@ -1,3 +1,6 @@
+using Meshmakers.Octo.Communication.Operator.Options;
+using Microsoft.Extensions.Options;
+
 namespace Meshmakers.Octo.Communication.Operator.Helm;
 
 /// <summary>
@@ -6,7 +9,8 @@ namespace Meshmakers.Octo.Communication.Operator.Helm;
 /// <see cref="HelmException"/> (with one well-defined exception: a
 /// <c>helm uninstall</c> against a non-existent release is success).
 /// </summary>
-public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> logger) : IHelmRunner
+public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> logger,
+    IOptions<OperatorOptions> options) : IHelmRunner
 {
     public async Task EnsureRepoAsync(string alias, string url, string? username, string? password,
         CancellationToken cancellationToken)
@@ -44,7 +48,8 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
         CancellationToken cancellationToken)
     {
-        var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: false);
+        var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: false,
+            forceConflicts: options.Value.Helm.ForceConflicts);
 
         var result = await invoker.InvokeAsync(args, cancellationToken);
         if (result.ExitCode != 0)
@@ -60,7 +65,11 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
         CancellationToken cancellationToken)
     {
-        var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: true);
+        // 🔴 AB#5325: the dry run deliberately does NOT force conflicts, even when the option is on.
+        // Its job is to answer "would this apply", and a pre-flight that forces its way past an
+        // ownership conflict would answer yes to a question nobody asked.
+        var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: true,
+            forceConflicts: false);
 
         var result = await invoker.InvokeAsync(args, cancellationToken);
         if (result.ExitCode != 0)
@@ -72,7 +81,8 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
     }
 
     private static List<string> BuildUpgradeArgs(string release, string chart, string version, string @namespace,
-        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, bool dryRunServer)
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, bool dryRunServer,
+        bool forceConflicts)
     {
         // Note: no `--create-namespace` — the deployment site namespace is owned by the
         // operator's namespace-scoped service account, which cannot create
@@ -114,6 +124,16 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
             // the upgrade fails, so a failed deploy never leaves a half-applied
             // release behind.
             args.Add("--rollback-on-failure");
+
+            // AB#5325: opt-in only. Helm 4 applies server-side, so a field another manager owns
+            // (a hand-written kubectl set / patch) refuses the apply — and helm's rollback refuses
+            // for the same reason, leaving the release 'failed'. This takes ownership instead.
+            // Off by default on purpose: it silently overwrites whatever a human set, which is a
+            // standing decision an operator makes once, not something a deploy path decides.
+            if (forceConflicts)
+            {
+                args.Add("--force-conflicts");
+            }
         }
 
         foreach (var file in valuesFiles)

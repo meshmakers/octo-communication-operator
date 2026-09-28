@@ -243,6 +243,43 @@ public class OperatorOptions
     /// pipeline from Vault).
     /// </summary>
     public ClusterSecretsOptions ClusterSecrets { get; set; } = new();
+
+    /// <summary>
+    /// How the operator invokes <c>helm</c> (AB#5325).
+    /// </summary>
+    public HelmOptions Helm { get; set; } = new();
+}
+
+/// <summary>
+/// Helm invocation behaviour (AB#5325).
+/// </summary>
+public class HelmOptions
+{
+    /// <summary>
+    /// When true, <c>helm upgrade</c> is given <c>--force-conflicts</c>, so a server-side apply takes
+    /// ownership of fields another field manager holds instead of refusing. Default <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>Off by default, and that is the decision, not an oversight.</b> The only way a
+    ///         foreign manager appears on a workload this operator deploys is a person writing to the
+    ///         object directly (<c>kubectl set image</c> / <c>set env</c> / <c>patch</c> all leave one
+    ///         behind). Forcing past that overwrites what they set, silently, on every deploy from then
+    ///         on — an operator may well want exactly that, but it has to be their call.
+    ///     </para>
+    ///     <para>
+    ///         What it buys: without it such a workload is stuck. Server-side apply refuses, helm's own
+    ///         rollback refuses for the same reason, and the release is left in <c>failed</c> state —
+    ///         so a retry makes it worse. The alternative remedy needs no option: delete the Deployment
+    ///         and let the chart own it again. Both are named in the error
+    ///         (<see cref="Helm.HelmFieldOwnershipConflict" />).
+    ///     </para>
+    ///     <para>
+    ///         Never applied to the pre-flight dry run: that asks "would this apply", and forcing its
+    ///         way past a conflict would answer a question nobody asked.
+    ///     </para>
+    /// </remarks>
+    public bool ForceConflicts { get; set; }
 }
 
 /// <summary>

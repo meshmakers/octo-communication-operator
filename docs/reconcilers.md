@@ -338,11 +338,15 @@ changes through a dedicated hub callback instead of helm:
   `OperatorHubService` logs one warning (`_scaleStatusUnsupportedLogged` latch, same
   pattern as the deploy-progress channel) and degrades silently.
 - **Redeploy must not resurrect a hibernated workload:** when
-  `WorkloadDeployedDto.Hibernated` is true, `WorkloadReconciler.DeployAsync` adds
-  `--set replicaCount=0` (applies to both the dry-run pre-flight and the real install);
-  `--set` beats every `-f` values layer. A deploy that is supposed to wake the workload
-  goes through the controller's wake gate first, which clears the hibernated state before
-  the deploy event is sent.
+  `WorkloadDeployedDto.Hibernated` is true, the deploy pins `--set replicaCount=0` (on both the
+  dry-run pre-flight and the real install); `--set` beats every `-f` values layer. A deploy that is
+  supposed to wake the workload goes through the controller's wake gate first, which clears the
+  hibernated state before the deploy event is sent — and **wakes by scaling, not by deploying**
+  (`EnsureWorkloadRunningAsync`: `Hibernated/Draining → Waking + scale-1`).
+- 🔴 **Patching `spec.replicas` outside helm is not free.** The chart renders that field, so Helm 4's
+  server-side apply contested it and every scaled workload failed its next deploy until AB#5350. The
+  hibernation pin is now one branch of a single rule that pins the live replica count — see
+  [A Scaled Workload Fails Its Next Deploy (AB#5350)](helm-field-ownership.md#a-scaled-workload-fails-its-next-deploy-ab5350).
 - Reconciler/scale failures follow the existing rule: logged, reported in the ack, never
   propagated into the hub connection.
 
@@ -353,6 +357,9 @@ members are leased to tenants in the owning tenant's subtree, one work item per 
 through the same `DeployAsync` / `UndeployAsync` / `ScaleAsync` path as every other workload — the
 1:1 workload ↔ helm release model is untouched, `MinReplicas`/`MaxReplicas` are a replica count on
 one release, and the AB#4917 scale verb is the scaling mechanism. Three things are different.
+
+⚠️ `MinReplicas` is the size a pool **starts** at, not what a redeploy returns it to: since AB#5350
+a deploy pins the live count, so a grown pool stays grown; the range is enforced on the scale path.
 
 **1. Namespace.** `WorkloadReconciler.ResolveNamespace` sends a pool to `PlatformNamespace` and
 everything else to `DeploymentSiteNamespace`. A pool member runs work for tenants other than the one that owns

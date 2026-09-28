@@ -18,6 +18,7 @@ The operator can be configured via environment variables:
 | `OPERATOR__WORKLOADCOMMUNICATIONCONTROLLERURI` | Controller URI projected into every deployed workload's Helm values. Empty projects `OPERATOR__COMMUNICATIONCONTROLLERURI`. Set it only when workloads cannot use the operator's own address, e.g. on local kind where the operator reaches a host-run controller through a pod hostAlias the adapters do not have (AB#4967). | _(empty — same as CommunicationControllerUri)_ |
 | `OPERATOR__DEFAULTDEPLOYMENTSITENAME` | Pool name for auto-created CRs | `default` |
 | `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to workload pods via the Helm chart values | _(none)_ |
+| `OPERATOR__HELM__FORCECONFLICTS` | Adds `--force-conflicts` to `helm upgrade`, so a server-side apply takes ownership of fields held by another field manager instead of refusing (AB#5325). Only a hand-written `kubectl set …` / `kubectl patch` creates such a manager, and forcing past it overwrites those values on every deploy from then on — so this stays off unless an operator decides otherwise. The other remedy needs no flag: delete the Deployment and let the chart own it again. Never applied to the `--dry-run=server` pre-flight. | `false` |
 | `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Forwarded to workload pods via the Helm chart values (dev only) | `false` |
 | `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManageDeploymentSites=true)_ |
 | `OPERATOR__BROKERVIRTUALHOST` | RabbitMQ virtual host | `/` |

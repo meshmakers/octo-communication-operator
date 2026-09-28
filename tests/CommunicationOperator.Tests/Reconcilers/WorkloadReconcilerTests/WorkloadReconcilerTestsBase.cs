@@ -36,6 +36,12 @@ internal abstract class WorkloadReconcilerTestsBase
         // tests override this to assert the enrichment path.
         Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
             .Returns(string.Empty);
+        // Default: the release owns no Deployments, i.e. a first install — no live replica count to
+        // pin (AB#5350). Stated explicitly rather than relying on NSubstitute's default for a
+        // collection-returning member, because every replicaCount assertion in this suite depends
+        // on which of the pin's branches is taken.
+        Gateway.GetDeploymentReplicasByInstanceAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<CancellationToken>()).Returns(Array.Empty<int>());
         Hub = Substitute.For<IOperatorHubInvoker>();
         // Lazy hub resolution mirrors the production wiring (Program.cs uses
         // IServiceProvider to break the OperatorHubService<->WorkloadReconciler

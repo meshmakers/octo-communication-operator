@@ -44,6 +44,28 @@ public interface IDeploymentSiteKubernetesGateway
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Live <c>spec.replicas</c> of every Deployment carrying the
+    /// <c>app.kubernetes.io/instance={instance}</c> label (AB#5350) — deliberately the same
+    /// selector <see cref="ScaleDeploymentsByInstanceAsync"/> patches through, so what is read
+    /// back here is exactly what a scale wrote.
+    ///
+    /// <para>
+    /// Empty when the release owns no Deployments — a first install, or a release that was
+    /// undeployed. The list is in apiserver order and is <b>not</b> reduced to a single number:
+    /// choosing between several counts is a policy decision and belongs to the caller, not to
+    /// the gateway.
+    /// </para>
+    ///
+    /// <para>
+    /// A Deployment whose <c>spec.replicas</c> is unset is skipped rather than reported as 1.
+    /// The apiserver defaults the field on write, so a live object always carries it; inventing
+    /// the default here would turn "could not read it" into a pin that changes what is running.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<int>> GetDeploymentReplicasByInstanceAsync(string @namespace, string instance,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Builds an owner reference to the <c>DeploymentSite</c> CR named <paramref name="name"/>
     /// in <paramref name="namespace"/>, or returns <c>null</c> when that CR does not exist
     /// (AB#4924). The CR is the only Kubernetes object that represents a tenant, so it is what a

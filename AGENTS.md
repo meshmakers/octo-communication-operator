@@ -23,6 +23,7 @@ Adapters and Applications, and talks to the Communication Controller over the Si
 |---|---|
 | `src/CommunicationOperator/Options/**`, `src/CommunicationOperator/appsettings*.json` | `docs/configuration.md` |
 | `tests/CommunicationOperator.Tests/E2E/**` | `docs/e2e-kind-tests.md` |
+| `src/CommunicationOperator/Helm/**`, `src/CommunicationOperator/Reconcilers/WorkloadReconciler.cs`, `src/CommunicationOperator/Services/*KubernetesGateway.cs` | `docs/helm-field-ownership.md` |
 | `src/CommunicationOperator/Controller/**`, `src/CommunicationOperator/Program.cs`, `src/CommunicationOperator/Services/*Diagnostics*.cs` | `docs/http-surface.md` |
 | `src/CommunicationOperator/Services/**` | `docs/operator-hub.md` |
 | `src/CommunicationOperator/Reconcilers/**`, `src/CommunicationOperator/Helm/**` | `docs/reconcilers.md` |
