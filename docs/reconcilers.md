@@ -401,6 +401,6 @@ of the wire, because either alone is one edit away from silence.
 `rbac.scope: cluster` (the default binding shape) nothing has to change — the ClusterRole already
 covers secrets and deployments in every namespace. With `rbac.scope: namespace` the Role is bound in
 the release namespace only, so a **distinct** platform namespace needs its own Role + RoleBinding
-there. A missing grant surfaces on the `--dry-run=server` pre-flight rather than mid-rollout, which
-is what that pre-flight is for.
+there. A missing grant does **not** surface on the `--dry-run=server` pre-flight - helm returns
+before it applies anything, so write RBAC is never exercised there - it fails the real install.
 

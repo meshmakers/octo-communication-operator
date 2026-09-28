@@ -12,9 +12,10 @@ and the adapter-pool rules in `reconcilers.md` all reference the two sections be
 ## A Hand-Patched Workload Locks the Operator Out (AB#5325)
 
 Helm 4 applies **server-side** by default (`--server-side auto`), so a field another manager owns is
-not merged — the apply is refused. The only way a foreign manager appears on a workload this operator
+not merged — the apply is refused. One source of a foreign manager on a workload this operator
 deploys is a person writing to the object directly: `kubectl set image`, `kubectl set env` and
-`kubectl patch` all leave a manager called `kubectl-set` / `kubectl-patch` behind.
+`kubectl patch` all leave a manager called `kubectl-set` / `kubectl-patch` behind. The other is the
+operator's own scale verb, covered further down and in AB#5350.
 
 🔴 **It is not transient, and a retry makes it worse.** The ownership lives in the object's
 `managedFields`, so it is there on every later deploy — and helm's own rollback applies the same way
