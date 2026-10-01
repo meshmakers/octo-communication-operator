@@ -219,6 +219,26 @@ public class OperatorOptions
     /// pipeline from Vault).
     /// </summary>
     public ClusterSecretsOptions ClusterSecrets { get; set; } = new();
+
+    /// <summary>
+    /// IronOCR licence key, projected as the secret-flagged value override
+    /// <c>secrets.ironOcrLicenseKey</c> into the workloads whose chart reads it
+    /// (AB#5449). Before this the key was a literal in the mesh adapter's source,
+    /// so every rotation was a code change and every clone of that repository
+    /// carried a live commercial key.
+    /// <para>
+    /// Cluster-wide rather than per workload because one licence covers the whole
+    /// estate — the same reason <see cref="BrokerPassword"/> lives here. Populated
+    /// from Vault by the deployment pipeline, exactly like the broker password.
+    /// </para>
+    /// <para>
+    /// 🔴 Unset is a supported state: only <c>PdfOcrExtraction@1</c> needs the key
+    /// and most tenants never run OCR, so an adapter deployed without it starts
+    /// normally and fails only when a document actually requires OCR. Nothing here
+    /// validates it — see <c>MeshAdapterConfiguration.IronOcrLicenseKey</c>.
+    /// </para>
+    /// </summary>
+    public string? IronOcrLicenseKey { get; set; }
 }
 
 /// <summary>

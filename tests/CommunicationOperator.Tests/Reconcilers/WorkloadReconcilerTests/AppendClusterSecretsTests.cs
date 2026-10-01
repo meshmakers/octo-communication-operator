@@ -205,4 +205,80 @@ internal class AppendClusterSecretsTests
         await Assert.That(yaml!).Contains("\"rootCa\": \"ca-pem-content\"");
         await Assert.That(yaml!).DoesNotContain("valueFrom");
     }
+
+    // AB#5449 — the IronOCR licence key. Gated on the CHART, not on
+    // ReceivesClusterSecrets: that opt-in means "this adapter talks to the cluster's
+    // data stores", which says nothing about OCR. The four tests below pin both
+    // directions of that gate, because an over-broad injection would materialise a
+    // commercial licence key into the Secret of every Loxone / Modbus / Zenon pod.
+    [Test]
+    public async Task IronOcrLicense_ChartReadsIt_InjectsSecretFlaggedEntry()
+    {
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(1);
+        await Assert.That(result[0].Path).IsEqualTo("secrets.ironOcrLicenseKey");
+        await Assert.That(result[0].Value).IsEqualTo("IRONOCR.TEST.KEY");
+        await Assert.That(result[0].IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task IronOcrLicense_ChartDoesNotReadIt_InjectsNothing()
+    {
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        // An edge adapter that never runs OCR must not carry the licence.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts, "octo-loxone-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IronOcrLicense_UnknownChartName_InjectsNothing()
+    {
+        // Null is what every pre-AB#5449 caller passes; it must stay inert rather
+        // than defaulting to "inject everywhere".
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IronOcrLicense_NotConfigured_InjectsNothing()
+    {
+        // Unset is a supported state: most tenants never run OCR, and the adapter
+        // fails on first OCR use rather than at startup.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false,
+            new OperatorOptions(), "octo-mesh-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IronOcrLicense_AlongsideClusterSecrets_AddsToThemRatherThanReplacing()
+    {
+        var opts = FullClusterOptions();
+        opts.IronOcrLicenseKey = "IRONOCR.TEST.KEY";
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(5);
+        var paths = result.Select(e => e.Path).ToArray();
+        await Assert.That(paths).Contains("secrets.ironOcrLicenseKey");
+        await Assert.That(paths).Contains("secrets.rabbitmq");
+        await Assert.That(paths).Contains("secrets.databaseUser");
+        foreach (var entry in result)
+        {
+            await Assert.That(entry.IsSecret).IsTrue();
+        }
+    }
 }

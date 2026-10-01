@@ -19,6 +19,22 @@ namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 /// </summary>
 public sealed class WorkloadReconciler : IWorkloadReconciler
 {
+    /// <summary>
+    /// Charts that declare <c>secrets.ironOcrLicenseKey</c> and can therefore consume the
+    /// operator's <see cref="OperatorOptions.IronOcrLicenseKey"/> (AB#5449). Only
+    /// <c>PdfOcrExtraction@1</c> needs the licence and that node ships in the mesh adapter,
+    /// so exactly one chart reads the value today. Kept as a named list rather than injected
+    /// unconditionally so a commercial licence key is not materialised into the Secret of
+    /// every Loxone / Modbus / Zenon pod that will never run OCR.
+    /// <para>
+    /// ⚠️ Add a chart here when it starts hosting an OCR-capable node — and add the value to
+    /// that chart's <c>secrets</c> block in the same change, since Helm ignores a value the
+    /// chart does not declare and the omission would be silent.
+    /// </para>
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ChartsReadingIronOcrLicense =
+        new HashSet<string>(StringComparer.Ordinal) { "octo-mesh-adapter" };
+
     /// <summary>Grace window for atomic rollback after a deploy cancel,
     /// before <see cref="UndeployAsync"/> proceeds with <c>helm uninstall</c>.
     /// Helm needs a moment to mark the release as failed and drop the
@@ -104,7 +120,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             //    The resulting overrides flow through the normal secret-flagged
             //    path: materialized into {release}-octo-secrets, referenced from
             //    the chart via valueFrom secretKeyRef.
-            workload = workload with { Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets, _options) };
+            workload = workload with { Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets, _options, workload.ChartName) };
 
             // 1. Materialize / refresh the operator-owned secret. We replace it
             //    every deploy so a value rotation propagates without manual
@@ -536,9 +552,28 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// are skipped silently.
     /// </summary>
     internal static IReadOnlyList<ValueOverrideDto> AppendClusterSecrets(
-        IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets, OperatorOptions options)
+        IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets, OperatorOptions options,
+        string? chartName = null)
     {
-        var injected = new List<ValueOverrideDto>(5);
+        var injected = new List<ValueOverrideDto>(6);
+
+        // IronOCR licence key (AB#5449). Gated on the CHART rather than on
+        // ReceivesClusterSecrets: that opt-in means "this adapter talks to the
+        // cluster's data stores", which has nothing to do with OCR, and reusing it
+        // would hand the key to every Mongo-using adapter while withholding it from
+        // an OCR-capable edge one. Only charts that actually declare
+        // `secrets.ironOcrLicenseKey` can consume it — Helm silently ignores a value
+        // a chart does not read, so injecting it everywhere would not break anything,
+        // but it would materialise a commercial licence key into the Secret of every
+        // Loxone, Modbus and Zenon pod in the estate for no purpose. Same reasoning
+        // the data-store gate below is built on.
+        if (!string.IsNullOrEmpty(options.IronOcrLicenseKey)
+            && chartName is not null
+            && ChartsReadingIronOcrLicense.Contains(chartName))
+        {
+            injected.Add(new ValueOverrideDto
+                { Path = "secrets.ironOcrLicenseKey", Value = options.IronOcrLicenseKey, IsSecret = true });
+        }
 
         // The RabbitMQ broker password is part of the basic controller↔adapter
         // contract — every adapter needs the command bus, regardless of whether
