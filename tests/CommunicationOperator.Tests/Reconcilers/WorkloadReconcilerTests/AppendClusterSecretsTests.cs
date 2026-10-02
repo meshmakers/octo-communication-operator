@@ -281,4 +281,77 @@ internal class AppendClusterSecretsTests
             await Assert.That(entry.IsSecret).IsTrue();
         }
     }
+
+    // --- Dash0 browser-RUM token -------------------------------------------------
+    // Same chart gate as the OCR licence, and pinned in both directions for a sharper
+    // reason: the NON-secret half (endpoint / dataset / environment) reaches every
+    // workload through WorkloadContextValuesBuilder. A frontend chart missing from the
+    // allowlist therefore comes up with an endpoint and no token and quietly decides
+    // Dash0 is not activated — a failure with no error anywhere to notice.
+    [Test]
+    public async Task Dash0WebAuthToken_FrontendChart_InjectsSecretFlaggedEntry()
+    {
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, opts, "meshmakers-app");
+
+        await Assert.That(result.Count).IsEqualTo(1);
+        await Assert.That(result[0].Path).IsEqualTo("secrets.dash0WebAuthToken");
+        await Assert.That(result[0].Value).IsEqualTo("auth_test");
+        await Assert.That(result[0].IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_BackendChart_InjectsNothing()
+    {
+        // A browser-RUM token is of no use to an adapter, whose server-side telemetry
+        // already reaches Dash0 via the injected auto-instrumentation.
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Select(e => e.Path)).DoesNotContain("secrets.dash0WebAuthToken");
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_UnknownChartName_InjectsNothing()
+    {
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_NotConfigured_InjectsNothing()
+    {
+        // The default state on a cluster without Dash0 activated, and on every cluster
+        // before its Vault key exists.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false,
+            new OperatorOptions(), "meshmakers-app");
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_EveryAllowlistedChart_IsInjected()
+    {
+        // Guards the list itself: a chart added to ChartsReadingDash0WebAuthToken without
+        // a secrets.dash0WebAuthToken block in its values is the silent half of this
+        // feature, so at minimum the operator side must agree with itself.
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        foreach (var chart in WorkloadReconciler.ChartsReadingDash0WebAuthToken)
+        {
+            var result = WorkloadReconciler.AppendClusterSecrets(
+                Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, opts, chart);
+
+            await Assert.That(result.Select(e => e.Path)).Contains("secrets.dash0WebAuthToken");
+        }
+    }
 }

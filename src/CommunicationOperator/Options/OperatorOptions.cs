@@ -239,6 +239,67 @@ public class OperatorOptions
     /// </para>
     /// </summary>
     public string? IronOcrLicenseKey { get; set; }
+
+    /// <summary>
+    /// Dash0 browser-RUM ingest token, injected as the secret-flagged value override
+    /// <c>secrets.dash0WebAuthToken</c> into the workloads whose chart reads it. Follows the
+    /// <see cref="IronOcrLicenseKey"/> pattern exactly: one token per cluster, populated from
+    /// Vault by the deployment pipeline, delivered through the per-release Kubernetes Secret.
+    /// <para>
+    /// Cluster-wide rather than per workload for a reason that matters here more than it does
+    /// for OCR: the tenant apps are operator-deployed, so their Helm values live on the
+    /// Application entity, not in git. The alternative — a value override per tenant — would
+    /// write the token in clear text into every tenant database and leave each newly
+    /// provisioned tenant silently without RUM until someone remembered to add it.
+    /// </para>
+    /// <para>
+    /// 🔴 This token is NOT a confidentiality boundary. A browser-RUM token is served to every
+    /// visitor inside the page and is readable in any dev-tools session — it must be created
+    /// with the Ingesting permission ONLY. It is handled as a secret here so it does not sit in
+    /// a rendered manifest or a tenant database, not because the value stays hidden.
+    /// </para>
+    /// <para>
+    /// Unset is a supported state and the default: the apps treat a missing endpoint or token as
+    /// "Dash0 not activated here" and skip SDK initialisation entirely.
+    /// </para>
+    /// </summary>
+    public string? Dash0WebAuthToken { get; set; }
+
+    /// <summary>
+    /// Non-secret Dash0 browser-RUM context (ingest URL, dataset, environment) projected into
+    /// every workload chart through <see cref="Reconcilers.WorkloadContextValuesBuilder"/>.
+    /// Bound from <c>Operator:Dash0</c>.
+    /// </summary>
+    public Dash0Options Dash0 { get; set; } = new();
+}
+
+/// <summary>
+/// Cluster-level Dash0 browser-RUM settings. Non-secret by construction — the ingest URL and the
+/// dataset name are visible in the page's network traffic anyway; the token lives in
+/// <see cref="OperatorOptions.Dash0WebAuthToken"/>.
+/// </summary>
+/// <remarks>
+/// Mirrors the <c>services.studio.dash0</c> block the octo-mesh chart already carries for the
+/// Refinery Studio, so a cluster configures the same three values in the same shape whether the
+/// frontend is deployed by that chart or rolled out as a tenant workload by this operator.
+/// </remarks>
+public class Dash0Options
+{
+    /// <summary>
+    /// OTLP/HTTP ingress base URL, excluding the <c>/v1/*</c> suffix the web SDK appends — e.g.
+    /// <c>https://ingress.europe-west4.gcp.dash0.com</c>. Empty disables RUM for every workload
+    /// on this cluster regardless of whether a token is configured.
+    /// </summary>
+    public string? Endpoint { get; set; }
+
+    /// <summary>Dash0 dataset, e.g. <c>prod-1</c>. May also be encoded in the auth token.</summary>
+    public string? Dataset { get; set; }
+
+    /// <summary>
+    /// Value reported as the OpenTelemetry <c>deployment.environment</c>. Conventionally the
+    /// cluster name, so RUM and backend telemetry from one cluster group together.
+    /// </summary>
+    public string? Environment { get; set; }
 }
 
 /// <summary>

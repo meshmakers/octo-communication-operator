@@ -35,6 +35,31 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     internal static readonly IReadOnlySet<string> ChartsReadingIronOcrLicense =
         new HashSet<string>(StringComparer.Ordinal) { "octo-mesh-adapter" };
 
+    /// <summary>
+    /// Charts that declare <c>secrets.dash0WebAuthToken</c> and can therefore consume the
+    /// operator's <see cref="OperatorOptions.Dash0WebAuthToken"/> — the browser-facing frontends
+    /// this operator rolls out as tenant workloads. Backend charts are absent on purpose: a
+    /// browser-RUM token is of no use to an adapter, and the server-side telemetry of those pods
+    /// already reaches Dash0 through the operator-injected auto-instrumentation.
+    /// <para>
+    /// ⚠️ Add a chart here when a new browser frontend ships — and add <c>dash0WebAuthToken</c>
+    /// to that chart's <c>secrets</c> block in the same change. Helm ignores a value the chart
+    /// does not declare, so the omission would be silent: the app would come up with an endpoint
+    /// and no token and skip telemetry, which is indistinguishable from "Dash0 is not activated
+    /// on this cluster".
+    /// </para>
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ChartsReadingDash0WebAuthToken =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "meshmakers-app",
+            "energy-community-app",
+            "energy-landing-page",
+            "cra-landing-page",
+            "accounting-landing-page",
+            "octomesh-website",
+        };
+
     /// <summary>Grace window for atomic rollback after a deploy cancel,
     /// before <see cref="UndeployAsync"/> proceeds with <c>helm uninstall</c>.
     /// Helm needs a moment to mark the release as failed and drop the
@@ -573,6 +598,19 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         {
             injected.Add(new ValueOverrideDto
                 { Path = "secrets.ironOcrLicenseKey", Value = options.IronOcrLicenseKey, IsSecret = true });
+        }
+
+        // Dash0 browser-RUM ingest token. Gated on the chart for the same reason as the OCR
+        // licence above, with one addition: the non-secret half of this (endpoint / dataset /
+        // environment) goes to every workload via WorkloadContextValuesBuilder, so a frontend
+        // chart that is missing from the allowlist gets an endpoint, no token, and silently
+        // decides Dash0 is not activated. Keep the two lists in step.
+        if (!string.IsNullOrEmpty(options.Dash0WebAuthToken)
+            && chartName is not null
+            && ChartsReadingDash0WebAuthToken.Contains(chartName))
+        {
+            injected.Add(new ValueOverrideDto
+                { Path = "secrets.dash0WebAuthToken", Value = options.Dash0WebAuthToken, IsSecret = true });
         }
 
         // The RabbitMQ broker password is part of the basic controller↔adapter
