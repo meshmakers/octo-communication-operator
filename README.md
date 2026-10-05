@@ -43,6 +43,9 @@ The operator can be configured via environment variables:
 | `OPERATOR__CLUSTERSECRETS__MONGODBUSERPASSWORD` | MongoDB user password injected as secret-flagged override `secrets.databaseUser` when the workload's `ReceivesClusterSecrets` flag is true. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__MONGODBADMINPASSWORD` | MongoDB admin password injected as `secrets.databaseAdmin` when the flag is true. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__STREAMDATAPASSWORD` | CrateDB password injected as `secrets.streamDataPassword` when the flag is true. | _(none)_ |
+| `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__<kid>` | SECRET attribute key ring (AB#5536), one variable per key id (lowercase, e.g. `..._KEYS__k1`); injected as `secrets.secretEncryption.keys.<kid>` when the flag is true. `k1` is the cluster's instance secret. | _(none)_ |
+| `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONACTIVEKEYID` | Active key id, injected as plain `secrets.secretEncryption.activeKeyId`. Unset with exactly one key = that key. | _(none)_ |
+| `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONLEGACYV1KEY` | Key for legacy `enc:v1:` values (the instance secret), injected as `secrets.secretEncryption.legacyV1Key`. | _(none)_ |
 
 The cluster-dependency, reporting-URI and ingress fields are all optional. Each value that is set is injected into every deployed workload's Helm values as the **lowest** precedence layer — the workload's own `ValuesYaml` and structured overrides win over it. Edge operators typically leave the cloud-side dependency hosts empty so per-workload values supply edge-local equivalents.
 

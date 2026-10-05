@@ -443,6 +443,29 @@ public class ClusterSecretsOptions
 
     /// <summary>CrateDB password for the stream-data user.</summary>
     public string? StreamDataPassword { get; set; }
+
+    /// <summary>
+    /// SECRET attribute key ring (AB#5536): key id → base64 32-byte AES-256 key, projected into
+    /// the workload as <c>secrets.secretEncryption.keys.&lt;kid&gt;</c> (secret-flagged) and rendered by
+    /// the mesh adapter chart as <c>OCTO_SECRETENCRYPTION__KEYS__&lt;kid&gt;</c>. Bound from
+    /// <c>OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__&lt;kid&gt;</c>; the key id keeps its case
+    /// because it is the id the engine writes into the <c>enc:v2:&lt;kid&gt;:</c> envelope header.
+    /// The first key <c>k1</c> is the cluster's existing instance secret (concept AB#5528,
+    /// decision 3). Empty entries are skipped.
+    /// </summary>
+    public Dictionary<string, string> SecretEncryptionKeys { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Key id new SECRET values are encrypted with (<c>SecretEncryption:ActiveKeyId</c>). When unset
+    /// and <see cref="SecretEncryptionKeys"/> holds exactly one key, that key is the active one.
+    /// </summary>
+    public string? SecretEncryptionActiveKeyId { get; set; }
+
+    /// <summary>
+    /// Key that decrypts legacy <c>enc:v1:</c> values (<c>SecretEncryption:LegacyV1Key</c>) — the
+    /// instance secret those values were written with.
+    /// </summary>
+    public string? SecretEncryptionLegacyV1Key { get; set; }
 }
 
 /// <summary>

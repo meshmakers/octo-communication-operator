@@ -659,6 +659,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             {
                 injected.Add(new ValueOverrideDto { Path = "secrets.streamDataPassword", Value = options.ClusterSecrets.StreamDataPassword, IsSecret = true });
             }
+
+            AppendSecretEncryptionKeyRing(injected, options.ClusterSecrets);
         }
 
         if (injected.Count == 0)
@@ -674,6 +676,40 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         merged.AddRange(injected);
         merged.AddRange(existing);
         return merged;
+    }
+
+    /// <summary>
+    /// SECRET attribute key ring (AB#5536). Same gate as the data-store credentials: a workload
+    /// that opts into <c>ReceivesClusterSecrets</c> runs the runtime engine against the cluster's
+    /// MongoDB and therefore reads and writes SECRET attribute values, which need the ring. The
+    /// keys are secret-flagged (they land in <c>{release}-octo-secrets</c>); the active key id is
+    /// not a secret and renders as a plain value. Keys are emitted in ordinal kid order so the
+    /// rendered values file — and with it the helm release — is stable across reconciles.
+    /// </summary>
+    private static void AppendSecretEncryptionKeyRing(List<ValueOverrideDto> injected, ClusterSecretsOptions clusterSecrets)
+    {
+        var keys = clusterSecrets.SecretEncryptionKeys
+            .Where(k => !string.IsNullOrWhiteSpace(k.Key) && !string.IsNullOrEmpty(k.Value))
+            .OrderBy(k => k.Key, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var (kid, key) in keys)
+        {
+            injected.Add(new ValueOverrideDto { Path = $"secrets.secretEncryption.keys.{kid}", Value = key, IsSecret = true });
+        }
+
+        var activeKeyId = !string.IsNullOrWhiteSpace(clusterSecrets.SecretEncryptionActiveKeyId)
+            ? clusterSecrets.SecretEncryptionActiveKeyId
+            : keys.Count == 1 ? keys[0].Key : null;
+        if (keys.Count > 0 && activeKeyId is not null)
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.secretEncryption.activeKeyId", Value = activeKeyId, IsSecret = false });
+        }
+
+        if (!string.IsNullOrEmpty(clusterSecrets.SecretEncryptionLegacyV1Key))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.secretEncryption.legacyV1Key", Value = clusterSecrets.SecretEncryptionLegacyV1Key, IsSecret = true });
+        }
     }
 
     /// <summary>

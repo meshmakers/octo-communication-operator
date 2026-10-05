@@ -354,4 +354,112 @@ internal class AppendClusterSecretsTests
             await Assert.That(result.Select(e => e.Path)).Contains("secrets.dash0WebAuthToken");
         }
     }
+
+    // --- AB#5536: SECRET attribute key ring --------------------------------------
+    // Gated on ReceivesClusterSecrets like the data-store credentials: a workload that
+    // talks to the cluster's MongoDB runs the runtime engine and reads/writes SECRET
+    // attribute values. An edge adapter without that opt-in must not carry the key.
+    private static OperatorOptions KeyRingOptions(string? activeKeyId = "k1") => new()
+    {
+        ClusterSecrets = new ClusterSecretsOptions
+        {
+            SecretEncryptionKeys = new Dictionary<string, string> { ["k1"] = "key-one" },
+            SecretEncryptionActiveKeyId = activeKeyId,
+            SecretEncryptionLegacyV1Key = "key-one",
+        },
+    };
+
+    [Test]
+    public async Task KeyRing_FlagOn_InjectsKeysActiveIdAndLegacyKey()
+    {
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, KeyRingOptions());
+
+        var key = result.Single(e => e.Path == "secrets.secretEncryption.keys.k1");
+        await Assert.That(key.Value).IsEqualTo("key-one");
+        await Assert.That(key.IsSecret).IsTrue();
+
+        var active = result.Single(e => e.Path == "secrets.secretEncryption.activeKeyId");
+        await Assert.That(active.Value).IsEqualTo("k1");
+        await Assert.That(active.IsSecret).IsFalse();
+
+        var legacy = result.Single(e => e.Path == "secrets.secretEncryption.legacyV1Key");
+        await Assert.That(legacy.Value).IsEqualTo("key-one");
+        await Assert.That(legacy.IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task KeyRing_FlagOff_InjectsNothing()
+    {
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, KeyRingOptions());
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task KeyRing_NotConfigured_InjectsNothing()
+    {
+        // Every cluster before its operator chart carries instanceSecretKey.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, new OperatorOptions());
+
+        await Assert.That(result.Select(e => e.Path).Any(p => p.StartsWith("secrets.secretEncryption"))).IsFalse();
+    }
+
+    [Test]
+    public async Task KeyRing_Rotation_InjectsEveryKeyInStableOrder()
+    {
+        var opts = new OperatorOptions
+        {
+            ClusterSecrets = new ClusterSecretsOptions
+            {
+                SecretEncryptionKeys = new Dictionary<string, string> { ["k2"] = "key-two", ["k1"] = "key-one" },
+                SecretEncryptionActiveKeyId = "k2",
+                SecretEncryptionLegacyV1Key = "key-one",
+            },
+        };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
+
+        var keyPaths = result.Select(e => e.Path).Where(p => p.StartsWith("secrets.secretEncryption.keys.")).ToArray();
+        await Assert.That(keyPaths).IsEquivalentTo(new[] { "secrets.secretEncryption.keys.k1", "secrets.secretEncryption.keys.k2" });
+        await Assert.That(keyPaths[0]).IsEqualTo("secrets.secretEncryption.keys.k1");
+        await Assert.That(result.Single(e => e.Path == "secrets.secretEncryption.activeKeyId").Value).IsEqualTo("k2");
+    }
+
+    [Test]
+    public async Task KeyRing_NoActiveIdWithSingleKey_UsesThatKey()
+    {
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, KeyRingOptions(activeKeyId: null));
+
+        await Assert.That(result.Single(e => e.Path == "secrets.secretEncryption.activeKeyId").Value).IsEqualTo("k1");
+    }
+
+    [Test]
+    public async Task KeyRing_EmptyKeyValue_IsSkipped()
+    {
+        var opts = KeyRingOptions();
+        opts.ClusterSecrets.SecretEncryptionKeys["k2"] = "";
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, opts);
+
+        await Assert.That(result.Select(e => e.Path)).DoesNotContain("secrets.secretEncryption.keys.k2");
+    }
+
+    [Test]
+    public async Task KeyRing_GeneratedOverrideYaml_KeysAsSecretKeyRef_ActiveIdPlain()
+    {
+        var injected = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, KeyRingOptions());
+        var yaml = WorkloadOverrideYamlBuilder.Build(injected, "rel-octo-secrets");
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"key\": \"secrets.secretEncryption.keys.k1\"");
+        await Assert.That(yaml!).Contains("\"activeKeyId\": \"k1\"");
+        await Assert.That(yaml!).DoesNotContain("key-one");
+    }
 }
