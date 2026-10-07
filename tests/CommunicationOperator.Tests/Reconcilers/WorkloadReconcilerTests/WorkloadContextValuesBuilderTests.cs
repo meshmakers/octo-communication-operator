@@ -508,4 +508,54 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).DoesNotContain("className");
         await Assert.That(yaml!).DoesNotContain("cluster-issuer");
     }
+
+    [Test]
+    public async Task Build_Dash0_EmitsNonSecretContextOnly()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            Dash0 = new Dash0Options
+            {
+                Endpoint = "https://ingress.europe-west4.gcp.dash0.com",
+                Dataset = "prod-1",
+                Environment = "prod-1",
+            },
+            // Set alongside to pin that the token never leaks into the context layer: this
+            // file is a plain -f argument to helm and ends up in the rendered manifest.
+            Dash0WebAuthToken = "auth_must_not_appear_here",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"endpoint\": \"https://ingress.europe-west4.gcp.dash0.com\"");
+        await Assert.That(yaml!).Contains("\"dataset\": \"prod-1\"");
+        await Assert.That(yaml!).Contains("\"environment\": \"prod-1\"");
+        await Assert.That(yaml!).DoesNotContain("auth_must_not_appear_here");
+        await Assert.That(yaml!).DoesNotContain("dash0WebAuthToken");
+    }
+
+    [Test]
+    public async Task Build_Dash0NotConfigured_OmitsTheKeyEntirely()
+    {
+        // A cluster without Dash0 must render byte-identical values to before this change.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            InstancePrefix = "test-2",
+        });
+
+        await Assert.That(yaml!).DoesNotContain("dash0");
+    }
+
+    [Test]
+    public async Task Build_Dash0PartiallyConfigured_EmitsOnlyWhatIsSet()
+    {
+        // Dataset can be encoded in the token instead, so endpoint-only is a real state.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            Dash0 = new Dash0Options { Endpoint = "https://ingress.example" },
+        });
+
+        await Assert.That(yaml!).Contains("\"endpoint\": \"https://ingress.example\"");
+        await Assert.That(yaml!).DoesNotContain("dataset");
+        await Assert.That(yaml!).DoesNotContain("environment");
+    }
 }

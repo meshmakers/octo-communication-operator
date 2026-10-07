@@ -126,4 +126,47 @@ public class OperatorOptionsBindingTests
         await Assert.That(options.Authentication).IsNotNull();
         await Assert.That(options.Authentication.IsEnabled).IsFalse();
     }
+
+    // AB#5536 - the SECRET key ring. The dictionary key is the key id the engine writes into
+    // the enc:v2:<kid>: header, so the env var spelling (lowercase kid, as rendered by the
+    // operator chart) must survive binding unchanged.
+    [Test]
+    [NotInParallel]
+    public async Task SecretEncryptionKeyRing_BindsFromTheDocumentedEnvironmentVariables()
+    {
+        var variables = new Dictionary<string, string>
+        {
+            ["OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__k1"] = "key-one",
+            ["OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__k2"] = "key-two",
+            ["OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONACTIVEKEYID"] = "k2",
+            ["OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONLEGACYV1KEY"] = "key-one"
+        };
+
+        foreach (var variable in variables)
+        {
+            Environment.SetEnvironmentVariable(variable.Key, variable.Value);
+        }
+
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+
+            var options = configuration.GetSection("Operator").Get<OperatorOptions>();
+
+            await Assert.That(options).IsNotNull();
+            var clusterSecrets = options!.ClusterSecrets;
+            await Assert.That(clusterSecrets.SecretEncryptionKeys.Keys.Order(StringComparer.Ordinal).ToArray())
+                .IsEquivalentTo(new[] { "k1", "k2" });
+            await Assert.That(clusterSecrets.SecretEncryptionKeys["k2"]).IsEqualTo("key-two");
+            await Assert.That(clusterSecrets.SecretEncryptionActiveKeyId).IsEqualTo("k2");
+            await Assert.That(clusterSecrets.SecretEncryptionLegacyV1Key).IsEqualTo("key-one");
+        }
+        finally
+        {
+            foreach (var variable in variables)
+            {
+                Environment.SetEnvironmentVariable(variable.Key, null);
+            }
+        }
+    }
 }

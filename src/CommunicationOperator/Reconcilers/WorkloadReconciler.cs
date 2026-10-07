@@ -20,6 +20,47 @@ namespace Meshmakers.Octo.Communication.Operator.Reconcilers;
 /// </summary>
 public sealed class WorkloadReconciler : IWorkloadReconciler
 {
+    /// <summary>
+    /// Charts that declare <c>secrets.ironOcrLicenseKey</c> and can therefore consume the
+    /// operator's <see cref="OperatorOptions.IronOcrLicenseKey"/> (AB#5449). Only
+    /// <c>PdfOcrExtraction@1</c> needs the licence and that node ships in the mesh adapter,
+    /// so exactly one chart reads the value today. Kept as a named list rather than injected
+    /// unconditionally so a commercial licence key is not materialised into the Secret of
+    /// every Loxone / Modbus / Zenon pod that will never run OCR.
+    /// <para>
+    /// ⚠️ Add a chart here when it starts hosting an OCR-capable node — and add the value to
+    /// that chart's <c>secrets</c> block in the same change, since Helm ignores a value the
+    /// chart does not declare and the omission would be silent.
+    /// </para>
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ChartsReadingIronOcrLicense =
+        new HashSet<string>(StringComparer.Ordinal) { "octo-mesh-adapter" };
+
+    /// <summary>
+    /// Charts that declare <c>secrets.dash0WebAuthToken</c> and can therefore consume the
+    /// operator's <see cref="OperatorOptions.Dash0WebAuthToken"/> — the browser-facing frontends
+    /// this operator rolls out as tenant workloads. Backend charts are absent on purpose: a
+    /// browser-RUM token is of no use to an adapter, and the server-side telemetry of those pods
+    /// already reaches Dash0 through the operator-injected auto-instrumentation.
+    /// <para>
+    /// ⚠️ Add a chart here when a new browser frontend ships — and add <c>dash0WebAuthToken</c>
+    /// to that chart's <c>secrets</c> block in the same change. Helm ignores a value the chart
+    /// does not declare, so the omission would be silent: the app would come up with an endpoint
+    /// and no token and skip telemetry, which is indistinguishable from "Dash0 is not activated
+    /// on this cluster".
+    /// </para>
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ChartsReadingDash0WebAuthToken =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "meshmakers-app",
+            "energy-community-app",
+            "energy-landing-page",
+            "cra-landing-page",
+            "accounting-landing-page",
+            "octomesh-website",
+        };
+
     /// <summary>Grace window for atomic rollback after a deploy cancel,
     /// before <see cref="UndeployAsync"/> proceeds with <c>helm uninstall</c>.
     /// Helm needs a moment to mark the release as failed and drop the
@@ -108,7 +149,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             workload = workload with
             {
                 Values = AppendClusterSecrets(workload.Values, workload.ReceivesClusterSecrets,
-                    workload.WorkloadType, _options),
+                    workload.WorkloadType, _options, workload.ChartName),
             };
 
             // AB#4924: a deployment site's resources belong to the tenant that lends it out, so that deleting
@@ -737,9 +778,40 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     /// </summary>
     internal static IReadOnlyList<ValueOverrideDto> AppendClusterSecrets(
         IReadOnlyList<ValueOverrideDto> existing, bool receivesClusterSecrets,
-        WorkloadTypeDto workloadType, OperatorOptions options)
+        WorkloadTypeDto workloadType, OperatorOptions options, string? chartName = null)
     {
-        var injected = new List<ValueOverrideDto>(5);
+        var injected = new List<ValueOverrideDto>(6);
+
+        // IronOCR licence key (AB#5449). Gated on the CHART rather than on
+        // ReceivesClusterSecrets: that opt-in means "this adapter talks to the
+        // cluster's data stores", which has nothing to do with OCR, and reusing it
+        // would hand the key to every Mongo-using adapter while withholding it from
+        // an OCR-capable edge one. Only charts that actually declare
+        // `secrets.ironOcrLicenseKey` can consume it — Helm silently ignores a value
+        // a chart does not read, so injecting it everywhere would not break anything,
+        // but it would materialise a commercial licence key into the Secret of every
+        // Loxone, Modbus and Zenon pod in the estate for no purpose. Same reasoning
+        // the data-store gate below is built on.
+        if (!string.IsNullOrEmpty(options.IronOcrLicenseKey)
+            && chartName is not null
+            && ChartsReadingIronOcrLicense.Contains(chartName))
+        {
+            injected.Add(new ValueOverrideDto
+                { Path = "secrets.ironOcrLicenseKey", Value = options.IronOcrLicenseKey, IsSecret = true });
+        }
+
+        // Dash0 browser-RUM ingest token. Gated on the chart for the same reason as the OCR
+        // licence above, with one addition: the non-secret half of this (endpoint / dataset /
+        // environment) goes to every workload via WorkloadContextValuesBuilder, so a frontend
+        // chart that is missing from the allowlist gets an endpoint, no token, and silently
+        // decides Dash0 is not activated. Keep the two lists in step.
+        if (!string.IsNullOrEmpty(options.Dash0WebAuthToken)
+            && chartName is not null
+            && ChartsReadingDash0WebAuthToken.Contains(chartName))
+        {
+            injected.Add(new ValueOverrideDto
+                { Path = "secrets.dash0WebAuthToken", Value = options.Dash0WebAuthToken, IsSecret = true });
+        }
 
         // The RabbitMQ broker password is part of the basic controller↔adapter
         // contract — every adapter needs the command bus, regardless of whether
@@ -824,6 +896,8 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             {
                 injected.Add(new ValueOverrideDto { Path = "secrets.streamDataPassword", Value = options.ClusterSecrets.StreamDataPassword, IsSecret = true });
             }
+
+            AppendSecretEncryptionKeyRing(injected, options.ClusterSecrets);
         }
 
         if (injected.Count == 0)
@@ -953,6 +1027,40 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             _logger.LogWarning(e,
                 "Could not write the owner reference onto release '{Release}'; the adapter pool will not be garbage-collected with its tenant",
                 release);
+        }
+    }
+
+    /// <summary>
+    /// SECRET attribute key ring (AB#5536). Same gate as the data-store credentials: a workload
+    /// that opts into <c>ReceivesClusterSecrets</c> runs the runtime engine against the cluster's
+    /// MongoDB and therefore reads and writes SECRET attribute values, which need the ring. The
+    /// keys are secret-flagged (they land in <c>{release}-octo-secrets</c>); the active key id is
+    /// not a secret and renders as a plain value. Keys are emitted in ordinal kid order so the
+    /// rendered values file — and with it the helm release — is stable across reconciles.
+    /// </summary>
+    private static void AppendSecretEncryptionKeyRing(List<ValueOverrideDto> injected, ClusterSecretsOptions clusterSecrets)
+    {
+        var keys = clusterSecrets.SecretEncryptionKeys
+            .Where(k => !string.IsNullOrWhiteSpace(k.Key) && !string.IsNullOrEmpty(k.Value))
+            .OrderBy(k => k.Key, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var (kid, key) in keys)
+        {
+            injected.Add(new ValueOverrideDto { Path = $"secrets.secretEncryption.keys.{kid}", Value = key, IsSecret = true });
+        }
+
+        var activeKeyId = !string.IsNullOrWhiteSpace(clusterSecrets.SecretEncryptionActiveKeyId)
+            ? clusterSecrets.SecretEncryptionActiveKeyId
+            : keys.Count == 1 ? keys[0].Key : null;
+        if (keys.Count > 0 && activeKeyId is not null)
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.secretEncryption.activeKeyId", Value = activeKeyId, IsSecret = false });
+        }
+
+        if (!string.IsNullOrEmpty(clusterSecrets.SecretEncryptionLegacyV1Key))
+        {
+            injected.Add(new ValueOverrideDto { Path = "secrets.secretEncryption.legacyV1Key", Value = clusterSecrets.SecretEncryptionLegacyV1Key, IsSecret = true });
         }
     }
 

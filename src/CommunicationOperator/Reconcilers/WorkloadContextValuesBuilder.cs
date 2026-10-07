@@ -124,6 +124,12 @@ public static class WorkloadContextValuesBuilder
             root["clusterDependencies"] = deps;
         }
 
+        var dash0 = BuildDash0(options.Dash0);
+        if (dash0.Count > 0)
+        {
+            root["dash0"] = dash0;
+        }
+
         var ingress = BuildIngress(options.Ingress, workload);
         if (ingress.Count > 0)
         {
@@ -147,6 +153,27 @@ public static class WorkloadContextValuesBuilder
             .WithEventEmitter(next => new QuotedStringEventEmitter(next))
             .Build();
         return serializer.Serialize(root);
+    }
+
+    /// <summary>
+    /// Projects the cluster's Dash0 browser-RUM context. Only the non-secret half lives here —
+    /// the ingest token travels as a secret-flagged value override
+    /// (<c>secrets.dash0WebAuthToken</c>) so it lands in the per-release Kubernetes Secret
+    /// instead of the rendered manifest.
+    /// <para>
+    /// Emitted for EVERY workload, not just the frontend charts. Helm ignores a value a chart
+    /// does not declare, so a Loxone adapter simply never reads it — and the alternative, an
+    /// allowlist here as well as on the token, would mean a new frontend chart silently gets the
+    /// token and no endpoint, which reads as "Dash0 is off here" rather than as a mistake.
+    /// </para>
+    /// </summary>
+    private static Dictionary<string, object> BuildDash0(Dash0Options dash0)
+    {
+        var map = new Dictionary<string, object>();
+        if (!string.IsNullOrWhiteSpace(dash0.Endpoint)) map["endpoint"] = dash0.Endpoint!;
+        if (!string.IsNullOrWhiteSpace(dash0.Dataset)) map["dataset"] = dash0.Dataset!;
+        if (!string.IsNullOrWhiteSpace(dash0.Environment)) map["environment"] = dash0.Environment!;
+        return map;
     }
 
     private static Dictionary<string, object> BuildClusterDependencies(ClusterDependenciesOptions deps)

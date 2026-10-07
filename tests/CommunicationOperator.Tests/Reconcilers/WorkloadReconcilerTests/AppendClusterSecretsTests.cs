@@ -252,4 +252,262 @@ internal class AppendClusterSecretsTests
         await Assert.That(paths).Contains("secrets.rabbitmq");
         await Assert.That(paths).Contains("secrets.rootCa");
     }
+
+    // AB#5449 — the IronOCR licence key. Gated on the CHART, not on
+    // ReceivesClusterSecrets: that opt-in means "this adapter talks to the cluster's
+    // data stores", which says nothing about OCR. The four tests below pin both
+    // directions of that gate, because an over-broad injection would materialise a
+    // commercial licence key into the Secret of every Loxone / Modbus / Zenon pod.
+    [Test]
+    public async Task IronOcrLicense_ChartReadsIt_InjectsSecretFlaggedEntry()
+    {
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, WorkloadTypeDto.Adapter, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(1);
+        await Assert.That(result[0].Path).IsEqualTo("secrets.ironOcrLicenseKey");
+        await Assert.That(result[0].Value).IsEqualTo("IRONOCR.TEST.KEY");
+        await Assert.That(result[0].IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task IronOcrLicense_ChartDoesNotReadIt_InjectsNothing()
+    {
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        // An edge adapter that never runs OCR must not carry the licence.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts, "octo-loxone-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IronOcrLicense_UnknownChartName_InjectsNothing()
+    {
+        // Null is what every pre-AB#5449 caller passes; it must stay inert rather
+        // than defaulting to "inject everywhere".
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts);
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IronOcrLicense_NotConfigured_InjectsNothing()
+    {
+        // Unset is a supported state: most tenants never run OCR, and the adapter
+        // fails on first OCR use rather than at startup.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false,
+            WorkloadTypeDto.Adapter, new OperatorOptions(), "octo-mesh-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IronOcrLicense_AlongsideClusterSecrets_AddsToThemRatherThanReplacing()
+    {
+        var opts = FullClusterOptions();
+        opts.IronOcrLicenseKey = "IRONOCR.TEST.KEY";
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Count).IsEqualTo(5);
+        var paths = result.Select(e => e.Path).ToArray();
+        await Assert.That(paths).Contains("secrets.ironOcrLicenseKey");
+        await Assert.That(paths).Contains("secrets.rabbitmq");
+        await Assert.That(paths).Contains("secrets.databaseUser");
+        foreach (var entry in result)
+        {
+            await Assert.That(entry.IsSecret).IsTrue();
+        }
+    }
+
+    // --- Dash0 browser-RUM token -------------------------------------------------
+    // Same chart gate as the OCR licence, and pinned in both directions for a sharper
+    // reason: the NON-secret half (endpoint / dataset / environment) reaches every
+    // workload through WorkloadContextValuesBuilder. A frontend chart missing from the
+    // allowlist therefore comes up with an endpoint and no token and quietly decides
+    // Dash0 is not activated — a failure with no error anywhere to notice.
+    [Test]
+    public async Task Dash0WebAuthToken_FrontendChart_InjectsSecretFlaggedEntry()
+    {
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, WorkloadTypeDto.Adapter, opts, "meshmakers-app");
+
+        await Assert.That(result.Count).IsEqualTo(1);
+        await Assert.That(result[0].Path).IsEqualTo("secrets.dash0WebAuthToken");
+        await Assert.That(result[0].Value).IsEqualTo("auth_test");
+        await Assert.That(result[0].IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_BackendChart_InjectsNothing()
+    {
+        // A browser-RUM token is of no use to an adapter, whose server-side telemetry
+        // already reaches Dash0 via the injected auto-instrumentation.
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Select(e => e.Path)).DoesNotContain("secrets.dash0WebAuthToken");
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_UnknownChartName_InjectsNothing()
+    {
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts);
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_NotConfigured_InjectsNothing()
+    {
+        // The default state on a cluster without Dash0 activated, and on every cluster
+        // before its Vault key exists.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false,
+            WorkloadTypeDto.Adapter, new OperatorOptions(), "meshmakers-app");
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Dash0WebAuthToken_EveryAllowlistedChart_IsInjected()
+    {
+        // Guards the list itself: a chart added to ChartsReadingDash0WebAuthToken without
+        // a secrets.dash0WebAuthToken block in its values is the silent half of this
+        // feature, so at minimum the operator side must agree with itself.
+        var opts = new OperatorOptions { Dash0WebAuthToken = "auth_test" };
+
+        foreach (var chart in WorkloadReconciler.ChartsReadingDash0WebAuthToken)
+        {
+            var result = WorkloadReconciler.AppendClusterSecrets(
+                Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, WorkloadTypeDto.Adapter, opts, chart);
+
+            await Assert.That(result.Select(e => e.Path)).Contains("secrets.dash0WebAuthToken");
+        }
+    }
+
+    // --- AB#5536: SECRET attribute key ring --------------------------------------
+    // Gated on ReceivesClusterSecrets like the data-store credentials: a workload that
+    // talks to the cluster's MongoDB runs the runtime engine and reads/writes SECRET
+    // attribute values. An edge adapter without that opt-in must not carry the key.
+    private static OperatorOptions KeyRingOptions(string? activeKeyId = "k1") => new()
+    {
+        ClusterSecrets = new ClusterSecretsOptions
+        {
+            SecretEncryptionKeys = new Dictionary<string, string> { ["k1"] = "key-one" },
+            SecretEncryptionActiveKeyId = activeKeyId,
+            SecretEncryptionLegacyV1Key = "key-one",
+        },
+    };
+
+    [Test]
+    public async Task KeyRing_FlagOn_InjectsKeysActiveIdAndLegacyKey()
+    {
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, KeyRingOptions());
+
+        var key = result.Single(e => e.Path == "secrets.secretEncryption.keys.k1");
+        await Assert.That(key.Value).IsEqualTo("key-one");
+        await Assert.That(key.IsSecret).IsTrue();
+
+        var active = result.Single(e => e.Path == "secrets.secretEncryption.activeKeyId");
+        await Assert.That(active.Value).IsEqualTo("k1");
+        await Assert.That(active.IsSecret).IsFalse();
+
+        var legacy = result.Single(e => e.Path == "secrets.secretEncryption.legacyV1Key");
+        await Assert.That(legacy.Value).IsEqualTo("key-one");
+        await Assert.That(legacy.IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task KeyRing_FlagOff_InjectsNothing()
+    {
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: false, WorkloadTypeDto.Adapter, KeyRingOptions());
+
+        await Assert.That(result.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task KeyRing_NotConfigured_InjectsNothing()
+    {
+        // Every cluster before its operator chart carries instanceSecretKey.
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, new OperatorOptions());
+
+        await Assert.That(result.Select(e => e.Path).Any(p => p.StartsWith("secrets.secretEncryption"))).IsFalse();
+    }
+
+    [Test]
+    public async Task KeyRing_Rotation_InjectsEveryKeyInStableOrder()
+    {
+        var opts = new OperatorOptions
+        {
+            ClusterSecrets = new ClusterSecretsOptions
+            {
+                SecretEncryptionKeys = new Dictionary<string, string> { ["k2"] = "key-two", ["k1"] = "key-one" },
+                SecretEncryptionActiveKeyId = "k2",
+                SecretEncryptionLegacyV1Key = "key-one",
+            },
+        };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts);
+
+        var keyPaths = result.Select(e => e.Path).Where(p => p.StartsWith("secrets.secretEncryption.keys.")).ToArray();
+        await Assert.That(keyPaths).IsEquivalentTo(new[] { "secrets.secretEncryption.keys.k1", "secrets.secretEncryption.keys.k2" });
+        await Assert.That(keyPaths[0]).IsEqualTo("secrets.secretEncryption.keys.k1");
+        await Assert.That(result.Single(e => e.Path == "secrets.secretEncryption.activeKeyId").Value).IsEqualTo("k2");
+    }
+
+    [Test]
+    public async Task KeyRing_NoActiveIdWithSingleKey_UsesThatKey()
+    {
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, KeyRingOptions(activeKeyId: null));
+
+        await Assert.That(result.Single(e => e.Path == "secrets.secretEncryption.activeKeyId").Value).IsEqualTo("k1");
+    }
+
+    [Test]
+    public async Task KeyRing_EmptyKeyValue_IsSkipped()
+    {
+        var opts = KeyRingOptions();
+        opts.ClusterSecrets.SecretEncryptionKeys["k2"] = "";
+
+        var result = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts);
+
+        await Assert.That(result.Select(e => e.Path)).DoesNotContain("secrets.secretEncryption.keys.k2");
+    }
+
+    [Test]
+    public async Task KeyRing_GeneratedOverrideYaml_KeysAsSecretKeyRef_ActiveIdPlain()
+    {
+        var injected = WorkloadReconciler.AppendClusterSecrets(
+            Array.Empty<ValueOverrideDto>(), receivesClusterSecrets: true, WorkloadTypeDto.Adapter, KeyRingOptions());
+        var yaml = WorkloadOverrideYamlBuilder.Build(injected, "rel-octo-secrets");
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"key\": \"secrets.secretEncryption.keys.k1\"");
+        await Assert.That(yaml!).Contains("\"activeKeyId\": \"k1\"");
+        await Assert.That(yaml!).DoesNotContain("key-one");
+    }
+
 }
