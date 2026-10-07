@@ -897,6 +897,11 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 injected.Add(new ValueOverrideDto { Path = "secrets.streamDataPassword", Value = options.ClusterSecrets.StreamDataPassword, IsSecret = true });
             }
 
+            // 🔴 E3b (AB#4924 × AB#5528): an adapter pool never reaches this line — its
+            // receivesClusterSecrets is forced false above — so a pool member gets NO key ring.
+            // Deliberate: a member runs work for several tenants, and a standing key ring would let
+            // it reveal any tenant's SECRET values. Leased pipelines that need secrets are refused at
+            // the controller's leased gate until the secret transport over the lease exists.
             AppendSecretEncryptionKeyRing(injected, options.ClusterSecrets);
         }
 

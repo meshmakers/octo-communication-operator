@@ -510,4 +510,68 @@ internal class AppendClusterSecretsTests
         await Assert.That(yaml!).DoesNotContain("key-one");
     }
 
+    // --- E3 (decision 2026-10-07): what a pool member gets of the AB#5449/AB#5536 additions ---
+
+    [Test]
+    public async Task AdapterPool_ChartReadsIt_GetsTheIronOcrLicense()
+    {
+        // E3a: yes. The OCR gate is the chart, not ReceivesClusterSecrets, and a pool member runs
+        // the octo-mesh-adapter chart — so a leased OCR pipeline works. The licence carries no
+        // tenant authority.
+        var opts = new OperatorOptions { IronOcrLicenseKey = "IRONOCR.TEST.KEY" };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(),
+            receivesClusterSecrets: true, WorkloadTypeDto.AdapterPool, opts, "octo-mesh-adapter");
+
+        var entry = result.SingleOrDefault(v => v.Path == "secrets.ironOcrLicenseKey");
+        await Assert.That(entry).IsNotNull();
+        await Assert.That(entry!.IsSecret).IsTrue();
+    }
+
+    [Test]
+    public async Task AdapterPool_FlagOn_GetsNoSecretEncryptionKeyRing()
+    {
+        // 🔴 E3b: no. The key ring decrypts SECRET attribute values of every tenant on the cluster;
+        // a member serving several tenants must not hold it standing. It rides on the data-store
+        // gate, which is forced off for a pool even when the entity sets the flag. Leased pipelines
+        // that need secrets are refused at the controller's leased gate instead.
+        var opts = new OperatorOptions
+        {
+            BrokerPassword = "rabbit-pwd",
+            ClusterSecrets = new ClusterSecretsOptions
+            {
+                MongodbUserPassword = "mongo-user-pwd",
+                SecretEncryptionKeys = new Dictionary<string, string> { ["k1"] = "key-one" },
+                SecretEncryptionActiveKeyId = "k1",
+                SecretEncryptionLegacyV1Key = "key-one",
+            },
+        };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(),
+            receivesClusterSecrets: true, WorkloadTypeDto.AdapterPool, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Any(v => v.Path.StartsWith("secrets.secretEncryption", StringComparison.Ordinal)))
+            .IsFalse();
+        await Assert.That(result.Select(v => v.Path).ToArray()).Contains("secrets.rabbitmq");
+    }
+
+    [Test]
+    public async Task DedicatedAdapter_FlagOn_StillGetsTheKeyRing()
+    {
+        // Positive control for the test above: the same options on a dedicated adapter do carry
+        // the ring, so the pool assertion is not passing for an unrelated reason.
+        var opts = new OperatorOptions
+        {
+            ClusterSecrets = new ClusterSecretsOptions
+            {
+                SecretEncryptionKeys = new Dictionary<string, string> { ["k1"] = "key-one" },
+                SecretEncryptionActiveKeyId = "k1",
+            },
+        };
+
+        var result = WorkloadReconciler.AppendClusterSecrets(Array.Empty<ValueOverrideDto>(),
+            receivesClusterSecrets: true, WorkloadTypeDto.Adapter, opts, "octo-mesh-adapter");
+
+        await Assert.That(result.Select(v => v.Path).ToArray()).Contains("secrets.secretEncryption.keys.k1");
+    }
 }
