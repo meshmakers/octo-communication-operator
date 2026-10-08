@@ -990,12 +990,14 @@ Argument shape under MTP:
 `devops-build/azure-pipelines.yml` builds, tests, builds the Docker image, and publishes artifacts. The structure mirrors `octo-communication-controller-services` — explicit `Restore` → `Build` → `Test` so that `OctoNugetPrivateServer` is forwarded to MSBuild on every step:
 
 ```yaml
+# Purges only the private feed's NuGet HTTP cache so floating 0.1.* ranges see fresh
+# packages; nuget.org stays cached. Replaced `--force` + `noCache: true` (AB#5720).
+- template: templates/steps/purge-private-nuget-http-cache.yml@pipelineTemplates
 - task: DotNetCoreCLI@2
   inputs:
     command: 'restore'
     projects: '$(solutionFile)'
-    restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
-    noCache: true
+    restoreArguments: '/p:OctoNugetPrivateServer=$(nugetPrivateServer)'
 - task: DotNetCoreCLI@2
   inputs:
     command: 'build'
