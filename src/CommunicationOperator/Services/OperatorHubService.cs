@@ -68,7 +68,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public bool IsConnected => _client?.IsAlive ?? false;
 
     /// <inheritdoc />
-    public async Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
+    public async Task<bool> RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         var client = _client;
         if (client == null || !client.IsAlive)
@@ -76,9 +76,24 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             _logger.LogDebug(
                 "Operator-hub not connected; skipping RegisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId} (will be replayed on reconnect)",
                 tenantId, deploymentSiteRtId);
-            return;
+            return false;
         }
-        await client.RegisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
+        try
+        {
+            await client.RegisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
+            return true;
+        }
+        catch (InvalidOperationException ex) when (IsConnectionNotActive(ex))
+        {
+            // AB#6418: IsAlive is true while the connection is Connecting/Reconnecting, but invoking a
+            // hub method then throws "The 'InvokeCoreAsync' method cannot be called if the connection
+            // is not active". That is the same "hub is down" case as above, not a failed reconcile:
+            // the connect callback registers every owned site once the connection is back.
+            _logger.LogDebug(ex,
+                "Operator-hub connection not active; deferring RegisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId} (will be replayed on reconnect)",
+                tenantId, deploymentSiteRtId);
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -92,8 +107,22 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 tenantId, deploymentSiteRtId);
             return;
         }
-        await client.UnregisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
+        try
+        {
+            await client.UnregisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
+        }
+        catch (InvalidOperationException ex) when (IsConnectionNotActive(ex))
+        {
+            _logger.LogDebug(ex,
+                "Operator-hub connection not active; skipping UnregisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId}",
+                tenantId, deploymentSiteRtId);
+        }
     }
+
+    // SignalR's HubConnection throws a plain InvalidOperationException with this wording when a hub
+    // method is invoked while the connection is not Connected.
+    private static bool IsConnectionNotActive(InvalidOperationException ex) =>
+        ex.Message.Contains("connection is not active", StringComparison.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public async Task ReportDeployedDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
@@ -217,8 +246,21 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             // → Cloud, edge op → Edge). Without this declaration the
             // controller treats us as legacy and skips enforcement.
             var deployedDeploymentSites = (await client.RegisterOperatorAsync(_options.AutoManageDeploymentSites)).ToArray();
-            _logger.LogInformation("Registered with controller, {DeploymentSiteCount} deployed Cloud deployment sites",
-                deployedDeploymentSites.Length);
+            if (_options.AutoManageDeploymentSites)
+            {
+                _logger.LogInformation("Registered with controller as central operator, {DeploymentSiteCount} deployed Cloud deployment sites to manage",
+                    deployedDeploymentSites.Length);
+            }
+            else
+            {
+                // AB#6418: the line used to read "Registered with controller, 19 deployed Cloud
+                // deployment sites" on an edge operator too, which looked like it owned them. An edge
+                // operator never acts on Cloud sites (they belong to the central operator); current
+                // controllers send it none, older ones send the full list, which is ignored below.
+                _logger.LogInformation(
+                    "Registered with controller as edge operator; the controller listed {DeploymentSiteCount} Cloud deployment site(s) of the central operator, ignored here",
+                    deployedDeploymentSites.Length);
+            }
 
             // Same gate as DeploymentSiteDeployedAsync: auto-CR-creation is the central
             // operator's job. Without this check an edge operator would

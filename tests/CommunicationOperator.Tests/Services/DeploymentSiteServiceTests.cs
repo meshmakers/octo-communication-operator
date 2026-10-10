@@ -18,6 +18,7 @@ public class DeploymentSiteServiceTests
     public DeploymentSiteServiceTests()
     {
         _hub.IsConnected.Returns(true);
+        _hub.RegisterDeploymentSiteAsync(Arg.Any<string>(), Arg.Any<string>()).Returns(true);
         _service = new DeploymentSiteService(NullLogger<DeploymentSiteService>.Instance, _hub);
     }
 
@@ -118,10 +119,27 @@ public class DeploymentSiteServiceTests
         // picks it up. Calling ReportDeployedDeploymentSiteAsync now would be wasted
         // work and produce a confusing "skipping" log entry per CR.
         _hub.IsConnected.Returns(false);
+        _hub.RegisterDeploymentSiteAsync(Arg.Any<string>(), Arg.Any<string>()).Returns(false);
         var entity = Entity("acme", AcmeDeploymentSiteRtId, "default");
 
         await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
 
         await _hub.DidNotReceiveWithAnyArgs().ReportDeployedDeploymentSiteAsync(default!, default!);
+    }
+
+    [Test]
+    public async Task RegisterDeploymentSiteAsync_ConnectionAliveButCallDeferred_IsNotMarkedRegistered()
+    {
+        // AB#6418: IsConnected is true while the connection is Connecting/Reconnecting, but the
+        // invoker deferred the call. The site must stay unregistered (retry loop / connect
+        // callback pick it up) and no reverse-sync may run against the inactive connection.
+        _hub.IsConnected.Returns(true);
+        _hub.RegisterDeploymentSiteAsync(Arg.Any<string>(), Arg.Any<string>()).Returns(false);
+        var entity = Entity("acme", AcmeDeploymentSiteRtId, "default");
+
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+
+        await _hub.DidNotReceiveWithAnyArgs().ReportDeployedDeploymentSiteAsync(default!, default!);
+        await Assert.That(_service.GetDeploymentSites().Single().IsRegistered).IsFalse();
     }
 }

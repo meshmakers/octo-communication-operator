@@ -95,8 +95,10 @@ public class DeploymentSiteService : IDeploymentSiteService, IOperatorHubCallbac
             // No-op when the hub connection is down — the reconnect
             // handler picks the deployment site up from GetDeploymentSites() and re-registers
             // it then.
-            await _hubInvoker.RegisterDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
-            deploymentSite.IsRegistered = _hubInvoker.IsConnected;
+            // IsRegistered only when the controller call actually ran (AB#6418): IsConnected is
+            // true while the connection is still Connecting/Reconnecting.
+            deploymentSite.IsRegistered =
+                await _hubInvoker.RegisterDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
         }
         catch (HubException e)
         {
