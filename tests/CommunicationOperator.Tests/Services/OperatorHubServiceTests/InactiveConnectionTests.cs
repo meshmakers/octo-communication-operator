@@ -31,7 +31,7 @@ public class InactiveConnectionTests : OperatorHubServiceTestsBase
         client.When(c => c.EnableReconnect(Arg.Any<Func<bool, Task>>())).Do(_ => connected.TrySetResult());
 
         await ((IHostedService)Service).StartAsync(CancellationToken.None);
-        await connected.Task;
+        await connected.Task.WaitAsync(TimeSpan.FromSeconds(10));
         return client;
     }
 

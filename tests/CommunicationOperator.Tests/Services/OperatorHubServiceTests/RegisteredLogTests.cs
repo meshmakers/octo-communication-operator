@@ -49,7 +49,7 @@ public class RegisteredLogTests
 
         var hosted = (IHostedService)service;
         await hosted.StartAsync(CancellationToken.None);
-        await connected.Task;
+        await connected.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await hosted.StopAsync(CancellationToken.None);
 
         var line = logger.Messages.Single(m => m.StartsWith("Registered with controller"));
