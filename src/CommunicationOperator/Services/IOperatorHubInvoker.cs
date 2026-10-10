@@ -22,10 +22,12 @@ public interface IOperatorHubInvoker
 
     /// <summary>
     /// Invokes <c>IOperatorHub.RegisterDeploymentSiteAsync</c> on the controller for
-    /// the given deployment site. Silently skips when the connection is down.
+    /// the given deployment site. Silently skips when the connection is down or not active.
     /// <paramref name="deploymentSiteRtId"/> is the controller-side lookup key.
     /// </summary>
-    Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId);
+    /// <returns><c>true</c> only if the controller call actually ran; <c>false</c> when it was
+    /// skipped/deferred (the connect callback or the retry loop registers the site later).</returns>
+    Task<bool> RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Invokes <c>IOperatorHub.UnregisterDeploymentSiteAsync</c>. Silently skips when

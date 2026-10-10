@@ -41,8 +41,9 @@ public class InactiveConnectionTests : OperatorHubServiceTestsBase
         var client = await StartedClientAsync();
         client.RegisterDeploymentSiteAsync(TenantId, DeploymentSiteRtId).Returns(Task.FromException(new InvalidOperationException(NotActive)));
 
-        await ((IOperatorHubInvoker)Service).RegisterDeploymentSiteAsync(TenantId, DeploymentSiteRtId);
+        var registered = await ((IOperatorHubInvoker)Service).RegisterDeploymentSiteAsync(TenantId, DeploymentSiteRtId);
 
+        await Assert.That(registered).IsFalse();
         await client.Received(1).RegisterDeploymentSiteAsync(TenantId, DeploymentSiteRtId);
         await ((IHostedService)Service).StopAsync(CancellationToken.None);
     }

@@ -68,7 +68,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
     public bool IsConnected => _client?.IsAlive ?? false;
 
     /// <inheritdoc />
-    public async Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
+    public async Task<bool> RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         var client = _client;
         if (client == null || !client.IsAlive)
@@ -76,11 +76,12 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             _logger.LogDebug(
                 "Operator-hub not connected; skipping RegisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId} (will be replayed on reconnect)",
                 tenantId, deploymentSiteRtId);
-            return;
+            return false;
         }
         try
         {
             await client.RegisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
+            return true;
         }
         catch (InvalidOperationException ex) when (IsConnectionNotActive(ex))
         {
@@ -91,6 +92,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             _logger.LogDebug(ex,
                 "Operator-hub connection not active; deferring RegisterDeploymentSiteAsync for tenant '{TenantId}', deployment site rtId {DeploymentSiteRtId} (will be replayed on reconnect)",
                 tenantId, deploymentSiteRtId);
+            return false;
         }
     }
 
