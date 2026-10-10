@@ -1018,7 +1018,7 @@ Argument shape under MTP:
 
 Two reasons for this exact shape:
 
-1. **`OctoNugetPrivateServer` must be passed to every MSBuild invocation.** `Directory.Build.props` reads it to choose `OctoVersion` (`0.1.*` from the private feed when set, `3.3.*` from nuget.org otherwise) and `RestoreSources`. If only the restore step gets it but the build/test step doesn't, MSBuild re-evaluates and falls back to nuget.org, dragging in stale transitive packages (this is how RestSharp 110.2.0 — `GHSA-4rr6-2v9v-wcpc` — slipped in earlier and tripped `NU1902` under `TreatWarningsAsErrors`).
+1. **`OctoNugetPrivateServer` must be passed to every MSBuild invocation.** `Directory.Build.props` reads it to choose `OctoVersion` (`0.1.*` from the private feed when set; otherwise there is no fallback since AB#6297 and the build fails fast with `OCTO0001` unless the pipeline sets `OctoVersion`) and `RestoreSources`. If only the restore step gets it but the build/test step doesn't, MSBuild re-evaluates and falls back to nuget.org, dragging in stale transitive packages (this is how RestSharp 110.2.0 — `GHSA-4rr6-2v9v-wcpc` — slipped in earlier and tripped `NU1902` under `TreatWarningsAsErrors`).
 2. **`command: 'custom'` + `--solution`** instead of `command: 'test'` + `projects: ...`. The standard form passes the project glob as positional args, which Microsoft.Testing.Platform rejects on .NET 10 SDK. `--solution` enumerates every test project in the .sln, so adding a new test project to the .sln is the only step needed to wire it into CI.
 
 ### Mandatory before commit (per repo conventions)
