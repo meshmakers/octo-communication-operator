@@ -219,4 +219,68 @@ public class OperatorAccessTokenServiceTests
             await service.StopAsync(CancellationToken.None);
         }
     }
+
+    [Test]
+    public async Task ComputeDelay_WithoutAnyToken_ReturnsTheRetryIntervalAndDoesNotThrow()
+    {
+        // AB#6455: DateTime.MinValue minus the refresh skew used to underflow and fault the host.
+        var delay = OperatorAccessTokenService.ComputeDelay(
+            DateTime.MinValue, DateTime.UtcNow, OperatorAccessTokenService.RetryInterval);
+
+        await Assert.That(delay).IsEqualTo(OperatorAccessTokenService.RetryInterval);
+    }
+
+    [Test]
+    public async Task ComputeDelay_WithAFarFutureToken_IsMeasuredFromTheExpiry()
+    {
+        var now = new DateTime(2026, 10, 11, 5, 0, 0, DateTimeKind.Utc);
+
+        var delay = OperatorAccessTokenService.ComputeDelay(
+            now.AddHours(1), now, OperatorAccessTokenService.RetryInterval);
+
+        await Assert.That(delay).IsEqualTo(TimeSpan.FromHours(1) - OperatorAccessTokenService.RefreshSkew);
+    }
+
+    [Test]
+    public async Task ComputeDelay_WithATokenInsideTheRefreshWindowOrExpired_IsClampedToTheRetryInterval()
+    {
+        var now = new DateTime(2026, 10, 11, 5, 0, 0, DateTimeKind.Utc);
+        var retry = OperatorAccessTokenService.RetryInterval;
+
+        await Assert.That(OperatorAccessTokenService.ComputeDelay(now.AddMinutes(2), now, retry)).IsEqualTo(retry);
+        await Assert.That(OperatorAccessTokenService.ComputeDelay(now.AddMinutes(-10), now, retry)).IsEqualTo(retry);
+    }
+
+    [Test]
+    public async Task ExecuteLoop_AfterAFailedFirstAcquisition_KeepsRetryingAndDoesNotFaultTheService()
+    {
+        // AB#6455: identity unavailable at startup must not stop the host; the loop retries.
+        var authenticatorClient = Substitute.For<IAuthenticatorClient>();
+        authenticatorClient.RequestClientCredentialsTokenAsync(
+                Arg.Any<ApiScopes>(), Arg.Any<DefaultScopes>(), Arg.Any<IEnumerable<string>?>(),
+                Arg.Any<string?>(), Arg.Any<string?>())
+            .ThrowsAsync(new HttpRequestException("503 Service Temporarily Unavailable"));
+        var accessToken = new ServiceClientAccessToken();
+        using var service = CreateService(authenticatorClient, accessToken);
+        service.RetryIntervalOverride = TimeSpan.FromMilliseconds(10);
+
+        await service.StartAsync(CancellationToken.None);
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (authenticatorClient.ReceivedCalls().Count() < 3 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(10);
+            }
+
+            await Assert.That(authenticatorClient.ReceivedCalls().Count()).IsGreaterThanOrEqualTo(3);
+            await Assert.That(service.ExecuteTask!.IsFaulted).IsFalse();
+            await Assert.That(service.ExecuteTask!.IsCompleted).IsFalse();
+            await Assert.That(accessToken.AccessToken).IsNull();
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
+        }
+    }
 }
