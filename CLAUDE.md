@@ -418,6 +418,9 @@ it ran during the first.
 
 Wire-compatible: no hub contract change. An older operator keeps the old behaviour; the controller side needs nothing.
 Tests: `Reconcilers/WorkloadReconcilerTests/DuplicateDispatchTests`, `Helm/HelmRunnerTests` (`--description`, history parse).
+Kind E2E (real helm, simulated controller restart with 6 workloads, one in flight, lost reports, user redeploy):
+`E2E/ControllerRestartRedispatchKindE2ETests`, run with `OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind`
+(`OCTO_OPERATOR_E2E_LEGACY=1` only prints the outcome — counter-check against a build without the fix).
 
 ### Stale Helm-Lock Recovery (AB#4894)
 
