@@ -20,6 +20,43 @@ internal class HelmRunnerTests
             .Returns(new HelmProcessResult(0, string.Empty, string.Empty));
     }
 
+    /// <summary>AB#6471: the desired-state stamp travels as <c>--description</c> on the real install only.</summary>
+    [Test]
+    public async Task UpgradeInstallAsync_WithDescription_PassesItToHelm()
+    {
+        await _runner.UpgradeInstallAsync("rel", "repo/chart", "1.0.0", "octo", [],
+            new Dictionary<string, string>(), "octo-deploy:abc", CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a => a.Zip(a.Skip(1)).Any(p => p.First == "--description" && p.Second == "octo-deploy:abc")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task UpgradeInstallDryRunAsync_NeverCarriesADescription()
+    {
+        await _runner.UpgradeInstallDryRunAsync("rel", "repo/chart", "1.0.0", "octo", [],
+            new Dictionary<string, string>(), CancellationToken.None);
+
+        await _invoker.Received(1).InvokeAsync(
+            Arg.Is<IReadOnlyList<string>>(a => !a.Contains("--description")), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task ParseLatestRevision_ReadsTheDescription()
+    {
+        const string json = """
+            [{"revision":1,"status":"superseded","description":"Install complete"},
+             {"revision":2,"status":"deployed","description":"octo-deploy:abc"}]
+            """;
+
+        var latest = _runner.ParseLatestRevision(json, "rel");
+
+        await Assert.That(latest!.Revision).IsEqualTo(2);
+        await Assert.That(latest.IsDeployed).IsTrue();
+        await Assert.That(latest.Description).IsEqualTo("octo-deploy:abc");
+    }
+
     /// <summary>
     ///     🔴 AB#5325 — <c>--force-conflicts</c> is opt-in. It overwrites whatever a person set on the
     ///     object by hand, on every deploy from then on, so the default must not carry it.
@@ -28,7 +65,7 @@ internal class HelmRunnerTests
     public async Task UpgradeInstallAsync_ByDefault_DoesNotForceConflicts()
     {
         await _runner.UpgradeInstallAsync("rel", "repo/chart", "1.0.0", "octo", [],
-            new Dictionary<string, string>(), CancellationToken.None);
+            new Dictionary<string, string>(), null, CancellationToken.None);
 
         await _invoker.Received(1).InvokeAsync(
             Arg.Is<IReadOnlyList<string>>(a => !a.Contains("--force-conflicts")), Arg.Any<CancellationToken>());
@@ -40,7 +77,7 @@ internal class HelmRunnerTests
         _options.Helm.ForceConflicts = true;
 
         await _runner.UpgradeInstallAsync("rel", "repo/chart", "1.0.0", "octo", [],
-            new Dictionary<string, string>(), CancellationToken.None);
+            new Dictionary<string, string>(), null, CancellationToken.None);
 
         await _invoker.Received(1).InvokeAsync(
             Arg.Is<IReadOnlyList<string>>(a => a.Contains("--force-conflicts")), Arg.Any<CancellationToken>());
@@ -111,6 +148,7 @@ internal class HelmRunnerTests
         await _runner.UpgradeInstallAsync("acme-app", "acme/voest-app", "1.2.3", "octo",
             valuesFiles: new[] { "/tmp/values-a.yaml", "/tmp/values-b.yaml" },
             setValues: new Dictionary<string, string> { ["image.tag"] = "dev" },
+            description: null,
             CancellationToken.None);
 
         await _invoker.Received(1).InvokeAsync(
@@ -138,6 +176,7 @@ internal class HelmRunnerTests
         await _runner.UpgradeInstallAsync("rel", "acme/app", string.Empty, "octo",
             valuesFiles: Array.Empty<string>(),
             setValues: new Dictionary<string, string>(),
+            description: null,
             CancellationToken.None);
 
         await _invoker.Received(1).InvokeAsync(
@@ -160,6 +199,7 @@ internal class HelmRunnerTests
         await _runner.UpgradeInstallAsync("rel", "acme/app", "   ", "octo",
             valuesFiles: Array.Empty<string>(),
             setValues: new Dictionary<string, string>(),
+            description: null,
             CancellationToken.None);
 
         await _invoker.Received(1).InvokeAsync(
@@ -179,6 +219,7 @@ internal class HelmRunnerTests
                 ["env.RAW"] = "a=b,c",
                 ["env.BACKSLASH"] = "back\\slash",
             },
+            description: null,
             CancellationToken.None);
 
         await _invoker.Received(1).InvokeAsync(
@@ -194,7 +235,7 @@ internal class HelmRunnerTests
             .Returns(new HelmProcessResult(2, "", "Error: chart not found"));
 
         var ex = await Assert.That(async () => await _runner.UpgradeInstallAsync("r", "c", "1", "n",
-                Array.Empty<string>(), new Dictionary<string, string>(), CancellationToken.None))
+                Array.Empty<string>(), new Dictionary<string, string>(), null, CancellationToken.None))
             .Throws<HelmException>();
 
         await Assert.That(ex!.ExitCode).IsEqualTo(2);

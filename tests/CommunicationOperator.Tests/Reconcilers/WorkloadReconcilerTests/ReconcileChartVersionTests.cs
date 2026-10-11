@@ -33,7 +33,7 @@ internal class ReconcileChartVersionTests : WorkloadReconcilerTestsBase
     private Task DeployedWith(string version) => Helm.Received(1).UpgradeInstallAsync(
         Arg.Any<string>(), Arg.Any<string>(), version, Arg.Any<string>(),
         Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-        Arg.Any<CancellationToken>());
+        Arg.Any<string?>(), Arg.Any<CancellationToken>());
 
     [Test]
     public async Task Reconcile_Unpinned_KeepsTheInstalledChartVersion()

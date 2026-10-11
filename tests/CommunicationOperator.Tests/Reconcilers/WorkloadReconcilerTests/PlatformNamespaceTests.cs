@@ -62,7 +62,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
             PlatformNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
         await Helm.Received(1).UpgradeInstallDryRunAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
             PlatformNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
             Arg.Any<CancellationToken>());
@@ -78,7 +78,7 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
             DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -116,10 +116,10 @@ internal class PlatformNamespaceTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
             DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
         await Helm.DidNotReceive().UpgradeInstallAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             PlatformNamespace, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]

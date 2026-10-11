@@ -45,11 +45,11 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
     }
 
     public async Task UpgradeInstallAsync(string release, string chart, string version, string @namespace,
-        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, string? description,
         CancellationToken cancellationToken)
     {
         var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: false,
-            forceConflicts: options.Value.Helm.ForceConflicts);
+            forceConflicts: options.Value.Helm.ForceConflicts, description);
 
         var result = await invoker.InvokeAsync(args, cancellationToken);
         if (result.ExitCode != 0)
@@ -69,7 +69,7 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
         // Its job is to answer "would this apply", and a pre-flight that forces its way past an
         // ownership conflict would answer yes to a question nobody asked.
         var args = BuildUpgradeArgs(release, chart, version, @namespace, valuesFiles, setValues, dryRunServer: true,
-            forceConflicts: false);
+            forceConflicts: false, description: null);
 
         var result = await invoker.InvokeAsync(args, cancellationToken);
         if (result.ExitCode != 0)
@@ -82,7 +82,7 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
 
     private static List<string> BuildUpgradeArgs(string release, string chart, string version, string @namespace,
         IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, bool dryRunServer,
-        bool forceConflicts)
+        bool forceConflicts, string? description)
     {
         // Note: no `--create-namespace` — the deployment site namespace is owned by the
         // operator's namespace-scoped service account, which cannot create
@@ -133,6 +133,14 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
             if (forceConflicts)
             {
                 args.Add("--force-conflicts");
+            }
+
+            // AB#6471: the desired-state stamp. Helm stores it with the revision, so it is exactly as
+            // durable as the release itself and needs no operator-side state that a pod restart loses.
+            if (!string.IsNullOrEmpty(description))
+            {
+                args.Add("--description");
+                args.Add(description);
             }
         }
 
@@ -282,7 +290,10 @@ public sealed class HelmRunner(IHelmProcessInvoker invoker, ILogger<HelmRunner> 
                 var status = entry.GetProperty("status").GetString() ?? string.Empty;
                 if (latest == null || revision > latest.Revision)
                 {
-                    latest = new HelmReleaseRevision(revision, status);
+                    var description = entry.TryGetProperty("description", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? d.GetString()
+                        : null;
+                    latest = new HelmReleaseRevision(revision, status, description);
                 }
             }
 

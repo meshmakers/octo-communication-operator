@@ -78,7 +78,7 @@ internal class UndeployAsyncTests : WorkloadReconcilerTestsBase
         var helmStarted = new TaskCompletionSource();
         Helm.UpgradeInstallAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
                 Arg.Any<string>(), Arg.Any<IReadOnlyList<string>>(),
-                Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>())
+                Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(async call =>
             {
                 capturedDeployToken = call.Arg<CancellationToken>();

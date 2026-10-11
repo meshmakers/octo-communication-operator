@@ -99,6 +99,6 @@ internal class StaleHelmLockTests : WorkloadReconcilerTestsBase
         // Assert — the real install still ran.
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(),
             DeploymentSiteNamespace, Arg.Any<IReadOnlyList<string>>(),
-            Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }

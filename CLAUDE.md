@@ -390,6 +390,35 @@ step fails with the conflict. The suite skips unless `OCTO_OPERATOR_E2E_KUBECONT
 helm on PATH is ≥ 4 — Helm 3 patches client-side, has no notion of field ownership, and would report
 this defect fixed on a build that still has it.
 
+### Idempotent Dispatch After a Controller Restart (AB#6471)
+
+The controller re-dispatches every workload still `Pending` when a deployment site (re-)registers
+(controller `ReconcilePendingWorkloadsAsync`, AB#4894), and it cannot know whether the operator is still
+running the first dispatch, finished it with the report lost into a dead connection, or never got it.
+SignalR client handlers run one after the other *per connection*, but a deploy that started on the old
+connection keeps running after the reconnect while the new connection's handler starts the re-dispatch.
+Before AB#6471 that produced, on test-2 (CD run 52427, 2026-10-10): a second helm revision per workload
+(mrotest v39/v40, energytest v38/v39, ...) when the re-dispatch ran after the first finished, and a
+`Error` report ("A deploy for release ... is already in progress") for a release helm had deployed when
+it ran during the first.
+
+`WorkloadReconciler.DeployAsync` is now single-flight and state-aware:
+
+- It computes a **desired-state fingerprint** (`DesiredStateFingerprint`: truncated SHA-256 of the request DTO
+  without `IsReconciliation`, plus the operator context layer). Secret values are hashed, never stored beside it.
+- **Same release, same fingerprint already running** → the second request *joins* it and shares its outcome (success or
+  the same exception). No second helm process, no "already in progress" error.
+- **Same release, different fingerprint running** → waits for the running deploy, then deploys. Other releases are
+  not serialised.
+- Every successful `helm upgrade` stamps `--description octo-deploy:<fingerprint>` on the revision (visible in
+  `helm history`; durable, so it survives an operator restart). A request with `IsReconciliation=true` whose
+  release's newest revision is `deployed` **and** carries the same stamp does **not** run helm: it returns, and
+  `OperatorHubService` reports success — the status follows the actual release. Anything else (no stamp from an older
+  operator, other stamp, `failed`, history unreadable) deploys as before. A user-triggered deploy never skips.
+
+Wire-compatible: no hub contract change. An older operator keeps the old behaviour; the controller side needs nothing.
+Tests: `Reconcilers/WorkloadReconcilerTests/DuplicateDispatchTests`, `Helm/HelmRunnerTests` (`--description`, history parse).
+
 ### Stale Helm-Lock Recovery (AB#4894)
 
 A helm process killed mid-upgrade — e.g. the operator pod replaced by a rollout while a deploy
