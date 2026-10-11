@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using k8s.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Operator.Common;
@@ -87,6 +89,24 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
     // block on helm's --rollback-on-failure wait timeout, typically 5 min).
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _inFlightDeploys = new();
 
+    // AB#6471: single-flight bookkeeping. One entry per release that has a deploy running right now;
+    // a second request for the same release either joins it (same desired state) or waits for it
+    // (different desired state) instead of racing it. Guarded by _flightsGate because the
+    // check-then-register must be atomic.
+    private readonly object _flightsGate = new();
+    private readonly Dictionary<string, DeployFlight> _deployFlights = new();
+
+    private sealed class DeployFlight(string fingerprint)
+    {
+        public string Fingerprint { get; } = fingerprint;
+
+        public TaskCompletionSource Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    /// <summary>Prefix of the <c>helm --description</c> text that carries the desired-state fingerprint.</summary>
+    internal const string DeployStampPrefix = "octo-deploy:";
+
     public WorkloadReconciler(IHelmRunner helm, IDeploymentSiteKubernetesGateway gateway,
         IWorkloadDiagnosticsCollector diagnostics,
         IServiceProvider serviceProvider,
@@ -106,9 +126,107 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
         _logger = logger;
     }
 
+    /// <summary>
+    /// Deploys the workload exactly once per desired state (AB#6471). The controller cannot know what
+    /// the operator is still doing when it restarts: it re-dispatches every workload that is still
+    /// <c>Pending</c> on re-registration (AB#4894), and a deploy that finished while the controller was
+    /// down reported its result into the void. Dispatch is therefore idempotent here:
+    /// <list type="bullet">
+    ///   <item>same release and same desired state already <b>running</b> → join it and share its outcome,
+    ///   so no second helm revision and no "already in progress" error;</item>
+    ///   <item>same release, <b>different</b> desired state running → wait for it, then deploy ours;</item>
+    ///   <item>a <see cref="WorkloadDeployedDto.IsReconciliation"/> whose desired state helm already runs
+    ///   (newest revision <c>deployed</c>, stamped with the same fingerprint) → no helm run, report
+    ///   success from the actual release state.</item>
+    /// </list>
+    /// </summary>
     public async Task DeployAsync(WorkloadDeployedDto workload, CancellationToken cancellationToken)
     {
         var release = ReleaseName(workload.TenantId, workload.WorkloadRtId);
+        var fingerprint = DesiredStateFingerprint(workload, _options);
+
+        while (true)
+        {
+            DeployFlight flight;
+            bool owner;
+            lock (_flightsGate)
+            {
+                owner = !_deployFlights.TryGetValue(release, out flight!);
+                if (owner)
+                {
+                    flight = new DeployFlight(fingerprint);
+                    _deployFlights[release] = flight;
+                }
+            }
+
+            if (owner)
+            {
+                try
+                {
+                    await DeployCoreAsync(workload, release, fingerprint, cancellationToken);
+                    lock (_flightsGate)
+                    {
+                        _deployFlights.Remove(release);
+                    }
+
+                    flight.Completion.TrySetResult();
+                }
+                catch (Exception ex)
+                {
+                    lock (_flightsGate)
+                    {
+                        _deployFlights.Remove(release);
+                    }
+
+                    flight.Completion.TrySetException(ex);
+                    throw;
+                }
+
+                return;
+            }
+
+            if (flight.Fingerprint == fingerprint)
+            {
+                _logger.LogInformation(
+                    "A deploy of release '{Release}' with the same desired state ({Fingerprint}) is already running — joining it instead of starting a second helm run (AB#6471)",
+                    release, fingerprint);
+                await flight.Completion.Task.WaitAsync(cancellationToken);
+                return;
+            }
+
+            _logger.LogInformation(
+                "A deploy of release '{Release}' with a different desired state is running — waiting for it before deploying {Fingerprint} (AB#6471)",
+                release, fingerprint);
+            try
+            {
+                await flight.Completion.Task.WaitAsync(cancellationToken);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The earlier deploy's outcome is its own request's business; ours starts from the
+                // release as that deploy left it.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hash of everything a deploy request asks for, minus the one flag that only says <em>why</em> it was
+    /// sent (<see cref="WorkloadDeployedDto.IsReconciliation"/>) — plus the operator-managed context layer,
+    /// so a changed cluster default is a different desired state. Written into the helm revision
+    /// description on success. Truncated SHA-256; secret values are inside the hash, never beside it.
+    /// </summary>
+    internal static string DesiredStateFingerprint(WorkloadDeployedDto workload, OperatorOptions options)
+    {
+        var normalized = workload with { IsReconciliation = false };
+        var json = JsonSerializer.Serialize(normalized);
+        var context = WorkloadContextValuesBuilder.Build(options, workload) ?? string.Empty;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(json + "\n--context--\n" + context));
+        return Convert.ToHexString(hash, 0, 16).ToLowerInvariant();
+    }
+
+    private async Task DeployCoreAsync(WorkloadDeployedDto workload, string release, string fingerprint,
+        CancellationToken cancellationToken)
+    {
         var ns = ResolveNamespace(workload.WorkloadType);
         var secretName = SecretName(release);
 
@@ -141,6 +259,19 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
 
         try
         {
+            // AB#6471: a reconciliation restores what should already be running. When helm says the
+            // newest revision is deployed AND that revision was stamped with this very desired state,
+            // there is nothing to restore — the dispatch was only re-sent because the report of the
+            // earlier deploy never reached the controller. Running helm again would add a revision
+            // (and a rollout) for no change; reporting success is the reconciliation.
+            if (workload.IsReconciliation && await IsDesiredStateAlreadyDeployedAsync(release, ns, fingerprint, deployToken))
+            {
+                _logger.LogInformation(
+                    "Release '{Release}' is already deployed with the requested desired state ({Fingerprint}) — reconciliation needs no helm run (AB#6471)",
+                    release, fingerprint);
+                return;
+            }
+
             // 0. If the workload opts in, append secret-flagged overrides for
             //    the cluster-internal credentials the operator knows about.
             //    The resulting overrides flow through the normal secret-flagged
@@ -262,7 +393,7 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
                 try
                 {
                     await _helm.UpgradeInstallAsync(release, chartRef,
-                        chartVersion, ns, valuesFiles, setValues, deployToken);
+                        chartVersion, ns, valuesFiles, setValues, DeployStampPrefix + fingerprint, deployToken);
                     // Only after the install: the Deployments the reference is written to are
                     // created by helm, so there is nothing to stamp before this point.
                     await ApplyDeploymentSiteOwnerReferenceAsync(release, ns, ownerReference, deployToken);
@@ -578,6 +709,32 @@ public sealed class WorkloadReconciler : IWorkloadReconciler
             "Reconciling unpinned workload '{WorkloadName}' (release '{Release}'): keeping the installed chart version {ChartVersion} instead of resolving the newest chart (AB#4955)",
             workload.WorkloadName, release, installed);
         return installed;
+    }
+
+    /// <summary>
+    /// Whether helm already runs exactly this desired state: the newest revision is <c>deployed</c> and
+    /// carries this fingerprint in its description. Any doubt (history unreadable, no stamp, other stamp,
+    /// a rollback revision) answers <c>false</c> — the deploy then runs as it always did.
+    /// </summary>
+    private async Task<bool> IsDesiredStateAlreadyDeployedAsync(string release, string ns, string fingerprint,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var latest = await _helm.GetLatestReleaseRevisionAsync(release, ns, cancellationToken);
+            return latest is { IsDeployed: true }
+                   && string.Equals(latest.Description, DeployStampPrefix + fingerprint, StringComparison.Ordinal);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not read the helm history of release '{Release}' to check the desired state — deploying", release);
+            return false;
+        }
     }
 
     /// <summary>

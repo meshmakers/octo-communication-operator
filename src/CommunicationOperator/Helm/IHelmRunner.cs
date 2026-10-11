@@ -30,8 +30,11 @@ public interface IHelmRunner
     /// <param name="namespace">Kubernetes namespace.</param>
     /// <param name="valuesFiles">Files passed via <c>-f</c>. Later files override earlier ones.</param>
     /// <param name="setValues">Inline overrides passed via <c>--set</c>.</param>
+    /// <param name="description">Text stored as the revision's description (<c>--description</c>), visible in
+    /// <c>helm history</c>. The reconciler stamps a fingerprint of the desired state here (AB#6471) so a later
+    /// reconciliation can tell from helm alone that exactly this state is already deployed. <c>null</c> omits the flag.</param>
     Task UpgradeInstallAsync(string release, string chart, string version, string @namespace,
-        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
+        IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, string? description,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -89,8 +92,15 @@ public interface IHelmRunner
 /// One entry of <c>helm history</c>: the revision number and its status
 /// (e.g. <c>deployed</c>, <c>superseded</c>, <c>pending-install</c>, <c>pending-upgrade</c>).
 /// </summary>
-public sealed record HelmReleaseRevision(int Revision, string Status)
+/// <remarks>
+/// <see cref="Description"/> is the revision's <c>description</c> as helm reports it; the reconciler stamps a
+/// desired-state fingerprint there on every successful deploy (AB#6471). <c>null</c> when helm reports none.
+/// </remarks>
+public sealed record HelmReleaseRevision(int Revision, string Status, string? Description = null)
 {
+    /// <summary>Whether the revision is the live, successfully deployed one.</summary>
+    public bool IsDeployed => string.Equals(Status, "deployed", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Whether the revision is stuck in one of helm's <c>pending-*</c> states.</summary>
     public bool IsPending => Status.StartsWith("pending-", StringComparison.OrdinalIgnoreCase);
 }

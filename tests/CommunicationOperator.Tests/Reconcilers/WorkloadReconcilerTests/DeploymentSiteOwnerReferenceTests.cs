@@ -103,7 +103,7 @@ internal class DeploymentSiteOwnerReferenceTests : WorkloadReconcilerTestsBase
         {
             Helm.UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
                 Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-                Arg.Any<CancellationToken>());
+                Arg.Any<string?>(), Arg.Any<CancellationToken>());
             Gateway.SetDeploymentOwnerReferenceByInstanceAsync(DeploymentSiteNamespace, Release,
                 Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>());
         });
@@ -152,7 +152,7 @@ internal class DeploymentSiteOwnerReferenceTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
         await Gateway.DidNotReceiveWithAnyArgs().SetDeploymentOwnerReferenceByInstanceAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<V1OwnerReference>(), Arg.Any<CancellationToken>());
     }
@@ -169,7 +169,7 @@ internal class DeploymentSiteOwnerReferenceTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -184,6 +184,6 @@ internal class DeploymentSiteOwnerReferenceTests : WorkloadReconcilerTestsBase
 
         await Helm.Received(1).UpgradeInstallAsync(Release, Arg.Any<string>(), Arg.Any<string>(), DeploymentSiteNamespace,
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }

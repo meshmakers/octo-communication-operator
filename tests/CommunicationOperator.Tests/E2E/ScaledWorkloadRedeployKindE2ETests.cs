@@ -209,10 +209,10 @@ internal class ScaledWorkloadRedeployKindE2ETests
             CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task UpgradeInstallAsync(string release, string chart, string version, string @namespace,
-            IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
+            IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues, string? description,
             CancellationToken cancellationToken) =>
             inner.UpgradeInstallAsync(release, Resolve(chart), version, @namespace, valuesFiles, setValues,
-                cancellationToken);
+                description, cancellationToken);
 
         public Task UpgradeInstallDryRunAsync(string release, string chart, string version, string @namespace,
             IReadOnlyList<string> valuesFiles, IReadOnlyDictionary<string, string> setValues,
@@ -336,7 +336,7 @@ internal class ScaledWorkloadRedeployKindE2ETests
             //    apply, and helm's rollback is refused for the same reason.
             var conflict = await Assert.That(async () => await helm.UpgradeInstallAsync(
                     Release, $"unused/{ChartName}", string.Empty, Namespace, [],
-                    new Dictionary<string, string>(), CancellationToken.None))
+                    new Dictionary<string, string>(), null, CancellationToken.None))
                 .Throws<HelmException>();
             await Assert.That(HelmFieldOwnershipConflict.IsFieldOwnershipConflict(conflict!.StdErr)).IsTrue();
             await Assert.That(conflict!.StdErr).Contains(DeploymentSiteKubernetesGateway.FieldManagerName);

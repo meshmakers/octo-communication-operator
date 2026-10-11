@@ -121,7 +121,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
         await Helm.Received(1).UpgradeInstallAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -140,7 +140,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Helm.UpgradeInstallAsync(
                 Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
                 Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-                Arg.Any<CancellationToken>());
+                Arg.Any<string?>(), Arg.Any<CancellationToken>());
         });
     }
 
@@ -158,7 +158,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             .Throws<HelmException>();
 
         await Helm.DidNotReceiveWithAnyArgs().UpgradeInstallAsync(
-            default!, default!, default!, default!, default!, default!, default);
+            default!, default!, default!, default!, default!, default!, default!, default);
     }
 
     [Test]
@@ -167,7 +167,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
         Helm.UpgradeInstallAsync(
                 Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
                 Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new HelmException("upgrade --install rel",
                 1, string.Empty, "Error: release failed, context deadline exceeded"));
 
@@ -185,7 +185,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
         Helm.UpgradeInstallAsync(
                 Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
                 Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new HelmException("upgrade --install rel",
                 1, string.Empty, "Error: context deadline exceeded"));
         Diagnostics.CollectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
@@ -205,7 +205,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
         Helm.UpgradeInstallAsync(
                 Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
                 Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-                Arg.Any<CancellationToken>())
+                Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new HelmException("upgrade --install rel",
                 1, string.Empty, "Error: context deadline exceeded"));
         // Default collector returns empty string — no enrichment.
@@ -249,7 +249,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Is<string>(n => n == DeploymentSiteNamespace),
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -268,7 +268,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Is<IReadOnlyList<string>>(files => files.Count == 3),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -285,7 +285,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Is<IReadOnlyList<string>>(files =>
                 files.Count == 1 && files[0].EndsWith("values-context.yaml")),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -303,7 +303,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Is<IReadOnlyList<string>>(files => files.Count == 1),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -328,7 +328,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
                 && files[1].EndsWith("values-base.yaml")
                 && files[2].EndsWith("values-overrides.yaml")),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -354,7 +354,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Is<IReadOnlyDictionary<string, string>>(set =>
                 set.ContainsKey("replicaCount") && set["replicaCount"] == "0"),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -375,7 +375,7 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Is<IReadOnlyDictionary<string, string>>(set => !set.ContainsKey("replicaCount")),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -396,6 +396,6 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
                 && files[0].EndsWith("values-context.yaml")
                 && files[1].EndsWith("values-base.yaml")),
             Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }

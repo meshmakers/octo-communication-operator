@@ -65,7 +65,7 @@ internal class ReplicaCountPinTests : WorkloadReconcilerTestsBase
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<IReadOnlyList<string>>(),
             Arg.Is<IReadOnlyDictionary<string, string>>(set => Matches(set, expected)),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     private static bool Matches(IReadOnlyDictionary<string, string> setValues, string? expected) =>
@@ -198,6 +198,6 @@ internal class ReplicaCountPinTests : WorkloadReconcilerTestsBase
         await Helm.DidNotReceiveWithAnyArgs().UpgradeInstallAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }
