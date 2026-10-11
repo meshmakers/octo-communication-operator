@@ -129,16 +129,26 @@ internal sealed class OperatorAccessTokenService : BackgroundService
         }
     }
 
+    private TimeSpan NextDelay() => ComputeDelay(_expiresAtUtc, DateTime.UtcNow, RetryIntervalOverride);
+
     /// <summary>
-    ///     Time to sleep before the next attempt: until shortly before the current token expires, or
-    ///     the retry cadence when there is no usable token (never acquired, or the last attempt
-    ///     failed). Never shorter than the retry cadence, so a pathologically short-lived token
-    ///     cannot turn this into a hot loop against the identity service.
+    ///     Time to sleep before the next attempt: until shortly before the token expires, or the
+    ///     retry cadence when there is no usable token (never acquired, or the last attempt failed).
+    ///     Never shorter than the retry cadence, so a pathologically short-lived token cannot turn
+    ///     this into a hot loop against the identity service. Never throws: with no token ever
+    ///     acquired <paramref name="expiresAtUtc" /> is <see cref="DateTime.MinValue" />, and
+    ///     subtracting the skew from that would underflow <see cref="DateTime" /> and fault the
+    ///     background service (AB#6455).
     /// </summary>
-    private TimeSpan NextDelay()
+    internal static TimeSpan ComputeDelay(DateTime expiresAtUtc, DateTime utcNow, TimeSpan retryInterval)
     {
-        var untilRefresh = _expiresAtUtc - RefreshSkew - DateTime.UtcNow;
-        return untilRefresh > RetryIntervalOverride ? untilRefresh : RetryIntervalOverride;
+        // Compare before subtracting: DateTime arithmetic throws instead of saturating.
+        if (expiresAtUtc <= utcNow + RefreshSkew + retryInterval)
+        {
+            return retryInterval;
+        }
+
+        return expiresAtUtc - RefreshSkew - utcNow;
     }
 
     /// <summary>
