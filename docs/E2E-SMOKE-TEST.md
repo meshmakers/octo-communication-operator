@@ -1,3 +1,8 @@
+---
+description: Manual end-to-end runbook for central operator mode. Run after changes to OperatorHubService or DeploymentSiteManager.
+background: true
+---
+
 # E2E Smoke Test — Central Operator Mode
 
 This runbook validates the central-operator code path end-to-end against a
@@ -23,12 +28,12 @@ depend on.
 [Refinery Studio → POST {tenantId}/v1/pool/deploy?poolRtId=<id>]
             ↓
 [Controller DeploymentSiteService.DeployPoolAsync]
-            ↓  (only when RtPool.Environment == Cloud)
+            ↓  (only when RtDeploymentSite.Environment == Cloud)
 [Controller /operatorHub SignalR push → DeploymentSiteDeployedAsync]
             ↓
 [OperatorHubService.DeploymentSiteDeployedAsync]
             ↓
-[DeploymentSiteManager.CreatePoolAsync(tenantId, poolName)]
+[DeploymentSiteManager.CreateDeploymentSiteAsync(tenantId, deploymentSiteRtId)]
             ↓
 [real k8s API call via IDeploymentSiteKubernetesGateway]
             ↓
@@ -131,6 +136,10 @@ In a second terminal — the operator (NOT auto-started by `Start-Octo`):
 cd $rootPath/octo-communication-operator
 ./start-operator.ps1 -configuration DebugL
 ```
+
+(`start-operator.ps1` is deliberately **not** named `octo-start.ps1` — that
+name would make `Start-Octo` launch the operator automatically, and we want
+it to stay opt-in for now.)
 
 The operator binds to `http://localhost:5022` and `https://localhost:5023`,
 loads `appsettings.Development.json`, and connects to the Communication

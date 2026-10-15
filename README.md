@@ -13,21 +13,23 @@ The operator can be configured via environment variables:
 | `OPERATOR__AUTOMANAGEDEPLOYMENTSITES` | Auto-create DeploymentSite CRs on tenant creation | `false` |
 | `OPERATOR__WATCHNAMESPACE` | Restricts the CR watcher to a single namespace. Required when multiple operator instances share one cluster (e.g. edge devices running one operator per target controller) so they don't race on each other's CRs. Leave empty to watch all namespaces. | _(empty — watch all)_ |
 | `OPERATOR__DEPLOYMENTSITENAMESPACE` | Namespace where auto-created CRs and per-tenant broker secrets live. Helm releases default to the same namespace unless the chart overrides it. | `octo` |
-| `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
+| `OPERATOR__PLATFORMNAMESPACE` | Namespace the deployment-site Helm releases land in. Empty resolves to `OPERATOR__DEPLOYMENTSITENAMESPACE`, which owner-reference garbage collection requires (Kubernetes forbids cross-namespace owner references). A different namespace is supported but disables the owner reference, and the operator says so once per deploy. | _(empty — same as DeploymentSiteNamespace)_ |
+| `OPERATOR__COMMUNICATIONCONTROLLERURI` | SignalR endpoint of the Communication Controller. **Required in both central and edge mode** — the `/operatorHub` connection is not gated on `AUTOMANAGEDEPLOYMENTSITES`. When empty the hub service logs a warning and exits, and pools reconciled from CRs are never registered with the controller (they stay `Unregistered` in the Studio). | _(required)_ |
+| `OPERATOR__WORKLOADCOMMUNICATIONCONTROLLERURI` | Controller URI projected into every deployed workload's Helm values. Empty projects `OPERATOR__COMMUNICATIONCONTROLLERURI`. Set it only when workloads cannot use the operator's own address, e.g. on local kind where the operator reaches a host-run controller through a pod hostAlias the adapters do not have. | _(empty — same as CommunicationControllerUri)_ |
 | `OPERATOR__DEFAULTDEPLOYMENTSITENAME` | Pool name for auto-created CRs | `default` |
 | `OPERATOR__INSTANCEPREFIX` | Instance prefix forwarded to workload pods via the Helm chart values | _(none)_ |
-| `OPERATOR__HELM__FORCECONFLICTS` | Adds `--force-conflicts` to `helm upgrade`, so a server-side apply takes ownership of fields held by another field manager instead of refusing (AB#5325). Only a hand-written `kubectl set …` / `kubectl patch` creates such a manager, and forcing past it overwrites those values on every deploy from then on — so this stays off unless an operator decides otherwise. The other remedy needs no flag: delete the Deployment and let the chart own it again. Never applied to the `--dry-run=server` pre-flight. | `false` |
+| `OPERATOR__HELM__FORCECONFLICTS` | Adds `--force-conflicts` to `helm upgrade`, so a server-side apply takes ownership of fields held by another field manager instead of refusing. Only a hand-written `kubectl set …` / `kubectl patch` creates such a manager, and forcing past it overwrites those values on every deploy from then on — so this stays off unless an operator decides otherwise. The other remedy needs no flag: delete the Deployment and let the chart own it again. Never applied to the `--dry-run=server` pre-flight. | `false` |
 | `OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION` | Forwarded to workload pods via the Helm chart values (dev only) | `false` |
-| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManagePools=true)_ |
+| `OPERATOR__BROKERHOST` | RabbitMQ host for workload pods | _(required when AutoManageDeploymentSites=true)_ |
 | `OPERATOR__BROKERVIRTUALHOST` | RabbitMQ virtual host | `/` |
 | `OPERATOR__BROKERPORT` | RabbitMQ port | `5672` |
-| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManagePools=true)_ |
-| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManagePools=true)_ |
-| `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see AB#4417 below. | _(none)_ |
+| `OPERATOR__BROKERUSER` | RabbitMQ username for broker secrets | _(required when AutoManageDeploymentSites=true)_ |
+| `OPERATOR__BROKERPASSWORD` | RabbitMQ password for broker secrets | _(required when AutoManageDeploymentSites=true)_ |
+| `OPERATOR__ROOTCACERTIFICATE` | PEM-encoded root CA certificate (chain) the operator's own pod trusts (chart value `secrets.rootCa`, forwarded here from the chart's `{fullname}-ca` Secret). When set, injected as a plain-string `secrets.rootCa` value into every deployed workload, unconditionally — see below. | _(none)_ |
 | `OPERATOR__REPORTINGSERVICEURI` | Cluster-internal URI of the reporting service. Projected into each workload's Helm values as `reportingServiceUri`. | _(none)_ |
 | `OPERATOR__AUTHURI` | Public URI of the identity service issuing the access tokens secured trigger nodes accept. Projected into each workload's Helm values as `authUri`. Must be the public issuer address, not a cluster-internal service name — the adapter compares it against the token's `iss` claim. | _(none)_ |
-| `OPERATOR__ADDITIONALVALIDISSUERS__<n>` | Additional token issuer values workloads accept on top of `OPERATOR__AUTHURI` (split-horizon setups). Projected into each workload's Helm values as the `additionalValidIssuers` list; the adapter chart renders them as `OCTO_ADAPTER__ADDITIONALVALIDISSUERS__<n>`, widening only the issuer string comparison (signing keys still come from the authority's discovery document). Needed where callers mint tokens under a different host name than the one workloads reach the identity service by — e.g. the local kind dev cluster: `authUri=https://host.docker.internal:5003` while tokens are minted via `https://localhost:5003/` (AB#5232). | _(none)_ |
-| `OPERATOR__AUTHENTICATION__ISSUERURI` | Public issuer URI of the identity service the operator obtains its **own** access token from, for the `/operatorHub` connection (AB#5062). Optional — see [Operator hub authentication](#operator-hub-authentication-ab5062). | _(none)_ |
+| `OPERATOR__ADDITIONALVALIDISSUERS__<n>` | Additional token issuer values workloads accept on top of `OPERATOR__AUTHURI` (split-horizon setups). Projected into each workload's Helm values as the `additionalValidIssuers` list; the adapter chart renders them as `OCTO_ADAPTER__ADDITIONALVALIDISSUERS__<n>`, widening only the issuer string comparison (signing keys still come from the authority's discovery document). Needed where callers mint tokens under a different host name than the one workloads reach the identity service by — e.g. the local kind dev cluster: `authUri=https://host.docker.internal:5003` while tokens are minted via `https://localhost:5003/`. | _(none)_ |
+| `OPERATOR__AUTHENTICATION__ISSUERURI` | Public issuer URI of the identity service the operator obtains its **own** access token from, for the `/operatorHub` connection. Optional — see [Operator hub authentication](#operator-hub-authentication). | _(none)_ |
 | `OPERATOR__AUTHENTICATION__CLIENTID` | Client id of the confidential OAuth client representing this operator. Empty ⇒ the operator connects without a token, exactly as before. | _(none)_ |
 | `OPERATOR__AUTHENTICATION__CLIENTSECRET` | Client secret for that client. Supply via `secretKeyRef`, like `OPERATOR__BROKERPASSWORD`. | _(none)_ |
 | `OPERATOR__AUTHENTICATION__TENANTID` | Tenant the operator authenticates **against** (`acr_values=tenant:…`). Set it to the installation's **system tenant** (`OctoSystem` by default). | _(none)_ |
@@ -37,6 +39,8 @@ The operator can be configured via environment variables:
 | `OPERATOR__CLUSTERDEPENDENCIES__RABBITMQUSER` | RabbitMQ user projected into workload `clusterDependencies.rabbitMqUser`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATAHOST` | CrateDB host projected into workload `clusterDependencies.streamDataHost`. | _(none)_ |
 | `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATAUSER` | CrateDB user projected into workload `clusterDependencies.streamDataUser`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__SYSTEMDATABASENAME` | MongoDB system database holding the tenant registry, projected into workload `clusterDependencies.systemDatabaseName`. Must match the core services' `serviceDefaults.systemDatabaseName` of the same instance, or every CK-model load fails with "Tenant does not exist". Empty keeps the workload default `OctoSystem`. | _(none)_ |
+| `OPERATOR__CLUSTERDEPENDENCIES__STREAMDATASCHEMAINSTANCEPREFIX` | CrateDB schema instance prefix projected into workload `clusterDependencies.streamDataSchemaInstancePrefix`. Must match the core services' setting of the same instance, or a second instance's workloads read and write the unprefixed schemas of the first. Empty keeps the unprefixed schema names. | _(none)_ |
 | `OPERATOR__INGRESS__CLASSNAME` | Ingress class projected into workload `ingress.className`. | _(none)_ |
 | `OPERATOR__INGRESS__CLUSTERISSUER` | cert-manager ClusterIssuer projected into workload `ingress.annotations["cert-manager.io/cluster-issuer"]`. | _(none)_ |
 | `OPERATOR__INGRESS__TLS` | TLS flag projected into workload `ingress.tls`. Leave unset to keep the chart default. | _(unset)_ |
@@ -44,7 +48,7 @@ The operator can be configured via environment variables:
 | `OPERATOR__CLUSTERSECRETS__MONGODBUSERPASSWORD` | MongoDB user password injected as secret-flagged override `secrets.databaseUser` when the workload's `ReceivesClusterSecrets` flag is true. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__MONGODBADMINPASSWORD` | MongoDB admin password injected as `secrets.databaseAdmin` when the flag is true. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__STREAMDATAPASSWORD` | CrateDB password injected as `secrets.streamDataPassword` when the flag is true. | _(none)_ |
-| `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__<kid>` | SECRET attribute key ring (AB#5536), one variable per key id (lowercase, e.g. `..._KEYS__k1`); injected as `secrets.secretEncryption.keys.<kid>` when the flag is true. `k1` is the cluster's instance secret. | _(none)_ |
+| `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__<kid>` | SECRET attribute key ring, one variable per key id (lowercase, e.g. `..._KEYS__k1`); injected as `secrets.secretEncryption.keys.<kid>` when the flag is true. `k1` is the cluster's instance secret. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONACTIVEKEYID` | Active key id, injected as plain `secrets.secretEncryption.activeKeyId`. Unset with exactly one key = that key. | _(none)_ |
 | `OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONLEGACYV1KEY` | Key for legacy `enc:v1:` values (the instance secret), injected as `secrets.secretEncryption.legacyV1Key`. | _(none)_ |
 
@@ -52,13 +56,13 @@ The cluster-dependency, reporting-URI and ingress fields are all optional. Each 
 
 The `ClusterSecrets.*` settings are different: they are injected only when the workload itself opts in via the `ReceivesClusterSecrets` flag on its CK Adapter entity. They appear in the rendered manifest as `valueFrom.secretKeyRef` envelopes pointing at the per-release operator-managed Secret (`{release}-octo-secrets`), not as plain values. The adapter chart's `secrets.*` paths must accept both plaintext strings (legacy) and `valueFrom` maps — see the `octo-mesh.secretEnv` helper in `octo-mesh-adapter` / `octo-eda-adapter` chart templates.
 
-The SECRET attribute key ring (`ClusterSecrets.SecretEncryptionKeys` / `SecretEncryptionActiveKeyId` / `SecretEncryptionLegacyV1Key`, AB#5536, concept AB#5528 §3.5) uses the same `ReceivesClusterSecrets` gate. It is injected as `secrets.secretEncryption.keys.<kid>` (secret-flagged, emitted in ordinal kid order so reconciles stay stable), `secrets.secretEncryption.activeKeyId` (plain) and `secrets.secretEncryption.legacyV1Key` (secret-flagged). The kid keeps its case through configuration binding (`OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__k1`). The operator chart derives the ring from `operator.clusterSecrets.instanceSecretKey` (key id `k1`).
+The SECRET attribute key ring (`ClusterSecrets.SecretEncryptionKeys` / `SecretEncryptionActiveKeyId` / `SecretEncryptionLegacyV1Key`) uses the same `ReceivesClusterSecrets` gate. It is injected as `secrets.secretEncryption.keys.<kid>` (secret-flagged, emitted in ordinal kid order so reconciles stay stable), `secrets.secretEncryption.activeKeyId` (plain) and `secrets.secretEncryption.legacyV1Key` (secret-flagged). The kid keeps its case through configuration binding (`OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__k1`). The operator chart derives the ring from `operator.clusterSecrets.instanceSecretKey` (key id `k1`).
 
-`BrokerPassword` and `RootCaCertificate` are injected unconditionally instead — independent of `ReceivesClusterSecrets` — because every workload needs the controller command bus and, on private-CA clusters, the same TLS trust anchor the operator itself was given (AB#4417). `BrokerPassword` still renders as a `valueFrom.secretKeyRef` envelope like the gated secrets above; `RootCaCertificate` is the one exception that renders as a plain string at `secrets.rootCa` — the workload chart's own root-CA handling `b64enc`s the value directly and requires a literal, not a `valueFrom` map.
+`BrokerPassword` and `RootCaCertificate` are injected unconditionally instead — independent of `ReceivesClusterSecrets` — because every workload needs the controller command bus and, on private-CA clusters, the same TLS trust anchor the operator itself was given. `BrokerPassword` still renders as a `valueFrom.secretKeyRef` envelope like the gated secrets above; `RootCaCertificate` is the one exception that renders as a plain string at `secrets.rootCa` — the workload chart's own root-CA handling `b64enc`s the value directly and requires a literal, not a `valueFrom` map.
 
 For central deployment, the operator also requires RabbitMQ connectivity for receiving tenant lifecycle events via the DistributedEventHub (configured via `Meshmakers.Octo.Services.Infrastructure`).
 
-### Operator hub authentication (AB#5062)
+### Operator hub authentication
 
 The operator can present a client-credentials access token on its `/operatorHub` connection to the
 Communication Controller. It is acquired at startup and refreshed for the lifetime of the process,
@@ -87,7 +91,7 @@ operator's client in the **system tenant** and name it here. Pinning the credent
 managed tenants would let a tenant delete take the whole fleet's credential with it — including the
 credential needed to tear that tenant's own pools down.
 
-Since **AB#5058**, omitting `TenantId` is only safe for a client that is provably unmirrored: a
+Omitting `TenantId` is only safe for a client that is provably unmirrored: a
 `client_credentials` request without `acr_values` is refused with `invalid_request` as soon as the
 client id is ambiguous (flagged `AutoProvisionInChildTenants`, a mirror itself, or with live mirror
 rows). Always set it. The operator logs a warning at startup when a client id is configured without
@@ -100,7 +104,7 @@ network blip, SDK watchdog). `OperatorAccessTokenService` therefore replaces the
 before its own expiry; a failed acquisition retries every 30 seconds and keeps the previous token in
 the meantime.
 
-**Rollout order.** The controller's `/operatorHub` gate (AB#5059) ships in `LogOnly`. Roll operators
+**Rollout order.** The controller's `/operatorHub` gate ships in `LogOnly`. Roll operators
 with credentials out **first**, read the controller's `LogOnly` warnings until no operator connection
 is listed as failing the policy any more, and only then set
 `OCTO_OPERATORHUBAUTHORIZATION__MODE=Enforce` on the controller. Arming it earlier disconnects every
@@ -171,7 +175,7 @@ kubectl -n pool1 apply -f ./src/scripts/test-cluster-pool-local.yaml
 ## During development
 
 
-# Generate CRD and deployment files
+### Generate CRD and deployment files
 ```bash
 dotnet kubeops g op meshmakers-octo-communication-operator ./CommunicationOperator.csproj --out config --clear-out
 ```
@@ -191,5 +195,5 @@ dotnet build Octo.CommunicationOperator.sln -c DebugL
 dotnet run --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj -c DebugL --no-build
 ```
 
-The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `CLAUDE.md` for details about the .NET 10 / MTP arguments.
+The test runner is opted into Microsoft.Testing.Platform via `global.json` at the repo root. See `AGENTS.md` → "Build & test" for the .NET 10 / MTP arguments.
 

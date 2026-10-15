@@ -404,3 +404,5 @@ FodyWeavers.xsd
 *.sln.iml
 
 .DS_Store
+# Claude Code personal settings (hooks, local permissions)
+.claude/settings.local.json
