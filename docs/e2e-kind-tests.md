@@ -9,7 +9,7 @@ Two suites, split by whether helm is in the loop. `AdapterPoolKindE2ETests` (fir
 `ScaledWorkloadRedeployKindE2ETests` (second) needs the real binary because the defect it proves is
 in the apply.
 
-## Adapter pools without helm (AB#4924)
+## Adapter pools without helm
 
 `tests/CommunicationOperator.Tests/E2E/AdapterPoolKindE2ETests` runs the adapter-pool paths against a **real apiserver**: a pool scaled 1 → 3 → 1 through
 `WorkloadReconciler.ScaleAsync`, and a pool garbage-collected when its tenant's `DeploymentSite`
@@ -33,7 +33,7 @@ Helm is deliberately not in the loop: a directly created Deployment carrying the
 
 The manual stack-bringup runbook is a different job: see `docs/E2E-SMOKE-TEST.md`.
 
-## The one suite that does run helm (AB#5350)
+## The one suite that does run helm
 
 `tests/CommunicationOperator.Tests/E2E/ScaledWorkloadRedeployKindE2ETests` is the exception, and the
 reason is the defect itself: a server-side-apply field-ownership conflict exists only where there is

@@ -83,7 +83,7 @@ the `WorkloadReconciler` over the `helm` CLI.
      the data-store gate, pure edge adapters (Modbus / Loxone) fail the
      chart's mandatory `secrets.rabbitmq` check.
 
-  2. **`secrets.rootCa`** (from `RootCaCertificate`, AB#4417) — injected
+  2. **`secrets.rootCa`** (from `RootCaCertificate`) — injected
      **unconditionally** whenever `RootCaCertificate` is set, same gate
      as `BrokerPassword`. On clusters whose ingress/controller endpoint
      uses a private CA (e.g. the local kind getting-started quickstart),
@@ -116,14 +116,14 @@ the `WorkloadReconciler` over the `helm` CLI.
   the one exception: it is never secret-flagged, so it always renders as
   a plain literal in `values-overrides.yaml`.
 
-## Reconciliation Keeps the Installed Chart Version (AB#4955)
+## Reconciliation Keeps the Installed Chart Version
 
 An empty `ChartVersion` means "newest in the repository", resolved by helm at
 `helm upgrade` time. On a deploy a human triggered that is the request. But the
 controller also re-dispatches stranded `Pending` workloads on every pool
-re-registration (AB#4894) — which happens on operator restarts, blueprint
+re-registration — which happens on operator restarts, blueprint
 re-applies, CK-model updates and `EnableCommunication`. Resolving anew there
-silently upgrades workloads nobody deployed (seen on prod-1, where the new chart carried AB#4951).
+silently upgrades workloads nobody deployed (seen on prod-1).
 
 `WorkloadDeployedDto.IsReconciliation` (SDK contract) marks a dispatch as
 "restore what was supposed to be running" rather than a release decision.
@@ -148,7 +148,7 @@ behaves exactly as before, and a controller that pre-dates it never sets it.
 That mixed-fleet window is why the controller still writes a warning event on
 every unpinned re-dispatch.
 
-## Stale Helm-Lock Recovery (AB#4894)
+## Stale Helm-Lock Recovery
 
 A helm process killed mid-upgrade — e.g. the operator pod replaced by a rollout while a deploy
 was in flight — leaves the release's newest revision in a `pending-*` status. That lock blocks
@@ -318,7 +318,7 @@ in the `octo-mesh.meshmakers.io/workload-name` annotation.
 The test assembly has `InternalsVisibleTo`, so `WorkloadReconciler.ReleaseName` / `SecretName` /
 `RepoAlias` can be asserted directly.
 
-## Workload Scale Verb (AB#4917 — On-Demand Lifecycle AB#4914)
+## Workload Scale Verb
 
 The controller's on-demand lifecycle (scale-to-zero for idle adapters) drives replica
 changes through a dedicated hub callback instead of helm:
@@ -344,22 +344,21 @@ changes through a dedicated hub callback instead of helm:
   hibernated state before the deploy event is sent — and **wakes by scaling, not by deploying**
   (`EnsureWorkloadRunningAsync`: `Hibernated/Draining → Waking + scale-1`).
 - 🔴 **Patching `spec.replicas` outside helm is not free.** The chart renders that field, so Helm 4's
-  server-side apply contested it and every scaled workload failed its next deploy until AB#5350. The
+  server-side apply contested it and every scaled workload failed its next deploy. The
   hibernation pin is now one branch of a single rule that pins the live replica count — see
-  [A Scaled Workload Fails Its Next Deploy (AB#5350)](helm-field-ownership.md#a-scaled-workload-fails-its-next-deploy-ab5350).
+  [A Scaled Workload Fails Its Next Deploy](helm-field-ownership.md#a-scaled-workload-fails-its-next-deploy).
 - Reconciler/scale failures follow the existing rule: logged, reported in the ack, never
   propagated into the hub connection.
 
-## Adapter Pools — Platform Namespace, Owner References, Secret Tier (AB#4924 increment 5)
+## Adapter Pools — Platform Namespace, Owner References, Secret Tier
 
 An **adapter pool** (`WorkloadTypeDto.AdapterPool`) is one workload with a replica range whose
 members are leased to tenants in the owning tenant's subtree, one work item per lease. It goes
 through the same `DeployAsync` / `UndeployAsync` / `ScaleAsync` path as every other workload — the
 1:1 workload ↔ helm release model is untouched, `MinReplicas`/`MaxReplicas` are a replica count on
-one release, and the AB#4917 scale verb is the scaling mechanism. Three things are different.
+one release, and the scale verb is the scaling mechanism. Three things are different.
 
-⚠️ `MinReplicas` is the size a pool **starts** at, not what a redeploy returns it to: since AB#5350
-a deploy pins the live count, so a grown pool stays grown; the range is enforced on the scale path.
+⚠️ `MinReplicas` is the size a pool **starts** at, not what a redeploy returns it to: a deploy pins the live count, so a grown pool stays grown; the range is enforced on the scale path.
 
 **1. Namespace.** `WorkloadReconciler.ResolveNamespace` sends a pool to `PlatformNamespace` and
 everything else to `DeploymentSiteNamespace`. A pool member runs work for tenants other than the one that owns

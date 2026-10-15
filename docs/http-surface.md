@@ -8,7 +8,7 @@ applies_to: src/CommunicationOperator/Controller/**, src/CommunicationOperator/P
 Why this host has no authentication and how its one administrative endpoint is protected instead.
 The rules are in `AGENTS.md` → "Rules"; this file is the reasoning behind them.
 
-## This host has no authentication at all (AB#5059)
+## This host has no authentication at all
 
 `Program.cs` registers `AddKubernetesOperator()`, `AddHealthChecks()` and `AddControllers()` — and
 nothing else. There is **no `AddAuthentication`, no `AddAuthorization`, no `UseAuthentication`, no
@@ -42,7 +42,7 @@ restart loses the state you want to see.
 
 **Tests:** `tests/CommunicationOperator.Tests/Controller/DiagnosticsControllerTests.cs`.
 
-## Outbound authentication (AB#5062)
+## Outbound authentication
 
 The operator's own credential on `/operatorHub` is covered in
-[Operator Hub Authentication](operator-hub.md#operator-hub-authentication-ab5062).
+[Operator Hub Authentication](operator-hub.md#operator-hub-authentication).

@@ -31,7 +31,7 @@ respond with `TenantException`. Re-throwing would put the entity back in the Kub
 forever. Locally the site is removed from `_deploymentSites` and its `IsRegistered` flag cleared
 regardless; the SignalR connection is shared by every site and is not touched.
 
-## Pool-Registration Retry Loop (AB#4371)
+## Pool-Registration Retry Loop
 
 A registration the **controller rejects while the SignalR connection stays alive** would otherwise
 be lost: the reconnect callback is the only other trigger, and it fires only when the connection
@@ -107,10 +107,10 @@ controller-side restore handles empty lists cleanly. Closing the gap needs the r
 restart can read them back (a helm `--labels` entry or the `{release}-octo-secrets` Secret); the
 contract is in `docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md`.
 
-## Operator Hub Authentication (AB#5062)
+## Operator Hub Authentication
 
 Configuration, the choice of tenant and the rollout order are in `README.md` →
-[Operator hub authentication](../README.md#operator-hub-authentication-ab5062). This section covers
+[Operator hub authentication](../README.md#operator-hub-authentication). This section covers
 only the code path.
 
 The operator obtains its own client-credentials access token and presents it on the `/operatorHub`
@@ -124,7 +124,7 @@ connection. Four pieces, in the order the token travels:
 2. **`ConfigureOperatorAuthenticatorOptions`** (`IConfigureOptions<AuthenticatorOptions>`) projects
    that onto the SDK's `AuthenticatorOptions`, which `AuthenticatorClient` reads. An
    `IConfigureOptions` rather than an inline delegate in `Program.cs` so the projection — above all
-   `TenantId`, whose loss produces an AB#5058 `invalid_request` that points nowhere near the mapping
+   `TenantId`, whose loss produces an `invalid_request` that points nowhere near the mapping
    — is pinned by a test.
 3. **`OperatorAccessTokenService`** (`BackgroundService`) requests the token
    (`ApiScopes.OctoApiFullAccess`, `DefaultScopes.None` → exactly `octo_api`, no `offline_access`)
