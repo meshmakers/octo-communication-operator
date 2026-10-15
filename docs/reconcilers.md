@@ -119,7 +119,7 @@ the `WorkloadReconciler` over the `helm` CLI.
 ## Reconciliation Keeps the Installed Chart Version
 
 An empty `ChartVersion` means "newest in the repository", resolved by helm at
-`helm upgrade` time. On a deploy a human triggered that is the request. But the
+`helm upgrade` time. For a deploy a user triggered, that is intended. But the
 controller also re-dispatches stranded `Pending` workloads on every pool
 re-registration — which happens on operator restarts, blueprint
 re-applies, CK-model updates and `EnableCommunication`. Resolving anew there
@@ -169,9 +169,10 @@ itself short of a manual Undeploy→Deploy cycle. Before the pre-flight, `Worklo
 
 ## Pre-flight + Diagnostics
 
-`helm upgrade --install --rollback-on-failure` collapses every failure into one
-opaque stderr line — typically `Error: release X failed, and has been
-uninstalled due to atomic being set: context deadline exceeded`. The
+`helm upgrade --install --rollback-on-failure` collapses a failure while applying
+resources or waiting for them into one opaque stderr line — typically `Error:
+release X failed, and has been uninstalled due to atomic being set: context
+deadline exceeded`. The
 actual root cause (`ImagePullBackOff`, admission-webhook denial,
 `CrashLoopBackOff`, missing secret, …) is observable on the cluster
 while helm waits, but `--rollback-on-failure` rolls everything back before the
