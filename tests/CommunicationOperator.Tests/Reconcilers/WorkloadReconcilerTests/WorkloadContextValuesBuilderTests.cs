@@ -34,6 +34,36 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).DoesNotContain("ingress");
     }
 
+    // 🔴 AB#5303 item 2. The projection existed in AdapterReconciler, was deleted with the move to
+    // Helm, and OperatorOptions.AdapterIgnoreCertificateValidation was read by nothing for four
+    // months while still being bound from OPERATOR__ADAPTERIGNORECERTIFICATEVALIDATION and
+    // documented in appsettings.Development.json. These two tests are the reason it cannot be lost
+    // again silently: one asserts it arrives, the other that false emits nothing at all.
+    [Test]
+    public async Task Build_AdapterIgnoreCertificateValidation_ReachesTheChart()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            AdapterIgnoreCertificateValidation = true,
+        });
+
+        // Unquoted: the chart branches on it with `if`, and a quoted "true" would still be truthy
+        // while a quoted "false" would be too - see the note at the top of this file.
+        await Assert.That(yaml!).Contains("\"ignoreCertificateValidation\": true");
+    }
+
+    [Test]
+    public async Task Build_AdapterIgnoreCertificateValidationFalse_EmitsNothing()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            InstancePrefix = "test-2",
+            AdapterIgnoreCertificateValidation = false,
+        });
+
+        await Assert.That(yaml!).DoesNotContain("ignoreCertificateValidation");
+    }
+
     [Test]
     public async Task Build_WorkloadControllerUri_OverridesTheSharedUriForWorkloads()
     {
@@ -477,5 +507,55 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).Contains("\"publicUri\": \"https://adapter.staging.octo-mesh.com\"");
         await Assert.That(yaml!).DoesNotContain("className");
         await Assert.That(yaml!).DoesNotContain("cluster-issuer");
+    }
+
+    [Test]
+    public async Task Build_Dash0_EmitsNonSecretContextOnly()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            Dash0 = new Dash0Options
+            {
+                Endpoint = "https://ingress.europe-west4.gcp.dash0.com",
+                Dataset = "prod-1",
+                Environment = "prod-1",
+            },
+            // Set alongside to pin that the token never leaks into the context layer: this
+            // file is a plain -f argument to helm and ends up in the rendered manifest.
+            Dash0WebAuthToken = "auth_must_not_appear_here",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"endpoint\": \"https://ingress.europe-west4.gcp.dash0.com\"");
+        await Assert.That(yaml!).Contains("\"dataset\": \"prod-1\"");
+        await Assert.That(yaml!).Contains("\"environment\": \"prod-1\"");
+        await Assert.That(yaml!).DoesNotContain("auth_must_not_appear_here");
+        await Assert.That(yaml!).DoesNotContain("dash0WebAuthToken");
+    }
+
+    [Test]
+    public async Task Build_Dash0NotConfigured_OmitsTheKeyEntirely()
+    {
+        // A cluster without Dash0 must render byte-identical values to before this change.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            InstancePrefix = "test-2",
+        });
+
+        await Assert.That(yaml!).DoesNotContain("dash0");
+    }
+
+    [Test]
+    public async Task Build_Dash0PartiallyConfigured_EmitsOnlyWhatIsSet()
+    {
+        // Dataset can be encoded in the token instead, so endpoint-only is a real state.
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            Dash0 = new Dash0Options { Endpoint = "https://ingress.example" },
+        });
+
+        await Assert.That(yaml!).Contains("\"endpoint\": \"https://ingress.example\"");
+        await Assert.That(yaml!).DoesNotContain("dataset");
+        await Assert.That(yaml!).DoesNotContain("environment");
     }
 }

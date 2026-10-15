@@ -23,4 +23,14 @@
     <InternalsVisibleTo Include="Meshmakers.Octo.Communication.Operator.Tests" />
   </ItemGroup>
 
+    <!--
+        AB#5478 §2.3. This process carries none of the Meshmakers.Octo.Services.* packages, so it
+        had no access to the ${otel-trace-id} / ${otel-span-id} layout renderers while they lived
+        there. They now sit in Meshmakers.Common.Observability, whose only dependency is NLog —
+        which this project already had in its graph — so the trace correlation costs nothing here.
+    -->
+    <ItemGroup>
+        <PackageReference Include="Meshmakers.Common.Observability" Version="$(MeshmakerVersion)" />
+    </ItemGroup>
+
 </Project>

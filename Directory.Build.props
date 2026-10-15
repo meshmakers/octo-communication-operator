@@ -41,6 +41,10 @@
              (train override on r-tag); $(OctoVersion) fallback only for local/standalone. -->
         <OctoCommVersion Condition="'$(OctoCommVersion)'==''">$(OctoVersion)</OctoCommVersion>
         <Version Condition="'$(Configuration)'=='DebugL'">999.0.0</Version>
+        <!-- mm-common release line, independent of the Octo lines (AB#5478 §2.3: the
+             OTel trace layout renderers live in Meshmakers.Common.Observability). -->
+        <MeshmakerVersion>4.3.0</MeshmakerVersion>
+        <MeshmakerVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</MeshmakerVersion>
         <PackageVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</PackageVersion>
         <RestoreSources Condition="'$(RestoreSources)'==''">https://api.nuget.org/v3/index.json</RestoreSources>
         <RestoreSources Condition="'$(OctoNugetPrivateServer)'!=''">$(OctoNugetPrivateServer)</RestoreSources>

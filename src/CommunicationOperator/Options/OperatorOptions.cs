@@ -245,6 +245,58 @@ public class OperatorOptions
     public ClusterSecretsOptions ClusterSecrets { get; set; } = new();
 
     /// <summary>
+    /// IronOCR licence key, projected as the secret-flagged value override
+    /// <c>secrets.ironOcrLicenseKey</c> into the workloads whose chart reads it
+    /// (AB#5449). Before this the key was a literal in the mesh adapter's source,
+    /// so every rotation was a code change and every clone of that repository
+    /// carried a live commercial key.
+    /// <para>
+    /// Cluster-wide rather than per workload because one licence covers the whole
+    /// estate — the same reason <see cref="BrokerPassword"/> lives here. Populated
+    /// from Vault by the deployment pipeline, exactly like the broker password.
+    /// </para>
+    /// <para>
+    /// 🔴 Unset is a supported state: only <c>PdfOcrExtraction@1</c> needs the key
+    /// and most tenants never run OCR, so an adapter deployed without it starts
+    /// normally and fails only when a document actually requires OCR. Nothing here
+    /// validates it — see <c>MeshAdapterConfiguration.IronOcrLicenseKey</c>.
+    /// </para>
+    /// </summary>
+    public string? IronOcrLicenseKey { get; set; }
+
+    /// <summary>
+    /// Dash0 browser-RUM ingest token, injected as the secret-flagged value override
+    /// <c>secrets.dash0WebAuthToken</c> into the workloads whose chart reads it. Follows the
+    /// <see cref="IronOcrLicenseKey"/> pattern exactly: one token per cluster, populated from
+    /// Vault by the deployment pipeline, delivered through the per-release Kubernetes Secret.
+    /// <para>
+    /// Cluster-wide rather than per workload for a reason that matters here more than it does
+    /// for OCR: the tenant apps are operator-deployed, so their Helm values live on the
+    /// Application entity, not in git. The alternative — a value override per tenant — would
+    /// write the token in clear text into every tenant database and leave each newly
+    /// provisioned tenant silently without RUM until someone remembered to add it.
+    /// </para>
+    /// <para>
+    /// 🔴 This token is NOT a confidentiality boundary. A browser-RUM token is served to every
+    /// visitor inside the page and is readable in any dev-tools session — it must be created
+    /// with the Ingesting permission ONLY. It is handled as a secret here so it does not sit in
+    /// a rendered manifest or a tenant database, not because the value stays hidden.
+    /// </para>
+    /// <para>
+    /// Unset is a supported state and the default: the apps treat a missing endpoint or token as
+    /// "Dash0 not activated here" and skip SDK initialisation entirely.
+    /// </para>
+    /// </summary>
+    public string? Dash0WebAuthToken { get; set; }
+
+    /// <summary>
+    /// Non-secret Dash0 browser-RUM context (ingest URL, dataset, environment) projected into
+    /// every workload chart through <see cref="Reconcilers.WorkloadContextValuesBuilder"/>.
+    /// Bound from <c>Operator:Dash0</c>.
+    /// </summary>
+    public Dash0Options Dash0 { get; set; } = new();
+
+    /// <summary>
     /// How the operator invokes <c>helm</c> (AB#5325).
     /// </summary>
     public HelmOptions Helm { get; set; } = new();
@@ -280,6 +332,35 @@ public class HelmOptions
     ///     </para>
     /// </remarks>
     public bool ForceConflicts { get; set; }
+}
+
+/// <summary>
+/// Cluster-level Dash0 browser-RUM settings. Non-secret by construction — the ingest URL and the
+/// dataset name are visible in the page's network traffic anyway; the token lives in
+/// <see cref="OperatorOptions.Dash0WebAuthToken"/>.
+/// </summary>
+/// <remarks>
+/// Mirrors the <c>services.studio.dash0</c> block the octo-mesh chart already carries for the
+/// Refinery Studio, so a cluster configures the same three values in the same shape whether the
+/// frontend is deployed by that chart or rolled out as a tenant workload by this operator.
+/// </remarks>
+public class Dash0Options
+{
+    /// <summary>
+    /// OTLP/HTTP ingress base URL, excluding the <c>/v1/*</c> suffix the web SDK appends — e.g.
+    /// <c>https://ingress.europe-west4.gcp.dash0.com</c>. Empty disables RUM for every workload
+    /// on this cluster regardless of whether a token is configured.
+    /// </summary>
+    public string? Endpoint { get; set; }
+
+    /// <summary>Dash0 dataset, e.g. <c>prod-1</c>. May also be encoded in the auth token.</summary>
+    public string? Dataset { get; set; }
+
+    /// <summary>
+    /// Value reported as the OpenTelemetry <c>deployment.environment</c>. Conventionally the
+    /// cluster name, so RUM and backend telemetry from one cluster group together.
+    /// </summary>
+    public string? Environment { get; set; }
 }
 
 /// <summary>
@@ -423,6 +504,29 @@ public class ClusterSecretsOptions
 
     /// <summary>CrateDB password for the stream-data user.</summary>
     public string? StreamDataPassword { get; set; }
+
+    /// <summary>
+    /// SECRET attribute key ring (AB#5536): key id → base64 32-byte AES-256 key, projected into
+    /// the workload as <c>secrets.secretEncryption.keys.&lt;kid&gt;</c> (secret-flagged) and rendered by
+    /// the mesh adapter chart as <c>OCTO_SECRETENCRYPTION__KEYS__&lt;kid&gt;</c>. Bound from
+    /// <c>OPERATOR__CLUSTERSECRETS__SECRETENCRYPTIONKEYS__&lt;kid&gt;</c>; the key id keeps its case
+    /// because it is the id the engine writes into the <c>enc:v2:&lt;kid&gt;:</c> envelope header.
+    /// The first key <c>k1</c> is the cluster's existing instance secret (concept AB#5528,
+    /// decision 3). Empty entries are skipped.
+    /// </summary>
+    public Dictionary<string, string> SecretEncryptionKeys { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Key id new SECRET values are encrypted with (<c>SecretEncryption:ActiveKeyId</c>). When unset
+    /// and <see cref="SecretEncryptionKeys"/> holds exactly one key, that key is the active one.
+    /// </summary>
+    public string? SecretEncryptionActiveKeyId { get; set; }
+
+    /// <summary>
+    /// Key that decrypts legacy <c>enc:v1:</c> values (<c>SecretEncryption:LegacyV1Key</c>) — the
+    /// instance secret those values were written with.
+    /// </summary>
+    public string? SecretEncryptionLegacyV1Key { get; set; }
 }
 
 /// <summary>
