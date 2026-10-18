@@ -844,6 +844,44 @@ Tests:
   the call, `ReportDeployedStateAsync` failure is logged but doesn't
   crash the connect callback.
 
+### Watch Falls Back to Classic List+Watch (AB#6898)
+
+KubeOps' `ResourceWatcher` (KubeOps 13.2.0) starts every custom-resource watch through
+`IKubernetesClient.WatchAsync(namespace, resourceVersion: null, ..., allowWatchBookmarks: true)`. It does **not**
+send `sendInitialEvents=true` (the generic `ICustomObjectsOperations` of KubernetesClient 19 has no such
+parameter); the unset `resourceVersion` is what matters: the API server answers a watch without
+`resourceVersion` with a **consistent read from etcd**, which needs the optional etcd feature
+`RequestWatchProgress`. When it is disabled (prod-1, 2026-10-17, cause cluster side, AB#6896) the server
+refuses the request with HTTP 500 `a watch stream was requested by the client but the required storage
+feature RequestWatchProgress is disabled`. KubeOps then logs `There was an error while watching the resource
+...V1DeploymentSiteEntity` every ~33 s and repeats the identical request, so a freshly started pod never sees
+its `DeploymentSite` CRs and every site goes offline. (A raw `kubectl get --watch` probe with
+`sendInitialEvents=true` fails the same way, which is how the fault was first diagnosed, but it is not what the
+operator sends.)
+
+Fix, in `Watching/`:
+
+- `WatchFallbackKubernetesClient` replaces `KubernetesClient` as the `IKubernetesClient` registration
+  (`Program.cs`). It re-implements only `WatchAsync`: when a watch **without** `resourceVersion` is refused
+  with the `RequestWatchProgress` message before it delivered an event, it switches the process to classic
+  mode and restarts the watch at `resourceVersion=0`. The API server serves that from its watch cache: the
+  current state as `ADDED` events, then live changes and bookmarks (one request instead of list + watch, same
+  semantics; the initial snapshot may be slightly stale). Reconnects that carry a bookmark `resourceVersion`
+  pass through untouched, and every other failure is rethrown to KubeOps as before.
+- `WatchModeState` (singleton) holds the switch for all watchers, because the cause is a cluster property; the
+  switch is logged **once** at WARN, so the 33 s retry loop does not repeat it. Once classic, later watches
+  start at `resourceVersion=0` directly and the refused request is never sent again. The operator stays in
+  classic mode until it is restarted.
+- `WatchRefusal` recognises the refusal by message (status message, response body or inner exception).
+- `OPERATOR__FORCECLASSICWATCH=true` (`OperatorOptions.ForceClassicWatch`, default `false`) starts in classic
+  mode from the first request and logs a WARN at startup. Env only; the `octo-helm-core` chart exposes no value
+  for it yet (proposal: chart value `operator.forceClassicWatch` rendered into that env var).
+
+Tests: `Watching/WatchFallbackKubernetesClientTests` runs the real k8s client against a fake API server
+handler that refuses an unversioned watch like prod-1: fallback delivers the sites, fallback is remembered and
+warns once, healthy server keeps the default, forced mode never sends the unversioned request, bookmark
+reconnects and other failures are not touched, env binding of the option.
+
 ### Webhooks
 
 - `DeploymentSiteValidator`: requires `Spec.PoolRtId` to be a
@@ -969,6 +1007,7 @@ Key options:
 | `WatchNamespace` | Restricts the CR watcher to a single namespace. When null/empty (default), the operator watches all namespaces cluster-wide. Required when running multiple operator instances on the same cluster (e.g. one per target controller on an edge device) so they don't race on the same CRs. Wired via `KubeOps.Abstractions.Builder.OperatorSettingsBuilder.WithNamespace()`. |
 | `CommunicationControllerUri` | SignalR endpoint of the Controller. Required in **both** central and edge modes for `OperatorHubService` to start. When empty, the hub service logs a warning and exits, and `IOperatorHubInvoker.RegisterDeploymentSiteAsync` becomes a no-op (CR-reconcile finishes locally but the controller never sees the pool). |
 | `WorkloadCommunicationControllerUri` | Controller URI projected into every deployed workload's Helm values. Empty (default) projects `CommunicationControllerUri` — one address serves the operator's own hub connection and the workloads, correct wherever both resolve it the same way. Set it when the operator needs an address the workloads cannot use (local kind: host-run controller reachable for the operator via a pod hostAlias only — the adapters then sat at Unregistered while the operator looked healthy, AB#4967). |
+| `ForceClassicWatch` | Starts the CR watchers in classic mode (`resourceVersion=0`) from the first request instead of waiting for the API server to refuse the consistent watch start (AB#6898, see [Watch Falls Back to Classic List+Watch](#watch-falls-back-to-classic-listwatch-ab6898)). Default **false**; the operator also switches on its own when the refusal happens. Env only: `OPERATOR__FORCECLASSICWATCH`. |
 | `Helm.ForceConflicts` | Adds `--force-conflicts` to `helm upgrade`, so a server-side apply takes ownership of fields another field manager holds instead of refusing (AB#5325). Default **false** — the only source of a foreign manager is a person patching the object by hand, and forcing past that overwrites what they set, silently, on every deploy from then on. Never applied to the `--dry-run=server` pre-flight. Env only (`OPERATOR__HELM__FORCECONFLICTS`); no chart value, because this is an incident lever rather than a deployment setting. The alternative remedy needs no option: delete the Deployment so the chart owns it again. |
 | `PoolRegistrationRetrySeconds` | Cadence of the pool-registration retry loop (see "Pool-Registration Retry Loop" above). Default 30; fractional values allowed; `<= 0` disables the loop. |
 | `PoolNamespace` | Namespace where auto-created `DeploymentSite` CRs and per-tenant broker secrets live (default `octo`). Helm releases are deployed into the same namespace unless the chart's values override it. |
@@ -1080,6 +1119,7 @@ Pure-logic + callback surfaces:
 - `Webhooks/DeploymentSiteMutatorTests` — no-op invariant.
 - `Finalizer/DeploymentSiteFinalizerTests` — success result + entity passthrough.
 - `Controller/DeploymentSiteControllerTests` — `ReconcileAsync` happy/failure paths and `DeletedAsync` no-status-update contract. The delete callback must not call `IKubernetesClient.UpdateStatusAsync` because the CR is already gone when KubeOps invokes it; a status-update there 404s and makes KubeOps retry the delete reconcile indefinitely.
+- `Watching/WatchFallbackKubernetesClientTests` — watch fallback to classic list+watch against a fake API server that refuses unversioned watches (AB#6898).
 - `Services/OperatorHubServiceTests` — `TenantCreatedAsync` / `TenantDeletedAsync` delegate to `IDeploymentSiteManager` and swallow exceptions.
 
 Reconcilers + Kubernetes resource managers (mocked at the abstraction boundary, not against the k8s SDK):

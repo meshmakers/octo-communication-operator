@@ -300,6 +300,27 @@ public class OperatorOptions
     /// How the operator invokes <c>helm</c> (AB#5325).
     /// </summary>
     public HelmOptions Helm { get; set; } = new();
+
+    /// <summary>
+    ///     Forces the operator's custom-resource watchers into the classic list-and-watch mode (AB#6898)
+    ///     from the very first request (<c>OPERATOR__FORCECLASSICWATCH=true</c>).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         By default the operator starts a watch without a <c>resourceVersion</c>, which the API server
+    ///         answers with a consistent read from etcd and therefore needs the optional etcd feature
+    ///         <c>RequestWatchProgress</c>. When that feature is off the server refuses every such watch with
+    ///         HTTP 500 and the operator would retry the refused request forever. The operator detects this
+    ///         refusal on its own and falls back; this switch skips the detour for clusters that are known to
+    ///         have the fault.
+    ///     </para>
+    ///     <para>
+    ///         Classic mode starts the watch at <c>resourceVersion=0</c>: the API server replays the current
+    ///         state from its watch cache as <c>ADDED</c> events and then streams live changes (and bookmarks),
+    ///         without a consistent read from etcd. The initial snapshot may be slightly stale.
+    ///     </para>
+    /// </remarks>
+    public bool ForceClassicWatch { get; set; }
 }
 
 /// <summary>
@@ -332,6 +353,7 @@ public class HelmOptions
     ///     </para>
     /// </remarks>
     public bool ForceConflicts { get; set; }
+
 }
 
 /// <summary>
