@@ -12,6 +12,7 @@ The operator can be configured via environment variables:
 |----------|-------------|---------|
 | `OPERATOR__AUTOMANAGEDEPLOYMENTSITES` | Auto-create DeploymentSite CRs on tenant creation | `false` |
 | `OPERATOR__WATCHNAMESPACE` | Restricts the CR watcher to a single namespace. Required when multiple operator instances share one cluster (e.g. edge devices running one operator per target controller) so they don't race on each other's CRs. Leave empty to watch all namespaces. | _(empty — watch all)_ |
+| `OPERATOR__FORCECLASSICWATCH` | Starts the `DeploymentSite` watcher in classic mode (`resourceVersion=0`, served from the API server's watch cache) from the first request. The operator switches to this mode on its own, once and with a WARN, when the API server refuses the default watch with `the required storage feature RequestWatchProgress is disabled` (AB#6898); set this only to skip that detour on a cluster known to have the fault. | `false` |
 | `OPERATOR__DEPLOYMENTSITENAMESPACE` | Namespace where auto-created CRs and per-tenant broker secrets live. Helm releases default to the same namespace unless the chart overrides it. | `octo` |
 | `OPERATOR__COMMUNICATIONCONTROLLERURI` | Controller URI for auto-created CRs | _(required when AutoManagePools=true)_ |
 | `OPERATOR__DEFAULTDEPLOYMENTSITENAME` | Pool name for auto-created CRs | `default` |

@@ -13,6 +13,7 @@ using Meshmakers.Octo.Communication.Operator.Helm;
 using Meshmakers.Octo.Communication.Operator.Options;
 using Meshmakers.Octo.Communication.Operator.Reconcilers;
 using Meshmakers.Octo.Communication.Operator.Services;
+using Meshmakers.Octo.Communication.Operator.Watching;
 using Meshmakers.Octo.Sdk.ServiceClient;
 using Meshmakers.Octo.Sdk.ServiceClient.AssetRepositoryServices.Tenants;
 using Meshmakers.Octo.Sdk.ServiceClient.Authentication;
@@ -108,7 +109,9 @@ try
 
     builder.Services.Configure<OperatorOptions>(builder.Configuration.GetSection("Operator"));
     builder.Services.AddSingleton<IDeploymentSiteService, DeploymentSiteService>();
-    builder.Services.AddSingleton<IKubernetesClient, KubernetesClient>();
+    // AB#6898: watch falls back to classic list+watch when the API server refuses the consistent watch start.
+    builder.Services.AddSingleton<WatchModeState>();
+    builder.Services.AddSingleton<IKubernetesClient, WatchFallbackKubernetesClient>();
     builder.Services.AddSingleton<IKubernetes>(_ =>
     {
         KubernetesClientConfiguration config;
