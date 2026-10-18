@@ -859,15 +859,45 @@ its `DeploymentSite` CRs and every site goes offline. (A raw `kubectl get --watc
 `sendInitialEvents=true` fails the same way, which is how the fault was first diagnosed, but it is not what the
 operator sends.)
 
+**Measured on prod-1 (2026-10-18, raw GET watches against `deploymentsites`, `timeoutSeconds=3`).** The first
+fix (PR #34) assumed `resourceVersion=0` is enough. It is not - the server also refuses the bookmark flag
+when the resourceVersion is empty or 0:
+
+| `resourceVersion` | `allowWatchBookmarks` | `sendInitialEvents` | prod-1 |
+|-------------------|-----------------------|---------------------|--------|
+| `0` | unset / `false` | - | **accepted** (watch cache, current state as `ADDED`) |
+| `0` | `true` | - | HTTP 500 `RequestWatchProgress` |
+| empty | `true` | - | HTTP 500 |
+| empty | unset / `false` | - | not measured; assumed 500 (it is the consistent read that needs the feature) |
+| exact (the list's) | `true` or `false` | - | accepted |
+| any | any | `true` | HTTP 500 |
+
+The fake API server of `Watching/WatchFallbackKubernetesClientTests` implements exactly this matrix (and has a
+test that pins it), so a regression of the rule turns the tests red. Lesson of PR #34: a fake that only rejects
+what the incident report mentions proves nothing about the fix; model the measured matrix.
+
 Fix, in `Watching/`:
 
 - `WatchFallbackKubernetesClient` replaces `KubernetesClient` as the `IKubernetesClient` registration
   (`Program.cs`). It re-implements only `WatchAsync`: when a watch **without** `resourceVersion` is refused
   with the `RequestWatchProgress` message before it delivered an event, it switches the process to classic
-  mode and restarts the watch at `resourceVersion=0`. The API server serves that from its watch cache: the
-  current state as `ADDED` events, then live changes and bookmarks (one request instead of list + watch, same
-  semantics; the initial snapshot may be slightly stale). Reconnects that carry a bookmark `resourceVersion`
-  pass through untouched, and every other failure is rethrown to KubeOps as before.
+  mode and restarts the watch at `resourceVersion=0` **with `allowWatchBookmarks=false`** (the flag KubeOps
+  always sends as `true` is overridden on exactly these starts). The API server serves that from its watch
+  cache: the current state as `ADDED` events, then live changes (one request instead of list + watch; the
+  initial snapshot may be slightly stale). A watch that carries a concrete `resourceVersion` passes through
+  untouched, bookmark flag included, and every other failure is rethrown to KubeOps as before.
+- **Reconnects in classic mode.** KubeOps 13.2.0 (`ResourceWatcher.ExecuteAsync`) remembers a `resourceVersion`
+  for the reconnect only from `BOOKMARK` events (event resource versions are logged, not kept). Without
+  bookmarks it is always `null`, so every reconnect (stream end, timeout, network drop) is again an unversioned
+  start; the wrapper turns it into `resourceVersion=0` + no bookmarks. Consequence: after each reconnect the
+  watcher receives the **full current state as `ADDED`** (KubeOps treats a `null` start as a full relist, the
+  same as after its own 410 Gone handling) - no event is lost, a site that appeared while the stream was down
+  arrives with the replay, the reconcile is idempotent, and there is no loop (one request per reconnect, KubeOps'
+  exponential backoff on errors). Cost: a replay of the 14 sites per reconnect instead of a delta. `rv=0` may
+  serve a slightly stale snapshot; the live stream corrects that. A site deleted during a gap is not delivered
+  as `DELETED` (same as KubeOps' own relist); the finalizer path and the next reconcile cover it.
+  Re-enabling bookmarks in classic mode would need a concrete `resourceVersion` (accepted by prod-1) and a list
+  call to obtain one; not done, the replay is cheap at this scale.
 - `WatchModeState` (singleton) holds the switch for all watchers, because the cause is a cluster property; the
   switch is logged **once** at WARN, so the 33 s retry loop does not repeat it. Once classic, later watches
   start at `resourceVersion=0` directly and the refused request is never sent again. The operator stays in
@@ -877,10 +907,15 @@ Fix, in `Watching/`:
   mode from the first request and logs a WARN at startup. Env only; the `octo-helm-core` chart exposes no value
   for it yet (proposal: chart value `operator.forceClassicWatch` rendered into that env var).
 
-Tests: `Watching/WatchFallbackKubernetesClientTests` runs the real k8s client against a fake API server
-handler that refuses an unversioned watch like prod-1: fallback delivers the sites, fallback is remembered and
-warns once, healthy server keeps the default, forced mode never sends the unversioned request, bookmark
-reconnects and other failures are not touched, env binding of the option.
+Tests: `Watching/WatchFallbackKubernetesClientTests` runs the real k8s client against the fake API server:
+fallback delivers the sites (request sequence `rv=<none> bookmarks=true`, then `rv=0 bookmarks=false`), fallback
+is remembered and warns once, healthy server keeps the default, forced mode never sends the unversioned request,
+a KubeOps-like reconnect loop (bookmark-only version memory) replays and loses no event with exactly one refused
+request, a concrete `resourceVersion` + bookmarks passes through and delivers only newer events, the unmodified
+KubeOps client is refused on `rv=0` + bookmarks (the PR #34 mistake), the matrix itself, env binding of the
+option. `Watching/WatcherChainTests` runs the **real KubeOps `ResourceWatcher`** with the Program.cs
+registrations against the same matrix: fallback, DeploymentSite events, `DeploymentSiteController` reconcile and
+the registration call at the controller. The `IKubernetesClient` seen by KubeOps is asserted to be the wrapper.
 
 ### Webhooks
 
