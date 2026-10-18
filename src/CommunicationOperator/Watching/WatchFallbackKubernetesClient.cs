@@ -16,9 +16,12 @@ namespace Meshmakers.Octo.Communication.Operator.Watching;
 ///     without it the request is refused (HTTP 500) and the watcher retries the identical request every ~33 s,
 ///     so a freshly started operator pod never learns its DeploymentSites. This client catches that refusal,
 ///     switches the process to classic mode once (<see cref="WatchModeState" />) and restarts the watch at
-///     <c>resourceVersion=0</c>, which the API server serves from its watch cache: the current state as
-///     <c>ADDED</c> events followed by the live changes and bookmarks. Reconnects that carry a bookmark
-///     resource version are untouched. Only <see cref="WatchAsync{TEntity}" /> is replaced; the interface is
+///     <c>resourceVersion=0</c> <b>without bookmarks</b> (<c>allowWatchBookmarks=false</c>), which the API server
+///     serves from its watch cache: the current state as <c>ADDED</c> events followed by the live changes. The
+///     bookmark flag has to go too: the same cluster refuses <c>allowWatchBookmarks=true</c> whenever the
+///     resourceVersion is empty or 0. KubeOps only remembers bookmark resource versions, so without bookmarks every
+///     reconnect is again a classic start (full replay of the current state as <c>ADDED</c>, which KubeOps treats
+///     like its own 410 Gone relist). Watches that carry a concrete resourceVersion are untouched. Only <see cref="WatchAsync{TEntity}" /> is replaced; the interface is
 ///     re-implemented so the rest is inherited.
 /// </remarks>
 public sealed class WatchFallbackKubernetesClient : KubernetesClient, IKubernetesClient
@@ -51,9 +54,14 @@ public sealed class WatchFallbackKubernetesClient : KubernetesClient, IKubernete
 
         while (true)
         {
-            var version = startsUnversioned && _state.IsClassic ? ClassicResourceVersion : resourceVersion;
+            var classic = startsUnversioned && _state.IsClassic;
+            var version = classic ? ClassicResourceVersion : resourceVersion;
+            // prod-1 measured (AB#6898): bookmarks are refused whenever the resourceVersion is empty or "0"
+            // (same RequestWatchProgress error), accepted with a concrete resourceVersion. The classic start
+            // therefore asks for no bookmarks; a concrete resourceVersion passes through with the caller's value.
+            var bookmarks = classic ? false : allowWatchBookmarks;
             await using var events = base
-                .WatchAsync<TEntity>(@namespace, version, labelSelector, fieldSelector, allowWatchBookmarks, cancellationToken)
+                .WatchAsync<TEntity>(@namespace, version, labelSelector, fieldSelector, bookmarks, cancellationToken)
                 .GetAsyncEnumerator(cancellationToken);
 
             var delivered = false;
