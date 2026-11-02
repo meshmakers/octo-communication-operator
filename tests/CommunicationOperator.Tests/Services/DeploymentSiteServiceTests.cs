@@ -142,4 +142,76 @@ public class DeploymentSiteServiceTests
         await _hub.DidNotReceiveWithAnyArgs().ReportDeployedDeploymentSiteAsync(default!, default!);
         await Assert.That(_service.GetDeploymentSites().Single().IsRegistered).IsFalse();
     }
+
+    [Test]
+    public async Task PreUpdateTenantAsync_CrFinalizedDuringWait_IsNotReRegistered()
+    {
+        // AB#8160 (test-2, tenant tmp-billbee-wp4): Delete --disable-features undeploys the
+        // site, deletes the DeploymentSite CR and updates the tenant in one go. The pre-update
+        // handler used to remove the entries itself and re-add them after its wait, so a CR
+        // finalized during the wait came back as a zombie entry that the retry loop
+        // registered every 30 s against a deleted tenant.
+        var entity = Entity("tmp-billbee-wp4", AcmeDeploymentSiteRtId, "cloud");
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+        _service.PreUpdateReRegisterDelay = TimeSpan.FromMilliseconds(200);
+
+        var preUpdate = _service.PreUpdateTenantAsync("tmp-billbee-wp4");
+        // The CR finalizer runs while the pre-update handler waits.
+        await _service.UnRegisterDeploymentSiteAsync(entity);
+        await preUpdate;
+
+        await Assert.That(_service.GetDeploymentSites().Count).IsEqualTo(0);
+        // Only the initial registration; no re-registration of the deleted site.
+        await _hub.Received(1).RegisterDeploymentSiteAsync("tmp-billbee-wp4", AcmeDeploymentSiteRtId);
+    }
+
+    [Test]
+    public async Task PreUpdateTenantAsync_CrStillPresent_UnregistersAndReRegisters()
+    {
+        var entity = Entity("acme", AcmeDeploymentSiteRtId, "default");
+        var other = Entity("energytest", EnergytestDeploymentSiteRtId, "cloud");
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+        await _service.RegisterDeploymentSiteAsync(other, CancellationToken.None);
+        _service.PreUpdateReRegisterDelay = TimeSpan.Zero;
+
+        await _service.PreUpdateTenantAsync("acme");
+
+        await _hub.Received(1).UnregisterDeploymentSiteAsync("acme", AcmeDeploymentSiteRtId);
+        await _hub.Received(2).RegisterDeploymentSiteAsync("acme", AcmeDeploymentSiteRtId);
+        // Other tenants are untouched.
+        await _hub.DidNotReceive().UnregisterDeploymentSiteAsync("energytest", Arg.Any<string>());
+        await _hub.Received(1).RegisterDeploymentSiteAsync("energytest", EnergytestDeploymentSiteRtId);
+        await Assert.That(_service.GetDeploymentSites().Count).IsEqualTo(2);
+        await Assert.That(_service.GetDeploymentSites().All(p => p.IsRegistered)).IsTrue();
+    }
+
+    [Test]
+    public async Task PreUpdateTenantAsync_ReRegistrationRejected_DoesNotThrowAndLeavesSiteForRetryLoop()
+    {
+        var entity = Entity("acme", AcmeDeploymentSiteRtId, "default");
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+        _service.PreUpdateReRegisterDelay = TimeSpan.Zero;
+        _hub.RegisterDeploymentSiteAsync("acme", AcmeDeploymentSiteRtId)
+            .Returns(Task.FromException<bool>(new Microsoft.AspNetCore.SignalR.HubException("Tenant 'acme' does not exist")));
+
+        await _service.PreUpdateTenantAsync("acme");
+
+        var site = _service.GetDeploymentSites().Single();
+        await Assert.That(site.IsRegistered).IsFalse();
+    }
+
+    [Test]
+    public async Task ResetRegistrationState_ClearsBackoff()
+    {
+        var entity = Entity("acme", AcmeDeploymentSiteRtId, "default");
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+        var site = _service.GetDeploymentSites().Single();
+        site.ConsecutiveRegistrationFailures = 5;
+        site.NextRegistrationAttempt = DateTimeOffset.UtcNow.AddHours(1);
+
+        _service.ResetRegistrationState();
+
+        await Assert.That(site.ConsecutiveRegistrationFailures).IsEqualTo(0);
+        await Assert.That(site.NextRegistrationAttempt).IsEqualTo(DateTimeOffset.MinValue);
+    }
 }
