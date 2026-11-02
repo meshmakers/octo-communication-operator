@@ -100,6 +100,11 @@ public class DeploymentSiteService : IDeploymentSiteService, IOperatorHubCallbac
             // true while the connection is still Connecting/Reconnecting.
             deploymentSite.IsRegistered =
                 await _hubInvoker.RegisterDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
+            if (deploymentSite.IsRegistered)
+            {
+                // Success resets the retry loop's back-off (AB#8160).
+                deploymentSite.ResetRegistrationBackoff();
+            }
         }
         catch (HubException e)
         {

@@ -214,4 +214,22 @@ public class DeploymentSiteServiceTests
         await Assert.That(site.ConsecutiveRegistrationFailures).IsEqualTo(0);
         await Assert.That(site.NextRegistrationAttempt).IsEqualTo(DateTimeOffset.MinValue);
     }
+
+    [Test]
+    public async Task RegisterDeploymentSiteAsync_Success_ResetsBackoff()
+    {
+        var entity = Entity("acme", AcmeDeploymentSiteRtId, "default");
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+        var site = _service.GetDeploymentSites().Single();
+        site.IsRegistered = false;
+        site.ConsecutiveRegistrationFailures = 4;
+        site.NextRegistrationAttempt = DateTimeOffset.UtcNow.AddHours(1);
+
+        // A CR reconcile registers the site successfully.
+        await _service.RegisterDeploymentSiteAsync(entity, CancellationToken.None);
+
+        await Assert.That(site.IsRegistered).IsTrue();
+        await Assert.That(site.ConsecutiveRegistrationFailures).IsEqualTo(0);
+        await Assert.That(site.NextRegistrationAttempt).IsEqualTo(DateTimeOffset.MinValue);
+    }
 }
