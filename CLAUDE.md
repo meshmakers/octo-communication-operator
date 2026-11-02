@@ -678,6 +678,31 @@ Registration is idempotent on the controller (`RegisterPoolForConnection`
 is a set-add; the state write is guarded), so a retry racing a reconnect
 replay is harmless.
 
+**Back-off and tenant updates (AB#8160).** On test-2 (2026-11-02) a central
+operator registered the deployment site of the deleted scratch tenant
+`tmp-billbee-wp4` every 30 s for hours — one controller ERROR
+(`TenantException: Tenant ... does not exist`) per attempt. Cause:
+`DeploymentSiteService.PreUpdateTenantAsync` (controller pre-update event, sent
+when `Delete --disable-features` disables communication) removed the tenant's
+entries from the in-memory registry, waited 5 s and re-added them. The
+DeploymentSite CR finalizer ran during the wait, found nothing to remove, and
+the entry of the deleted site came back as a zombie no CR backed. Since then:
+
+- `PreUpdateTenantAsync` unregisters at the controller but **keeps** the local
+  entries; only the CR finalizer (`UnRegisterDeploymentSiteAsync`) removes an
+  entry. After the wait (`PreUpdateReRegisterDelay`, 5 s) it re-registers only
+  entries still in the registry. A failed re-registration is a WARN and is left
+  to the retry loop (no exception, no ERROR).
+- The retry loop backs off per deployment site: after the n-th consecutive
+  rejection the next attempt waits `interval x 2^(n-1)`, capped at
+  `RegistrationRetryMaxBackoffFactor` (32, i.e. 16 min at the default 30 s).
+  Success and a connection drop (`ResetRegistrationState`) reset the back-off.
+  The WARN names the failure count and the hint to delete the DeploymentSite CR
+  when the tenant or site was deleted.
+- An in-memory zombie from an older operator version disappears with a pod
+  restart (`kubectl -n <ns> rollout restart deployment/<operator>`) or the next
+  operator rollout.
+
 Tests: `Services/OperatorHubServiceTests/RegistrationRetryTests` —
 rejected-on-connect recovers via retry, recovery fires the per-pool
 reverse-sync, connect callback resets registration state, `<= 0` disables

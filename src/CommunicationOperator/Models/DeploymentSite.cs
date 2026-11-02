@@ -19,4 +19,26 @@ public class DeploymentSite(K8DeploymentSite descriptor, V1DeploymentSiteEntity 
     /// drops so the reconnect handler knows to re-register.
     /// </summary>
     public bool IsRegistered { get; set; }
+
+    /// <summary>
+    /// Number of consecutive registration attempts of the periodic retry loop that the
+    /// controller rejected. Drives the exponential back-off (AB#8160); reset on success
+    /// and on a connection drop.
+    /// </summary>
+    public int ConsecutiveRegistrationFailures { get; set; }
+
+    /// <summary>
+    /// Earliest time the periodic retry loop attempts the next registration of this
+    /// deployment site. <see cref="DateTimeOffset.MinValue"/> means "on the next tick".
+    /// </summary>
+    public DateTimeOffset NextRegistrationAttempt { get; set; } = DateTimeOffset.MinValue;
+
+    /// <summary>
+    /// Clears the back-off state so the next retry tick attempts the registration again.
+    /// </summary>
+    public void ResetRegistrationBackoff()
+    {
+        ConsecutiveRegistrationFailures = 0;
+        NextRegistrationAttempt = DateTimeOffset.MinValue;
+    }
 }

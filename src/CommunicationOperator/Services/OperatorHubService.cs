@@ -437,7 +437,9 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
             }
 
             var deploymentSiteService = _serviceProvider.GetRequiredService<IDeploymentSiteService>();
-            foreach (var deploymentSite in deploymentSiteService.GetDeploymentSites().Where(p => !p.IsRegistered))
+            var now = DateTimeOffset.UtcNow;
+            foreach (var deploymentSite in deploymentSiteService.GetDeploymentSites()
+                         .Where(p => !p.IsRegistered && p.NextRegistrationAttempt <= now))
             {
                 var tenantId = deploymentSite.Entity.Spec.TenantId;
                 var deploymentSiteRtId = deploymentSite.Entity.Spec.DeploymentSiteRtId;
@@ -445,6 +447,7 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 {
                     await client.RegisterDeploymentSiteAsync(tenantId, deploymentSiteRtId);
                     deploymentSite.IsRegistered = true;
+                    deploymentSite.ResetRegistrationBackoff();
                     _logger.LogInformation(
                         "Recovered registration for deployment site rtId {DeploymentSiteRtId} (tenant '{TenantId}') after an earlier failure",
                         deploymentSiteRtId, tenantId);
@@ -455,14 +458,32 @@ public class OperatorHubService : BackgroundService, IOperatorHubCallbacks, IOpe
                 }
                 catch (Exception ex)
                 {
+                    // Exponential back-off per deployment site (AB#8160): a registration the
+                    // controller keeps rejecting — e.g. the tenant was deleted while the
+                    // DeploymentSite CR survived — must not hit the controller every interval
+                    // forever. 1x, 2x, 4x ... the interval, capped at RegistrationRetryMaxBackoffFactor.
+                    deploymentSite.ConsecutiveRegistrationFailures++;
+                    var factor = Math.Min(
+                        Math.Pow(2, deploymentSite.ConsecutiveRegistrationFailures - 1),
+                        RegistrationRetryMaxBackoffFactor);
+                    var backoff = TimeSpan.FromSeconds(_options.DeploymentSiteRegistrationRetrySeconds * factor);
+                    deploymentSite.NextRegistrationAttempt = DateTimeOffset.UtcNow + backoff;
                     _logger.LogWarning(ex,
-                        "Registration retry failed for deployment site rtId {DeploymentSiteRtId} (tenant '{TenantId}'); " +
-                        "next attempt in {RetrySeconds}s",
-                        deploymentSiteRtId, tenantId, _options.DeploymentSiteRegistrationRetrySeconds);
+                        "Registration retry failed for deployment site rtId {DeploymentSiteRtId} (tenant '{TenantId}'), " +
+                        "{FailureCount} consecutive failure(s); next attempt in {RetrySeconds}s. " +
+                        "If the tenant or the deployment site was deleted, delete the DeploymentSite CR",
+                        deploymentSiteRtId, tenantId, deploymentSite.ConsecutiveRegistrationFailures, backoff.TotalSeconds);
                 }
             }
         }
     }
+
+    /// <summary>
+    /// Upper bound of the per-deployment-site back-off of the registration retry loop,
+    /// as a multiple of <see cref="OperatorOptions.DeploymentSiteRegistrationRetrySeconds"/>
+    /// (32 x 30 s = 16 min with the default interval).
+    /// </summary>
+    internal const double RegistrationRetryMaxBackoffFactor = 32;
 
     public async Task DeploymentSiteDeployedAsync(DeployedDeploymentSiteDto deploymentSite)
     {

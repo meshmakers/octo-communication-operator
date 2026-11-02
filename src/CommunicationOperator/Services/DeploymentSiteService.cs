@@ -62,6 +62,7 @@ public class DeploymentSiteService : IDeploymentSiteService, IOperatorHubCallbac
             foreach (var deploymentSite in _deploymentSites.Values)
             {
                 deploymentSite.IsRegistered = false;
+                deploymentSite.ResetRegistrationBackoff();
             }
         }
     }
@@ -99,6 +100,11 @@ public class DeploymentSiteService : IDeploymentSiteService, IOperatorHubCallbac
             // true while the connection is still Connecting/Reconnecting.
             deploymentSite.IsRegistered =
                 await _hubInvoker.RegisterDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
+            if (deploymentSite.IsRegistered)
+            {
+                // Success resets the retry loop's back-off (AB#8160).
+                deploymentSite.ResetRegistrationBackoff();
+            }
         }
         catch (HubException e)
         {
@@ -162,37 +168,94 @@ public class DeploymentSiteService : IDeploymentSiteService, IOperatorHubCallbac
         }
     }
 
+    /// <summary>
+    /// Delay between the unregister and the re-register step of a tenant update.
+    /// Internal so tests can shorten it.
+    /// </summary>
+    internal TimeSpan PreUpdateReRegisterDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Handles the controller's pre-update event of a tenant: unregisters the tenant's
+    /// deployment sites at the controller, waits, and registers them again.
+    ///
+    /// The local entries stay in the registry during the wait. Only the
+    /// <c>DeploymentSite</c> CR finalizer (<see cref="UnRegisterDeploymentSiteAsync"/>)
+    /// removes an entry. A site whose CR was deleted while this method waited — the
+    /// typical tenant-delete cascade (<c>Delete --disable-features</c> undeploys the
+    /// sites, deletes the CRs and updates the tenant in one go) — is therefore not
+    /// re-registered. Before AB#8160 this method removed the entries itself and
+    /// re-added them after the wait; when the CR finalizer ran in between, the entry
+    /// of the deleted site came back as a zombie and the retry loop registered it
+    /// every 30 s against a tenant that no longer existed.
+    /// </summary>
     public async Task PreUpdateTenantAsync(string tenantId)
     {
         _logger.LogInformation("PreUpdateTenantAsync for tenant {TenantId}", tenantId);
 
-        try
+        DeploymentSite[] tenantDeploymentSites;
+        lock (_gate)
         {
-            DeploymentSite[] tenantDeploymentSites;
-            lock (_gate)
+            tenantDeploymentSites = _deploymentSites.Values
+                .Where(p => p.Entity.Spec.TenantId == tenantId)
+                .ToArray();
+        }
+
+        foreach (var deploymentSite in tenantDeploymentSites)
+        {
+            var entity = deploymentSite.Entity;
+            deploymentSite.IsRegistered = false;
+            try
             {
-                tenantDeploymentSites = _deploymentSites.Values
-                    .Where(p => p.Entity.Spec.TenantId == tenantId)
-                    .ToArray();
+                await _hubInvoker.UnregisterDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
             }
-
-            foreach (var deploymentSite in tenantDeploymentSites)
+            catch (Exception e)
             {
-                await UnRegisterDeploymentSiteAsync(deploymentSite.Entity);
-            }
-
-            _logger.LogInformation("Waiting for 5 seconds before re-registering deployment sites");
-            await Task.Delay(5000);
-            _logger.LogInformation("Re-registering deployment sites");
-
-            foreach (var deploymentSite in tenantDeploymentSites)
-            {
-                await RegisterDeploymentSiteAsync(deploymentSite.Entity, CancellationToken.None);
+                _logger.LogWarning(e,
+                    "Controller refused unregister for deployment site rtId {DeploymentSiteRtId} (tenant {TenantId}) during tenant update",
+                    entity.Spec.DeploymentSiteRtId, tenantId);
             }
         }
-        catch (Exception e)
+
+        _logger.LogInformation("Waiting for {Delay} before re-registering deployment sites", PreUpdateReRegisterDelay);
+        await Task.Delay(PreUpdateReRegisterDelay);
+        _logger.LogInformation("Re-registering deployment sites");
+
+        foreach (var deploymentSite in tenantDeploymentSites)
         {
-            throw DeploymentSiteServiceException.PreUpdateTenantFailed(tenantId, e);
+            var entity = deploymentSite.Entity;
+            bool stillOwned;
+            lock (_gate)
+            {
+                stillOwned = _deploymentSites.TryGetValue(KeyFor(entity), out var current) &&
+                             ReferenceEquals(current, deploymentSite);
+            }
+
+            if (!stillOwned)
+            {
+                _logger.LogInformation(
+                    "DeploymentSite CR for deployment site rtId {DeploymentSiteRtId} (tenant {TenantId}) was removed during the tenant update; not re-registering",
+                    entity.Spec.DeploymentSiteRtId, tenantId);
+                continue;
+            }
+
+            try
+            {
+                deploymentSite.IsRegistered =
+                    await _hubInvoker.RegisterDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
+                if (deploymentSite.IsRegistered)
+                {
+                    deploymentSite.ResetRegistrationBackoff();
+                    await _hubInvoker.ReportDeployedDeploymentSiteAsync(entity.Spec.TenantId, entity.Spec.DeploymentSiteRtId);
+                }
+            }
+            catch (Exception e)
+            {
+                // The periodic retry loop in OperatorHubService picks the site up again
+                // (IsRegistered stays false), with back-off.
+                _logger.LogWarning(e,
+                    "Re-registration after tenant update failed for deployment site rtId {DeploymentSiteRtId} (tenant {TenantId}); the retry loop takes over",
+                    entity.Spec.DeploymentSiteRtId, tenantId);
+            }
         }
     }
 }

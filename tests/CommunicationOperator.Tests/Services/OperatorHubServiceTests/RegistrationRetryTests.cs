@@ -135,6 +135,42 @@ public class RegistrationRetryTests : OperatorHubServiceTestsBase
     }
 
     [Test]
+    public async Task RegistrationRejectedRepeatedly_BacksOffExponentially()
+    {
+        // AB#8160: a registration the controller keeps rejecting (tenant deleted, CR left
+        // behind) used to be retried every interval forever — one controller ERROR per
+        // attempt. The loop now backs off per site: 1x, 2x, 4x ... the interval.
+        OperatorOptions.AutoManageDeploymentSites = true;
+        OperatorOptions.CommunicationControllerUri = "https://controller";
+        OperatorOptions.DeploymentSiteRegistrationRetrySeconds = 0.02;
+
+        var deploymentSite = MakeDeploymentSite(TenantId, DeploymentSiteRtId);
+        DeploymentSiteService.GetDeploymentSites().Returns(new[] { deploymentSite });
+
+        var setup = SetupClient();
+        var registerCalls = 0;
+        setup.Client.RegisterDeploymentSiteAsync(TenantId, DeploymentSiteRtId).Returns(_ =>
+        {
+            Interlocked.Increment(ref registerCalls);
+            return Task.FromException(new HubException("Tenant does not exist"));
+        });
+
+        var hosted = (IHostedService)Service;
+        await hosted.StartAsync(CancellationToken.None);
+        await setup.ConnectedAndReconnectEnabled.Task;
+
+        await WaitUntilAsync(() => deploymentSite.ConsecutiveRegistrationFailures >= 3);
+        await Task.Delay(600);
+        await hosted.StopAsync(CancellationToken.None);
+
+        // Without back-off ~40 attempts would run in this window (one per 20 ms tick);
+        // with back-off the attempts are 20, 40, 80, 160, 320, 640 ms apart.
+        await Assert.That(Volatile.Read(ref registerCalls)).IsLessThanOrEqualTo(10);
+        await Assert.That(deploymentSite.IsRegistered).IsFalse();
+        await Assert.That(deploymentSite.NextRegistrationAttempt).IsGreaterThan(DateTimeOffset.UtcNow);
+    }
+
+    [Test]
     public async Task RetryDisabled_DoesNotRetry()
     {
         OperatorOptions.AutoManageDeploymentSites = true;
