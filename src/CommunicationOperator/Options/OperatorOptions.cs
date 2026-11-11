@@ -511,6 +511,14 @@ public class ClusterDependenciesOptions
     /// Empty keeps the legacy, unprefixed schema names.
     /// </summary>
     public string? StreamDataSchemaInstancePrefix { get; set; }
+
+    /// <summary>
+    /// MongoDB tenant-database prefix (AB#8797). Must match the core services'
+    /// <c>clusterDependencies.tenantDatabasePrefix</c> (<c>OCTO_SYSTEM__TENANTDATABASEPREFIX</c>), so every
+    /// process of the instance derives and accepts the same tenant database names. Empty keeps the
+    /// unprefixed names.
+    /// </summary>
+    public string? TenantDatabasePrefix { get; set; }
 }
 
 /// <summary>

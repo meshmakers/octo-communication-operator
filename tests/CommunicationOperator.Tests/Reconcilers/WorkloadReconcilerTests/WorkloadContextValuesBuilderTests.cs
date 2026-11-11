@@ -104,6 +104,7 @@ internal class WorkloadContextValuesBuilderTests
                 StreamDataUser = "octo-system",
                 SystemDatabaseName = "OctoSystemDev",
                 StreamDataSchemaInstancePrefix = "dev",
+                TenantDatabasePrefix = "dev_",
             },
         });
 
@@ -116,6 +117,7 @@ internal class WorkloadContextValuesBuilderTests
         await Assert.That(yaml!).Contains("\"streamDataUser\": \"octo-system\"");
         await Assert.That(yaml!).Contains("\"systemDatabaseName\": \"OctoSystemDev\"");
         await Assert.That(yaml!).Contains("\"streamDataSchemaInstancePrefix\": \"dev\"");
+        await Assert.That(yaml!).Contains("\"tenantDatabasePrefix\": \"dev_\"");
     }
 
     /// <summary>
@@ -134,12 +136,14 @@ internal class WorkloadContextValuesBuilderTests
                 MongodbHost = "host-only",
                 SystemDatabaseName = "",
                 StreamDataSchemaInstancePrefix = "   ",
+                TenantDatabasePrefix = "",
             },
         });
 
         await Assert.That(yaml).IsNotNull();
         await Assert.That(yaml!).DoesNotContain("systemDatabaseName");
         await Assert.That(yaml!).DoesNotContain("streamDataSchemaInstancePrefix");
+        await Assert.That(yaml!).DoesNotContain("tenantDatabasePrefix");
     }
 
     [Test]

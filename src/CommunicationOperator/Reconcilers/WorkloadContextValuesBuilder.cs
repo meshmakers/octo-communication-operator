@@ -193,6 +193,12 @@ public static class WorkloadContextValuesBuilder
         {
             map["streamDataSchemaInstancePrefix"] = deps.StreamDataSchemaInstancePrefix!;
         }
+
+        // AB#8797: same rule - unset on a single-instance cluster, so nothing changes there.
+        if (!string.IsNullOrWhiteSpace(deps.TenantDatabasePrefix))
+        {
+            map["tenantDatabasePrefix"] = deps.TenantDatabasePrefix!;
+        }
         return map;
     }
 
