@@ -871,7 +871,7 @@ Tests:
 
 ### Watch Falls Back to Classic List+Watch (AB#6898)
 
-KubeOps' `ResourceWatcher` (KubeOps 13.2.0) starts every custom-resource watch through
+KubeOps' `ResourceWatcher` (analysed on KubeOps 13.2.0; `Watching/WatcherChainTests` re-run green on 13.3.6, AB#9610) starts every custom-resource watch through
 `IKubernetesClient.WatchAsync(namespace, resourceVersion: null, ..., allowWatchBookmarks: true)`. It does **not**
 send `sendInitialEvents=true` (the generic `ICustomObjectsOperations` of KubernetesClient 19 has no such
 parameter); the unset `resourceVersion` is what matters: the API server answers a watch without
@@ -911,7 +911,7 @@ Fix, in `Watching/`:
   cache: the current state as `ADDED` events, then live changes (one request instead of list + watch; the
   initial snapshot may be slightly stale). A watch that carries a concrete `resourceVersion` passes through
   untouched, bookmark flag included, and every other failure is rethrown to KubeOps as before.
-- **Reconnects in classic mode.** KubeOps 13.2.0 (`ResourceWatcher.ExecuteAsync`) remembers a `resourceVersion`
+- **Reconnects in classic mode.** KubeOps 13.2.0 (`ResourceWatcher.ExecuteAsync`; the tests pin the same behaviour on 13.3.6) remembers a `resourceVersion`
   for the reconnect only from `BOOKMARK` events (event resource versions are logged, not kept). Without
   bookmarks it is always `null`, so every reconnect (stream end, timeout, network drop) is again an unversioned
   start; the wrapper turns it into `resourceVersion=0` + no bookmarks. Consequence: after each reconnect the
