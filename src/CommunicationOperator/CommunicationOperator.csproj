@@ -15,7 +15,7 @@
     </PackageReference>
     <PackageReference Include="KubeOps.Operator.Web" Version="13.2.0" />
     <PackageReference Include="Meshmakers.Octo.Sdk.ServiceClient" Version="$(OctoCoreLibVersion)" />
-    <PackageReference Include="NLog.Web.AspNetCore" Version="6.2.0" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="6.3.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
