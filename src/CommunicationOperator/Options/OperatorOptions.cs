@@ -168,6 +168,16 @@ public class OperatorOptions
     public string? ReportingServiceUri { get; set; }
 
     /// <summary>
+    /// Base URL of the AI service's central-key LLM gateway for this cluster (AB#8452). When set, the operator
+    /// injects it into each workload's Helm values as <c>llmGatewayUrl</c>, the cluster default the mesh adapter
+    /// chart renders as <c>OCTO_ADAPTER__LLMGATEWAYURL</c>. It is the lowest value layer: a per-adapter
+    /// ValueOverride (Path <c>llmGatewayUrl</c>) still wins. Leave empty on clusters whose gateway is not open;
+    /// the central-key path of <c>AnthropicAiQuery@1</c> then fails closed as before. The adapter chart refuses a
+    /// value that is not an absolute http(s) URL at render time.
+    /// </summary>
+    public string? LlmGatewayUrl { get; set; }
+
+    /// <summary>
     /// Public URI of the identity service issuing the access tokens that
     /// secured trigger nodes accept. When set, the operator injects this into
     /// each workload's Helm values as <c>authUri</c>. This must be the public

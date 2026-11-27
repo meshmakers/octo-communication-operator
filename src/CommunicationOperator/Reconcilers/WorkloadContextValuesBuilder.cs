@@ -77,6 +77,13 @@ public static class WorkloadContextValuesBuilder
             root["reportingServiceUri"] = options.ReportingServiceUri!;
         }
 
+        // AB#8452 — cluster default of the central-key LLM gateway. Context values are the lowest layer, so a
+        // per-adapter ValueOverride (Path llmGatewayUrl) keeps winning; empty projects nothing (fail closed).
+        if (!string.IsNullOrWhiteSpace(options.LlmGatewayUrl))
+        {
+            root["llmGatewayUrl"] = options.LlmGatewayUrl!.Trim();
+        }
+
         // 🔴 AB#5303 item 2 — the projection that was lost. AdapterReconciler emitted
         // OCTO_ADAPTER__IGNORECERTIFICATEVALIDATION into the pod's environment until it was deleted
         // with the move to Helm (028739e, 2026-05-13); the chart never grew an equivalent, and a

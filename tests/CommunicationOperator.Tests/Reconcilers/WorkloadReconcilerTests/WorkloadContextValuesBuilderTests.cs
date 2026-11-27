@@ -327,6 +327,34 @@ internal class WorkloadContextValuesBuilderTests
     }
 
     [Test]
+    public async Task Build_LlmGatewayUrl_EmitsTopLevelKey()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            LlmGatewayUrl = " https://ai.test-2.mm.cloud ",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"llmGatewayUrl\": \"https://ai.test-2.mm.cloud\"");
+    }
+
+    [Test]
+    [Arguments(null)]
+    [Arguments("")]
+    [Arguments("   ")]
+    public async Task Build_LlmGatewayUrlUnset_EmitsNoKey(string? value)
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            ReportingServiceUri = "http://octo-reporting.octo.svc.cluster.local",
+            LlmGatewayUrl = value,
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("llmGatewayUrl");
+    }
+
+    [Test]
     public async Task Build_AuthUri_EmitsTopLevelKey()
     {
         var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions

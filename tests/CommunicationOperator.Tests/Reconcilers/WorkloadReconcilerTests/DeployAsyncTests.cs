@@ -332,6 +332,33 @@ internal class DeployAsyncTests : WorkloadReconcilerTestsBase
     }
 
     [Test]
+    public async Task DeployAsync_LlmGatewayUrl_ClusterDefaultInContextFile_AdapterOverrideInLaterFile()
+    {
+        // AB#8452: the cluster default of the LLM gateway travels in the context file (lowest layer); a per-adapter
+        // ValueOverride with Path llmGatewayUrl lands in the overrides file, which helm applies later, so it wins.
+        Options.LlmGatewayUrl = "https://ai.cluster-default.example";
+        var contents = new List<string>();
+        Helm.UpgradeInstallAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Do<IReadOnlyList<string>>(files => contents.AddRange(files.Select(File.ReadAllText))),
+                Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var dto = BaseDto(new[]
+        {
+            new ValueOverrideDto { Path = "llmGatewayUrl", Value = "https://ai.adapter-override.example", IsSecret = false },
+        });
+
+        await Reconciler.DeployAsync(dto, CancellationToken.None);
+
+        await Assert.That(contents.Count).IsEqualTo(3);
+        await Assert.That(contents[0]).Contains("https://ai.cluster-default.example");
+        await Assert.That(contents[2]).Contains("https://ai.adapter-override.example");
+        await Assert.That(contents[2]).DoesNotContain("https://ai.cluster-default.example");
+    }
+
+    [Test]
     public async Task DeployAsync_Hibernated_PinsReplicaCountToZeroViaSetValues()
     {
         // AB#4917: a redeploy of a hibernated workload must not resurrect it.
