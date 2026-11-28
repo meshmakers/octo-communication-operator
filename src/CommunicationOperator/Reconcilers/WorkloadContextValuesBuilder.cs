@@ -78,8 +78,10 @@ public static class WorkloadContextValuesBuilder
         }
 
         // AB#8452 — cluster default of the central-key LLM gateway. Context values are the lowest layer, so a
-        // per-adapter ValueOverride (Path llmGatewayUrl) keeps winning; empty projects nothing (fail closed).
-        if (!string.IsNullOrWhiteSpace(options.LlmGatewayUrl))
+        // per-adapter ValueOverride (Path llmGatewayUrl) keeps winning; empty projects nothing (fail closed). A value
+        // the adapter would refuse (not http(s), user info, query, fragment) is not projected either: set outside the
+        // chart (which validates it), it would otherwise fail the render of every adapter on the cluster.
+        if (IsValidLlmGatewayUrl(options.LlmGatewayUrl))
         {
             root["llmGatewayUrl"] = options.LlmGatewayUrl!.Trim();
         }
@@ -249,5 +251,24 @@ public static class WorkloadContextValuesBuilder
             map["annotations"] = annotations;
         }
         return map;
+    }
+
+    /// <summary>
+    ///     True for the LLM gateway URL form the mesh adapter accepts: an absolute http or https URL with a host and no
+    ///     user info, query or fragment (surrounding blanks ignored). Null, blank and anything else is false (AB#8452).
+    /// </summary>
+    internal static bool IsValidLlmGatewayUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) &&
+               !string.IsNullOrEmpty(uri.Host) &&
+               string.IsNullOrEmpty(uri.UserInfo) &&
+               string.IsNullOrEmpty(uri.Query) &&
+               string.IsNullOrEmpty(uri.Fragment);
     }
 }
