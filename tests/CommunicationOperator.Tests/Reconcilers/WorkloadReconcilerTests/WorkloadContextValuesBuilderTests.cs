@@ -327,6 +327,50 @@ internal class WorkloadContextValuesBuilderTests
     }
 
     [Test]
+    public async Task Build_LlmGatewayUrl_EmitsTopLevelKey()
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            LlmGatewayUrl = " https://ai.test-2.mm.cloud ",
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).Contains("\"llmGatewayUrl\": \"https://ai.test-2.mm.cloud\"");
+    }
+
+    [Test]
+    [Arguments(null)]
+    [Arguments("")]
+    [Arguments("   ")]
+    [Arguments("ai.test-2.mm.cloud")]
+    [Arguments("ftp://ai.test-2.mm.cloud")]
+    [Arguments("https://user:pw@ai.test-2.mm.cloud")]
+    [Arguments("https://ai.test-2.mm.cloud?x=1")]
+    [Arguments("https://ai.test-2.mm.cloud#f")]
+    public async Task Build_LlmGatewayUrlUnsetOrInvalid_EmitsNoKey(string? value)
+    {
+        var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
+        {
+            ReportingServiceUri = "http://octo-reporting.octo.svc.cluster.local",
+            LlmGatewayUrl = value,
+        });
+
+        await Assert.That(yaml).IsNotNull();
+        await Assert.That(yaml!).DoesNotContain("llmGatewayUrl");
+    }
+
+    [Test]
+    [Arguments("https://ai.test-2.mm.cloud", true)]
+    [Arguments("http://octo-ai.octo.svc.cluster.local:5019/base", true)]
+    [Arguments(" HTTPS://ai.example ", true)]
+    [Arguments("mailto:ai@example.test", false)]
+    [Arguments("/relative/path", false)]
+    public async Task IsValidLlmGatewayUrl_AcceptsOnlyTheAdapterForm(string value, bool expected)
+    {
+        await Assert.That(WorkloadContextValuesBuilder.IsValidLlmGatewayUrl(value)).IsEqualTo(expected);
+    }
+
+    [Test]
     public async Task Build_AuthUri_EmitsTopLevelKey()
     {
         var yaml = WorkloadContextValuesBuilder.Build(new OperatorOptions
